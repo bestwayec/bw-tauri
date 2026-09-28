@@ -211,11 +211,21 @@ fn apply_linux_lockdown(locked: bool) {
                 }
             };
             // owner_events=false so all key events report to us while grabbed.
-            let grabbed = conn
-                .grab_keyboard(false, root, x11rb::CURRENT_TIME, GrabMode::Async, GrabMode::Async)
-                .and_then(|cookie| cookie.reply())
-                .map(|reply| reply.status == x11rb::protocol::xproto::GrabStatus::SUCCESS)
-                .unwrap_or(false);
+            // x11rb 0.13: GrabMode is a newtype struct (SYNC/ASYNC consts) and
+            // Cookie::reply() returns Result<_, ReplyError>.
+            let grabbed = match conn.grab_keyboard(
+                false,
+                root,
+                x11rb::CURRENT_TIME,
+                GrabMode::ASYNC,
+                GrabMode::ASYNC,
+            ) {
+                Ok(cookie) => cookie
+                    .reply()
+                    .map(|reply| reply.status == x11rb::protocol::xproto::GrabStatus::SUCCESS)
+                    .unwrap_or(false),
+                Err(_) => false,
+            };
             if !grabbed {
                 eprintln!("[lockdown] Linux: XGrabKeyboard rejected by server (Wayland? fallback: fullscreen+top)");
             }
