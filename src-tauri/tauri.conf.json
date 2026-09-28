@@ -1,0 +1,58 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Bestway App",
+  "version": "0.2.2",
+  "identifier": "uz.bestway.exam",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Bestway Exam",
+        "width": 1280,
+        "height": 800,
+        "fullscreen": false,
+        "decorations": true,
+        "alwaysOnTop": false,
+        "resizable": true,
+        "skipTaskbar": false,
+        "devtools": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' 'sha256-/GSWPfMtfMVOfvyy8NWW+BpQMbn1cKkbWnf0eeLF1AQ='; img-src 'self' data: asset: http://asset.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://* http://localhost:* https://localhost:*; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "dmg", "appimage", "deb"],
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/64x64.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Education"
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "dialog": false,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU0MDdGNzczNzY1QUEwQTQKUldTa29GcDJjL2NIVkF3djZLNjl2SHJuVUp1bVVNbmN4VXF2SFRvMjc0U0xsUzB6alc0MEVEdGgK",
+      "endpoints": ["https://github.com/bestwayec/bw-tauri/releases/latest/download/latest.json"]
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": ["bestway-exam"]
+      }
+    }
+  }
+}

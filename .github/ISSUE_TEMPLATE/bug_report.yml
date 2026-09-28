@@ -1,0 +1,53 @@
+name: Bug report
+description: Report a reproducible bug in the Bestway Exam desktop client.
+title: "fix: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Fill in the version + repro steps. For security issues see SECURITY.md — do not file public issues.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - exam flow (tests/mock)
+        - lockdown/kiosk
+        - login/auth
+        - updater/install
+        - other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: e.g. app 0.3.0 (see package.json)
+      placeholder: app 0.3.0
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps, OS, student role if relevant.
+      placeholder: |
+        1. Login as student ...
+        2. Start mock exam ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+      placeholder: Expected ..., got ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Paste console/Tauri log excerpt or screenshots for UI.
+      render: shell

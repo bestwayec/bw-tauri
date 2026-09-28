@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+    <title>Bestway Exam</title>
+    <style>
+      /* Instant dark boot paint — shown before the JS bundle hydrates.
+         React replaces #root content on first render with the full
+         animated BootSplash (same look, seamless handoff). */
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: #050807;
+      }
+      #root { min-height: 100%; }
+      .boot-fallback {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0;
+        background:
+          radial-gradient(340px 340px at 50% 38%, rgba(56, 199, 101, 0.16), transparent 70%),
+          #050807;
+        color: #f2f5f2;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        text-align: center;
+        padding: 24px 16px;
+      }
+      .boot-fallback-mark {
+        width: min(300px, 76vw);
+        filter: drop-shadow(0 0 22px rgba(56, 199, 101, 0.45));
+        animation: boot-fallback-pulse 2.2s ease-in-out infinite;
+      }
+      .boot-fallback-mark img {
+        width: 100%;
+        height: auto;
+        display: block;
+      }
+      .boot-fallback-name {
+        margin: 22px 0 0;
+        font-size: 30px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+      .boot-fallback-name span { font-weight: 300; opacity: 0.85; }
+      .boot-fallback-slogan {
+        margin: 8px 0 0;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.32em;
+        text-indent: 0.32em;
+        color: rgba(134, 239, 172, 0.75);
+      }
+      @keyframes boot-fallback-pulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.03); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .boot-fallback-mark { animation: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="boot-fallback" aria-hidden="true">
+        <div class="boot-fallback-mark"><img src="/logo-transparent.png" alt="" /></div>
+        <p class="boot-fallback-name">Best<span>Way</span></p>
+        <p class="boot-fallback-slogan">DO YOUR BEST, FOR GET THE REST</p>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

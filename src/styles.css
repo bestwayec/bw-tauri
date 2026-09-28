@@ -1,0 +1,726 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-brand: #38c765;
+  --color-ink: #050807;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: #050807;
+  color: #f2f5f2;
+  overflow-x: hidden;
+}
+
+/* Subtle grid backdrop for the black theme */
+.app-bg {
+  background:
+    radial-gradient(900px 420px at 15% -5%, rgba(56, 199, 101, 0.14), transparent 60%),
+    radial-gradient(700px 380px at 90% 10%, rgba(76, 201, 240, 0.1), transparent 60%),
+    #050807;
+}
+
+.app-grid::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 30%, transparent 75%);
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  backdrop-filter: blur(12px);
+}
+
+.btn-brand {
+  background: linear-gradient(135deg, #38c765, #1faa53);
+  color: #04120a;
+  box-shadow: 0 8px 30px rgba(56, 199, 101, 0.35);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+
+.btn-brand:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 10px 36px rgba(56, 199, 101, 0.45);
+}
+
+.btn-brand:active {
+  transform: translateY(1px) scale(0.99);
+}
+
+.btn-ghost {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.field {
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #f2f5f2;
+}
+
+.field::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.field:focus {
+  outline: none;
+  border-color: rgba(56, 199, 101, 0.6);
+  box-shadow: 0 0 0 3px rgba(56, 199, 101, 0.18);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Entrance motion for lists and route content */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-rise {
+  animation: rise 0.35s ease-out both;
+}
+
+/* Quick fade/slide for login view switching (OAuth ↔ manual) */
+@keyframes view-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-view {
+  animation: view-in 0.2s ease-out both;
+}
+
+/* Brand details */
+::selection {
+  background: rgba(56, 199, 101, 0.35);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(56, 199, 101, 0.35) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(56, 199, 101, 0.3);
+  border-radius: 9999px;
+}
+
+/* Native audio fits the dark theme */
+audio {
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
+}
+
+/* Exam workspace range sliders (seek + volume) */
+.exam-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.12);
+  outline: none;
+  cursor: pointer;
+}
+
+.exam-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: #19d36b;
+  border: 2px solid #062b18;
+  box-shadow: 0 0 10px rgba(25, 211, 107, 0.5);
+}
+
+.exam-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: #19d36b;
+  border: 2px solid #062b18;
+  box-shadow: 0 0 10px rgba(25, 211, 107, 0.5);
+}
+
+.exam-range::-moz-range-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.exam-range:focus-visible {
+  box-shadow: 0 0 0 3px rgba(25, 211, 107, 0.25);
+}
+
+/* Long-answer textareas share the field look */
+textarea.field {
+  resize: vertical;
+  line-height: 1.6;
+}
+
+/* ============================================================
+   BestWay brand intro (exactly 2.5s total, plays ONCE on app open).
+   GPU-friendly: transform + opacity only (entrance blur is one-shot).
+   Timeline: ambient → logo (0.15–0.75s) →
+   rings + pulse (0.5–1.4s) → brand + slogan (0.9–1.6s) →
+   exit fade/scale (2.2–2.5s, driven by JS `exiting` flag).
+   No loops, no progress bar — this is an intro, not a waiting screen.
+   ============================================================ */
+
+.bw-boot {
+  --bw-stage: 336px;
+  --bw-green: #38c765;
+  --bw-green-soft: rgba(56, 199, 101, 0.55);
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #050807;
+  color: #f2f5f2;
+  padding: 24px 16px;
+  transition: opacity 0.3s ease;
+}
+
+.bw-boot.is-exiting {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.bw-boot.is-exiting .bw-boot-inner {
+  transform: scale(1.04);
+}
+
+.bw-boot-inner {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  width: 100%;
+  max-width: 420px;
+  transition: transform 0.3s ease;
+}
+
+/* ---------- background ---------- */
+
+.bw-boot-bg,
+.bw-ambient-core,
+.bw-ambient-drift,
+.bw-particles,
+.bw-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.bw-boot-bg {
+  z-index: 0;
+}
+
+.bw-ambient-core {
+  background: radial-gradient(
+    340px 340px at 50% 38%,
+    rgba(56, 199, 101, 0.16),
+    rgba(56, 199, 101, 0.05) 45%,
+    transparent 70%
+  );
+  opacity: 0;
+  animation: bw-ambient-in 0.5s ease-out 0s both;
+}
+
+.bw-ambient-drift {
+  background: radial-gradient(
+    560px 380px at 50% 110%,
+    rgba(56, 199, 101, 0.06),
+    transparent 65%
+  );
+  opacity: 0;
+  animation: bw-ambient-in 0.6s ease-out 0s both;
+}
+
+.bw-particles {
+  overflow: hidden;
+}
+
+.bw-particle {
+  position: absolute;
+  border-radius: 9999px;
+  background: rgba(134, 239, 172, 0.8);
+  opacity: 0;
+  animation: bw-particle-in 0.6s ease-out both;
+}
+
+.bw-vignette {
+  background: radial-gradient(
+    120% 90% at 50% 42%,
+    transparent 45%,
+    rgba(0, 0, 0, 0.5) 100%
+  );
+}
+
+/* ---------- logo stage ---------- */
+
+.bw-logo-stage {
+  position: relative;
+  width: var(--bw-stage);
+  height: var(--bw-stage);
+  display: grid;
+  place-items: center;
+  margin-bottom: 22px;
+}
+
+.bw-halo {
+  position: absolute;
+  z-index: 0;
+  width: 150%;
+  height: 150%;
+  border-radius: 9999px;
+  background: radial-gradient(
+    closest-side,
+    rgba(56, 199, 101, 0.15),
+    rgba(56, 199, 101, 0.045) 55%,
+    transparent 72%
+  );
+  opacity: 0;
+  animation: bw-ambient-in 0.6s ease-out 0.1s both;
+}
+
+.bw-burst {
+  position: absolute;
+  z-index: 1;
+  width: 78%;
+  height: 78%;
+  border-radius: 9999px;
+  background: radial-gradient(
+    closest-side,
+    rgba(190, 255, 210, 0.28),
+    rgba(56, 199, 101, 0.1) 55%,
+    transparent 72%
+  );
+  opacity: 0;
+  transform: scale(0.9);
+  animation: bw-burst 0.8s ease-out 0.4s both;
+}
+
+/* Expanding energy wave — thin luminous ring that grows and dissolves. */
+.bw-pulse {
+  position: absolute;
+  z-index: 1;
+  width: 84%;
+  height: 84%;
+  border-radius: 9999px;
+  border: 1px solid rgba(110, 231, 160, 0.7);
+  box-shadow:
+    0 0 18px rgba(56, 199, 101, 0.35),
+    inset 0 0 12px rgba(56, 199, 101, 0.18);
+  opacity: 0;
+  transform: scale(0.6);
+}
+
+.bw-pulse-a {
+  animation: bw-pulse 0.6s cubic-bezier(0.22, 1, 0.36, 1) 0.55s both;
+}
+
+.bw-pulse-b {
+  animation: bw-pulse 0.6s cubic-bezier(0.22, 1, 0.36, 1) 0.8s both;
+}
+
+/* Thin elegant rings with a brighter travelling segment (conic sheen). */
+.bw-ring {
+  position: absolute;
+  z-index: 1;
+  border-radius: 9999px;
+  opacity: 0;
+}
+
+.bw-ring-outer {
+  width: 96%;
+  height: 96%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(56, 199, 101, 0.06) 120deg,
+    rgba(140, 255, 180, 0.85) 178deg,
+    rgba(56, 199, 101, 0.06) 236deg,
+    transparent 360deg
+  );
+  -webkit-mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - 2.5px),
+    #000 calc(100% - 1.5px)
+  );
+  mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - 2.5px),
+    #000 calc(100% - 1.5px)
+  );
+  animation:
+    bw-ring-in 0.5s ease-out 0.5s both,
+    bw-spin 1.6s linear 0.5s both;
+}
+
+.bw-ring-mid {
+  width: 78%;
+  height: 78%;
+  background: conic-gradient(
+    from 180deg,
+    transparent 0deg,
+    rgba(56, 199, 101, 0.05) 140deg,
+    rgba(190, 255, 210, 0.5) 200deg,
+    rgba(56, 199, 101, 0.05) 260deg,
+    transparent 360deg
+  );
+  -webkit-mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - 2px),
+    #000 calc(100% - 1px)
+  );
+  mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - 2px),
+    #000 calc(100% - 1px)
+  );
+  animation:
+    bw-ring-in 0.5s ease-out 0.65s both,
+    bw-spin-rev 2s linear 0.65s both;
+}
+
+/* Small light bead carried around the logo — the "alive" accent. */
+.bw-orbit {
+  position: absolute;
+  z-index: 1;
+  width: 96%;
+  height: 96%;
+  opacity: 0;
+  animation:
+    bw-ring-in 0.5s ease-out 0.6s both,
+    bw-spin 1.4s linear 0.6s both;
+}
+
+.bw-orbit-dot {
+  position: absolute;
+  top: -2.5px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 9999px;
+  background: #c8ffd9;
+  box-shadow:
+    0 0 8px 2px rgba(56, 199, 101, 0.8),
+    0 0 20px 6px rgba(56, 199, 101, 0.3);
+}
+
+/* One-shot cinematic entrance (no loops — the intro plays once).
+   The logo wrapper sits on an explicit top layer so the glow/ring
+   effects can never wash over the artwork. */
+.bw-logo-breathe {
+  position: relative;
+  z-index: 2;
+  animation: none;
+}
+
+.bw-logo-enter {
+  opacity: 0;
+  transform: scale(0.85);
+  filter: blur(14px);
+  animation: bw-logo-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both;
+}
+
+.bw-logo-glow {
+  position: absolute;
+  z-index: 0;
+  inset: -26px;
+  border-radius: 28px;
+  background: radial-gradient(
+    closest-side,
+    rgba(56, 199, 101, 0.4),
+    transparent 72%
+  );
+  opacity: 0;
+  animation: bw-glow-in 0.6s ease-out 0.25s both;
+}
+
+.bw-logo-box {
+  position: relative;
+  z-index: 3;
+  width: min(300px, 76vw);
+}
+
+.bw-logo-img {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: auto;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+  filter: drop-shadow(0 0 22px rgba(56, 199, 101, 0.45)) saturate(1.08);
+}
+
+.bw-boot.is-exiting .bw-logo-img {
+  filter: drop-shadow(0 0 34px rgba(56, 199, 101, 0.75)) brightness(1.12) saturate(1.08);
+}
+
+/* ---------- typography ---------- */
+
+.bw-brand {
+  margin: 0;
+  font-size: clamp(26px, 5.4vw, 32px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  opacity: 0;
+  transform: translateY(10px);
+  animation: bw-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.9s both;
+}
+
+.bw-brand-thin {
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.bw-slogan {
+  margin: 8px 0 0;
+  max-width: 34ch;
+  font-size: clamp(10px, 2.6vw, 11.5px);
+  font-weight: 600;
+  letter-spacing: 0.32em;
+  text-indent: 0.32em;
+  line-height: 1.9;
+  text-wrap: balance;
+  color: rgba(134, 239, 172, 0.75);
+  opacity: 0;
+  transform: translateY(8px);
+  animation: bw-rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) 1.15s both;
+}
+
+/* ---------- keyframes ---------- */
+
+@keyframes bw-ambient-in {
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes bw-particle-in {
+  to {
+    opacity: 0.35;
+  }
+}
+
+@keyframes bw-logo-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+    filter: blur(14px);
+  }
+  60% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes bw-glow-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes bw-burst {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  30% {
+    opacity: 0.55;
+    transform: scale(1.06);
+  }
+  55% {
+    opacity: 0;
+    transform: scale(1.14);
+  }
+}
+
+@keyframes bw-pulse {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  18% {
+    opacity: 0.6;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.45);
+  }
+}
+
+@keyframes bw-ring-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes bw-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes bw-spin-rev {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+@keyframes bw-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes bw-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 480px) {
+  .bw-boot {
+    --bw-stage: 232px;
+  }
+
+  .bw-logo-stage {
+    margin-bottom: 18px;
+  }
+
+  .bw-logo-box {
+    width: min(204px, 78vw);
+  }
+
+  .bw-slogan {
+    letter-spacing: 0.22em;
+    text-indent: 0.22em;
+    max-width: 26ch;
+  }
+}
+
+@media (max-height: 560px) {
+  .bw-boot {
+    --bw-stage: 210px;
+  }
+
+  .bw-logo-stage {
+    margin-bottom: 12px;
+  }
+}
+
+/* ---------- reduced motion: static brand, gentle opacity only ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .bw-ring-outer,
+  .bw-ring-mid,
+  .bw-orbit,
+  .bw-pulse,
+  .bw-burst,
+  .bw-particle,
+  .bw-halo,
+  .bw-ambient-drift {
+    animation: none !important;
+  }
+
+  .bw-ring-outer,
+  .bw-ring-mid,
+  .bw-orbit,
+  .bw-pulse,
+  .bw-burst,
+  .bw-particle {
+    opacity: 0 !important;
+  }
+
+  .bw-halo {
+    opacity: 0.6 !important;
+  }
+
+  .bw-ambient-core,
+  .bw-logo-enter,
+  .bw-logo-glow,
+  .bw-brand,
+  .bw-slogan {
+    animation: bw-fade 0.2s ease-out both !important;
+  }
+}

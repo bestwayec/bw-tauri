@@ -1,0 +1,90 @@
+# Release the Tauri desktop app as `bestway-app vX.Y.Z`.
+#
+# How to release:
+#   1. Bump version in package.json,
+#      src-tauri/tauri.conf.json and
+#      src-tauri/Cargo.toml (keep all three in sync).
+#   2. Commit, then tag:  git tag bestway-app-v0.3.0
+#   3. Push the tag:      git push origin bestway-app-v0.3.0
+# CI builds Windows (.exe/.msi via nsis), macOS (.dmg) and
+# Linux (.AppImage/.deb) and attaches them to the GitHub Release
+# named `bestway-app vX.Y.Z`.
+name: Release Desktop (bestway-app)
+
+on:
+  push:
+    tags:
+      - "bestway-app-v*"
+
+permissions:
+  contents: read # default-deny; jobs below request exactly what they need
+
+jobs:
+  build:
+    permissions:
+      contents: write # tauri-action creates the Release and uploads bundles
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+          - os: macos-latest
+          - os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false # release upload uses GITHUB_TOKEN via env, not git credentials
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          # Pinned: lockfile is generated with this Node/npm pair (24.13.0/npm 11.6.2).
+          # Floating `24` pulls newer npm (v12) which resolves optional deps
+          # (@emnapi/*) differently and breaks `npm ci` with "Missing from lock file".
+          node-version: "24.13.0"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install Linux WebKit deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl wget file \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev patchelf \
+            libssl-dev libxdo-dev
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Build + Release
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+        with:
+          projectPath: .
+          tagName: ${{ github.ref_name }}
+          releaseName: "bestway-app ${{ github.ref_name }}"
+          releaseBody: "Student lockdown exam client (Tauri v2). Pick your OS installer below."
+          releaseDraft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Updater signing: signs `latest.json` + bundles via minisign.
+          # Private key must be stored as a CI secret (never committed).
+          # Generate: `npm run tauri signer generate -w ~/.tauri/bestway.key`
+          # then `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/bestway.key`
+          # Public key lives in `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}

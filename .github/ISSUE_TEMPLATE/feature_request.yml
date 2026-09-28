@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest a new feature or improvement for the Bestway Exam desktop client.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem and proposed solution. Keep it scoped to one area if possible.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: Who needs this (student/proctor/admin) and why?
+      placeholder: As a student I want ...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      placeholder: Add ... to the exam runner with ...
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - desktop
+        - docs
+        - ci/infra
