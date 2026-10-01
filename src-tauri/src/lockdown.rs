@@ -54,18 +54,23 @@ pub fn set_kiosk(window: &tauri::WebviewWindow, locked: bool) -> Result<(), Stri
 /// kiosk mode, not just this hook. The hook also dies with the process
 /// (admin Task-Manager kill still works).
 #[cfg(target_os = "windows")]
-fn apply_windows_lockdown(locked: bool) {
-    use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+mod windows_hook {
+    use std::sync::{
+        atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering},
+        Mutex,
+    };
     use windows::Win32::Foundation::{LRESULT, LPARAM, WPARAM};
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, SetWindowsHookExW, UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT,
-        HC_ACTION, LLKHF_ALTDOWN, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN,
-        WM_SYSKEYUP,
+        CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
+        TranslateMessage, UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, MSG, HC_ACTION,
+        LLKHF_ALTDOWN, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
     };
 
     static HOOK: AtomicIsize = AtomicIsize::new(0);
     static LOCKED: AtomicBool = AtomicBool::new(false);
+    static THREAD_ID: AtomicU32 = AtomicU32::new(0);
+    static THREAD_HANDLE: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
 
     const VK_LWIN: u32 = 0x5B;
     const VK_RWIN: u32 = 0x5C;
@@ -91,37 +96,10 @@ fn apply_windows_lockdown(locked: bool) {
                 }
             }
         }
-        unsafe {
-            CallNextHookEx(
-                None,
-                ncode,
-                wparam,
-                lparam,
-            )
-        }
+        unsafe { CallNextHookEx(None, ncode, wparam, lparam) }
     }
 
-    if locked {
-        LOCKED.store(true, Ordering::SeqCst);
-        if HOOK.load(Ordering::SeqCst) != 0 {
-            return; // already installed
-        }
-        unsafe {
-            let module = GetModuleHandleW(None).unwrap_or_default();
-            match SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_hook), Some(module.into()), 0) {
-                Ok(h) => {
-                    // HHOOK is a handle wrapper; store the raw pointer value.
-                    HOOK.store(h.0 as isize, Ordering::SeqCst);
-                }
-                Err(e) => {
-                    eprintln!("[lockdown] Windows keyboard hook install failed: {e} (fallback: fullscreen+top)");
-                }
-            }
-            // WH_KEYBOARD_LL is pumped by the Tauri/wry main message loop;
-            // no dedicated GetMessageW thread is needed while the app runs.
-        }
-    } else {
-        LOCKED.store(false, Ordering::SeqCst);
+    fn unhook_raw() {
         let raw = HOOK.swap(0, Ordering::SeqCst);
         if raw != 0 {
             unsafe {
@@ -129,6 +107,84 @@ fn apply_windows_lockdown(locked: bool) {
             }
         }
     }
+
+    /// Install the hook on its OWN thread with its own message loop, so the
+    /// kiosk never depends on (or blocks) the Tauri main loop.
+    pub(super) fn install() {
+        LOCKED.store(true, Ordering::SeqCst);
+        if THREAD_HANDLE.lock().map(|g| g.is_some()).unwrap_or(false) {
+            return; // already installed
+        }
+        let handle = std::thread::spawn(|| unsafe {
+            let module = GetModuleHandleW(None).unwrap_or_default();
+            match SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_hook), Some(module.into()), 0) {
+                Ok(h) => HOOK.store(h.0 as isize, Ordering::SeqCst),
+                Err(e) => {
+                    eprintln!("[lockdown] Windows keyboard hook install failed: {e} (fallback: fullscreen+top)");
+                    return;
+                }
+            }
+            THREAD_ID.store(current_thread_id(), Ordering::SeqCst);
+            let mut msg = MSG::default();
+            // Pump until WM_QUIT (posted by `uninstall`). The return value is
+            // intentionally ignored: exit path always unhooks below.
+            while GetMessageW(&mut msg, None, 0, 0).0 > 0 {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+            // Belt and suspenders: the thread that installed the hook removes it.
+            unhook_raw();
+        });
+        if let Ok(mut g) = THREAD_HANDLE.lock() {
+            *g = Some(handle);
+        }
+    }
+
+    /// Stop the pump thread, join it, and guarantee the hook is gone.
+    /// Safe to call when nothing is installed.
+    pub(super) fn uninstall() {
+        LOCKED.store(false, Ordering::SeqCst);
+        let tid = THREAD_ID.swap(0, Ordering::SeqCst);
+        if tid != 0 {
+            unsafe {
+                // Wake GetMessageW so it observes WM_QUIT and exits.
+                let _ = PostThreadMessageW(tid, WM_QUIT, WPARAM(0), LPARAM(0));
+            }
+        }
+        let handle = THREAD_HANDLE.lock().ok().and_then(|mut g| g.take());
+        if let Some(h) = handle {
+            let _ = h.join();
+        }
+        // Join or not, the handle must be gone (covers install failure races).
+        unhook_raw();
+    }
+
+    // GetCurrentThreadId lives in the kernel32 export table; declared
+    // directly to avoid pulling a new `windows` feature module.
+    unsafe extern "system" {
+        fn GetCurrentThreadId() -> u32;
+    }
+
+    fn current_thread_id() -> u32 {
+        unsafe { GetCurrentThreadId() }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn apply_windows_lockdown(locked: bool) {
+    if locked {
+        windows_hook::install();
+    } else {
+        windows_hook::uninstall();
+    }
+}
+
+/// Release every OS-level lockdown primitive. Called on unlock, window
+/// destroy, and process exit so a crash can never leave a PC keyboard-locked
+/// (the OS also drops hooks of dead processes — this covers graceful paths).
+pub fn release_all() {
+    #[cfg(target_os = "windows")]
+    windows_hook::uninstall();
 }
 
 // ---------------------------------------------------------------------------

@@ -26,7 +26,7 @@ Installed clients, the backend OAuth redirect, and the auto-updater all depend o
 
 - Tauri v2 + Rust (OS WebView, ~10MB binary) — `uz.bestway.exam`
 - Vite 8 + React 19 + TS + Tailwind v4 + TanStack Query + zod
-- Rust crates: `single-instance`, `global-shortcut`, `clipboard-manager`, `autostart`, `starship-battery`
+- Rust crates: `single-instance`, `opener`, `deep-link`, `clipboard-manager`, `updater`, `process`, `starship-battery`, `serde`, `reqwest` (auth refresh), `keyring` (token store)
 
 ## Structure
 

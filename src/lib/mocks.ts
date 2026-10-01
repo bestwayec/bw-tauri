@@ -17,6 +17,12 @@
  * api.ts `request()` already unwraps `{ success, data }` -> `data`.
  */
 import { API_BASE_URL, get, getAccessTokenCached, post } from "./api";
+import {
+  MockExamListSchema,
+  MockStartResultSchema,
+  MockSubmitResultSchema,
+  parseOrThrow,
+} from "./schemas";
 
 export type MockExamType = "ielts_academic" | "ielts_general" | "multilevel";
 export type MockSkill = "listening" | "reading" | "writing" | "speaking";
@@ -73,6 +79,10 @@ export interface MockShapedGroup {
   title: string | null;
   instructions: string | null;
   passageText: string | null;
+  /** Sanitized rich document with `<span data-gap="N"></span>` tokens (null = no gapped doc). */
+  contentHtml: string | null;
+  /** Layout hint for the gapped document (e.g. notes/table/summary). Null = default. */
+  contentLayout: string | null;
   hasAudio: boolean;
   /** Sanitized path like `/v1/mock/groups/:id/audio`, or null. */
   audioUrl: string | null;
@@ -132,19 +142,21 @@ export interface MockSubmitResult {
   cefrLevel: string | null;
 }
 
-/** Published + demo mocks visible to the signed-in student. */
-export function listMockExams(): Promise<MockExamListItem[]> {
-  return get<MockExamListItem[]>("/mock/exams");
+/** Published + demo mocks visible to the signed-in student. Validated against the backend shape. */
+export async function listMockExams(): Promise<MockExamListItem[]> {
+  const raw = await get<unknown>("/mock/exams");
+  return parseOrThrow("GET /mock/exams", MockExamListSchema, raw);
 }
 
-export function startMockExam(
+export async function startMockExam(
   examId: string,
   opts?: { mode?: MockAttemptMode },
 ): Promise<MockStartResult> {
-  return post<MockStartResult>(`/mock/exams/${encodeURIComponent(examId)}/start`, {
+  const raw = await post<unknown>(`/mock/exams/${encodeURIComponent(examId)}/start`, {
     mode: opts?.mode ?? "practice",
     flow: "single_skill",
   });
+  return parseOrThrow("POST /mock/exams/:id/start", MockStartResultSchema, raw);
 }
 
 export function saveMockAnswer(
@@ -169,14 +181,15 @@ export function bulkMockAnswers(
 }
 
 /** Section-only submit: pass e.g. ["listening"] to grade just that section. */
-export function submitMockAttempt(
+export async function submitMockAttempt(
   attemptId: string,
   skills?: MockSkill[],
 ): Promise<MockSubmitResult> {
-  return post<MockSubmitResult>(
+  const raw = await post<unknown>(
     `/mock/attempts/${encodeURIComponent(attemptId)}/submit`,
     skills && skills.length > 0 ? { skills } : {},
   );
+  return parseOrThrow("POST /mock/attempts/:id/submit", MockSubmitResultSchema, raw);
 }
 
 /**

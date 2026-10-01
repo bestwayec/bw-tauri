@@ -167,10 +167,20 @@ export function useBattery(pollMs: number = POLL_MS): UseBatteryResult {
   useEffect(() => {
     void refresh();
     if (pollMs <= 0) return;
+    // No polling while hidden: the OS reading is cached server-side for 10s
+    // anyway, and exams must not burn CPU in background tabs.
     const id = window.setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
       void refresh();
     }, pollMs);
-    return () => window.clearInterval(id);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [refresh, pollMs]);
 
   return { ...snapshot, refresh };

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { useQueries } from "@tanstack/react-query";
 import type { Route } from "@/App";
 import {
   listTests,
@@ -31,85 +32,79 @@ function formatDate(iso: string | null): string {
 }
 
 /** Desktop overview: stats, in-progress resume, recent activity, quick actions. */
+const OVERVIEW_QUERY_OPTS = {
+  staleTime: 30_000,
+  refetchInterval: 30_000,
+  refetchIntervalInBackground: false,
+  refetchOnWindowFocus: true,
+  refetchOnReconnect: true,
+  retry: 3,
+  retryDelay: (attempt: number) => Math.min(1_000 * 2 ** attempt, 15_000),
+} as const;
+
 export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
-  const [tests, setTests] = useState<TestListItem[] | null>(null);
-  const [attempts, setAttempts] = useState<AttemptSummary[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [resumeError, setResumeError] = useState<string | null>(null);
   const [resumingId, setResumingId] = useState<string | null>(null);
 
-  const load = useCallback(async (showSpinner = true) => {
-    if (showSpinner) setLoading(true);
-    setError(null);
-    try {
-      const [t, a, m] = await Promise.all([
-        listTests().catch(() => [] as TestListItem[]),
-        myAttempts().catch(() => [] as AttemptSummary[]),
-        listMockExams().catch(() => []),
-      ]);
-      // Include live mock count in assigned so new mocks appear without manual refresh
-      // For overview stats we count tests + published mocks as assigned
-      const publishedMocks = m.filter((x) => x.isPublished || x.isDemo);
-      // Merge for display purposes: tests are primary, mocks are additive for stats
-      // Keep tests separate for resume logic; mocks only affect assigned/ready counts
-      setTests([...t, ...publishedMocks.map((mm) => ({
-        id: mm.id,
-        type: mm.type === "multilevel" ? "multilevel" : "ielts",
-        title: mm.title,
-        level: mm.level,
-        isDemo: mm.isDemo,
-        isActive: mm.isPublished,
-        durationMinutes: mm.durationMinutes,
-        questionCount: mm.questionCount,
-        sections: mm.skills as unknown as TestListItem["sections"],
-        // marker for mock-origin so resume won't try to find it in tests
-        _isMock: true,
-      } as unknown as TestListItem))]);
-      setAttempts(a);
-    } catch {
-      setError("Could not load overview. Retrying automatically…");
-    } finally {
-      if (showSpinner) setLoading(false);
-    }
-  }, []);
+  const [testsQuery, attemptsQuery, mocksQuery] = useQueries({
+    queries: [
+      { queryKey: ["tests"], queryFn: () => listTests(), ...OVERVIEW_QUERY_OPTS },
+      { queryKey: ["my-attempts"], queryFn: () => myAttempts(), ...OVERVIEW_QUERY_OPTS },
+      { queryKey: ["mock-exams"], queryFn: listMockExams, ...OVERVIEW_QUERY_OPTS },
+    ],
+  });
 
-  useEffect(() => {
-    void load(true);
-    const interval = window.setInterval(() => void load(false), 30000);
-    const onFocus = () => void load(false);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") void load(false);
-    };
-    const onOnline = () => void load(false);
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("online", onOnline);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("online", onOnline);
-    };
-  }, [load]);
+  const loading = testsQuery.isPending || attemptsQuery.isPending || mocksQuery.isPending;
+  const error =
+    testsQuery.isError || attemptsQuery.isError || mocksQuery.isError
+      ? "Could not load overview. Retrying automatically…"
+      : null;
+
+  // Include live mock count in assigned so new mocks appear without manual refresh.
+  // 0-question rows are junk (never startable) — hide them like Exams does.
+  const tVisible = (testsQuery.data ?? []).filter((x) => x.questionCount > 0);
+  const publishedMocks = (mocksQuery.data ?? []).filter((x) => (x.isPublished || x.isDemo) && x.questionCount > 0);
+  // Merge for display purposes: tests are primary, mocks are additive for stats.
+  // Mock-origin rows carry _isMock so resume never sends them to /tests/start.
+  const tests: TestListItem[] = [
+    ...tVisible,
+    ...publishedMocks.map(
+      (mm) =>
+        ({
+          id: mm.id,
+          type: mm.type === "multilevel" ? "multilevel" : "ielts",
+          title: mm.title,
+          level: mm.level,
+          isDemo: mm.isDemo,
+          isActive: mm.isPublished,
+          durationMinutes: mm.durationMinutes,
+          questionCount: mm.questionCount,
+          sections: mm.skills as unknown as TestListItem["sections"],
+          _isMock: true,
+        }) as unknown as TestListItem,
+    ),
+  ];
+  const attempts: AttemptSummary[] | null = attemptsQuery.data ?? null;
 
   async function handleResume(a: AttemptSummary) {
-    const test = tests?.find((t) => t.id === a.testId);
+    const test = tests.find((t) => t.id === a.testId);
     if (!test) return;
     // Mock attempts are not resumable via test endpoint – they use mock flow on web
     if ((test as unknown as { _isMock?: boolean })._isMock) return;
     setResumingId(a.id);
+    setResumeError(null);
     try {
       const start = await startTest(test.id);
       onStart(test, start);
     } catch {
-      setError("Could not resume the attempt. Try again from Exams.");
+      setResumeError("Could not resume the attempt. Try again from Exams.");
     } finally {
       setResumingId(null);
     }
   }
 
-  const assigned = tests?.length ?? 0;
-  const ready = tests?.filter((t) => t.questionCount > 0).length ?? 0;
+  const assigned = tests.length;
+  const ready = tests.filter((t) => t.questionCount > 0).length;
   const inProgress = attempts?.filter((a) => a.status === "in_progress") ?? [];
   const completed = attempts?.filter((a) => a.status === "completed").length ?? 0;
   const scored = attempts?.filter((a) => a.totalScore != null) ?? [];
@@ -122,14 +117,8 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
     <section>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-4">
-          <img
-            src="/logo-transparent.png"
-            alt="BestWay"
-            draggable={false}
-            className="h-14 w-auto shrink-0 drop-shadow-[0_0_18px_rgba(56,199,101,0.35)]"
-          />
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-300/70">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-brand/70">
               Overview
             </p>
             <h1 className="mt-1 text-2xl font-black tracking-tight text-white">
@@ -144,7 +133,7 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
         </div>
         <div className="flex items-center gap-2">
           <span className="hidden items-center gap-1.5 text-[11px] text-white/35 sm:inline-flex" aria-live="polite">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" aria-hidden />
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand" aria-hidden />
             Auto-sync
           </span>
           <button
@@ -181,7 +170,7 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
               { value: completed > 0 || avg != null ? `${completed}` : "—", label: "completed", accent: false },
             ].map((s) => (
               <div key={s.label} className="card rounded-2xl p-5">
-                <p className={`text-3xl font-black tabular-nums ${s.accent ? "text-emerald-300" : "text-white"}`}>
+                <p className={`text-3xl font-black tabular-nums ${s.accent ? "text-brand" : "text-white"}`}>
                   {s.value}
                 </p>
                 <p className="mt-1 text-[11px] uppercase tracking-widest text-white/40">{s.label}</p>
@@ -198,6 +187,11 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
                   {inProgress.length}
                 </span>
               </div>
+              {resumeError && (
+                <p role="alert" className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                  {resumeError}
+                </p>
+              )}
               {inProgress.length === 0 ? (
                 <p className="mt-2 text-xs leading-relaxed text-white/40">
                   Nothing in progress. Starting an exam from the Exams tab lets you resume it here if you leave.
@@ -234,7 +228,7 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
                 <h2 className="text-sm font-bold text-white">Recent activity</h2>
                 <button
                   onClick={() => onNavigate("history")}
-                  className="text-xs font-semibold text-emerald-300 hover:text-emerald-200"
+                  className="text-xs font-semibold text-brand hover:text-brand-subtle-fg"
                 >
                   Full history →
                 </button>
@@ -250,7 +244,7 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
                       <span
                         className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-xs font-black ${
                           a.status === "completed"
-                            ? "bg-emerald-400/15 text-emerald-200"
+                            ? "bg-brand/15 text-brand-subtle-fg"
                             : a.status === "grading"
                               ? "bg-amber-400/15 text-amber-200"
                               : "bg-sky-400/15 text-sky-200"

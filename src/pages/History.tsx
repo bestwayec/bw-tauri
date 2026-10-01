@@ -10,7 +10,7 @@ type Props = {
 
 function statusBadge(status: AttemptSummary["status"]) {
   if (status === "completed")
-    return "bg-emerald-400/10 text-emerald-200 ring-emerald-400/30";
+    return "bg-brand/10 text-brand-subtle-fg ring-brand/30";
   if (status === "grading") return "bg-amber-400/10 text-amber-200 ring-amber-400/30";
   return "bg-sky-400/10 text-sky-200 ring-sky-400/30";
 }

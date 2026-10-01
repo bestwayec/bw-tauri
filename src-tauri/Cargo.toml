@@ -1,6 +1,6 @@
 [package]
 name = "bestway-app"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
 authors = ["Bestway"]
 description = "Bestway Exam lockdown client (Tauri 2 core)"
@@ -11,7 +11,7 @@ rust-version = "1.77.2"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon", "image-ico", "image-png"] }
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-opener = "2"
 tauri-plugin-deep-link = "2"
@@ -21,6 +21,9 @@ tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 starship-battery = "0.11"
+# Auth token ownership (Phase 1): HTTP refresh + OS credential store.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+keyring = "3"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61", features = [
@@ -40,3 +43,13 @@ x11rb = { version = "0.13", features = ["allow-unsafe-code"] }
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+# Exam PCs are slow: optimize for speed, strip symbols for size.
+# If installer size matters more than cold start, try opt-level = "s"
+# and compare cold-start + bundle numbers before keeping it.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

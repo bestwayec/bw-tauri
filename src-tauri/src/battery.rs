@@ -1,3 +1,6 @@
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
 use serde::Serialize;
 
 /// Battery snapshot sent to the frontend.
@@ -7,6 +10,55 @@ pub struct BatteryInfo {
     pub percent: Option<u8>,
     pub charging: bool,
     pub state: String,
+}
+
+/// How long a reading is trusted before re-probing the OS.
+const CACHE_TTL: Duration = Duration::from_secs(10);
+
+/// Managed cache: probing the OS is the slow part, so concurrent ticks
+/// within the TTL share one reading instead of hammering the API.
+pub struct BatteryCache {
+    last: Mutex<Option<(BatteryInfo, Instant)>>,
+}
+
+impl BatteryCache {
+    pub fn new() -> Self {
+        Self { last: Mutex::new(None) }
+    }
+
+    fn fresh(&self) -> Option<BatteryInfo> {
+        self.last
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().filter(|(_, at)| at.elapsed() < CACHE_TTL).map(|(info, _)| info.clone()))
+    }
+
+    fn store(&self, info: &BatteryInfo) {
+        if let Ok(mut g) = self.last.lock() {
+            *g = Some((info.clone(), Instant::now()));
+        }
+    }
+}
+
+impl Default for BatteryCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Async command: never blocks the UI thread (heavy probe runs on the
+/// blocking pool) and serves cached readings to concurrent pollers.
+/// (Tauri requires async commands with borrowed inputs to return Result.)
+#[tauri::command]
+pub async fn get_battery(cache: tauri::State<'_, BatteryCache>) -> Result<BatteryInfo, String> {
+    if let Some(hit) = cache.fresh() {
+        return Ok(hit);
+    }
+    let info = tauri::async_runtime::spawn_blocking(get_battery_sync)
+        .await
+        .unwrap_or_else(|_| unknown());
+    cache.store(&info);
+    Ok(info)
 }
 
 fn unknown() -> BatteryInfo {
@@ -19,7 +71,8 @@ fn unknown() -> BatteryInfo {
 
 /// Cross-platform battery readout via `starship-battery`.
 /// Never panics: every failure path falls back to `unknown()`.
-pub fn get_battery() -> BatteryInfo {
+/// Runs on the blocking pool (see the `get_battery` command above).
+fn get_battery_sync() -> BatteryInfo {
     let manager = match starship_battery::Manager::new() {
         Ok(m) => m,
         Err(_) => return unknown(),

@@ -26,6 +26,28 @@ export default defineConfig({
     // Do not emit sourcemaps in production — leaks source and aids exploit chaining.
     sourcemap: false,
     minify: "esbuild",
+    // Lab PCs run modern WebViews: es2022 output is smaller and faster.
+    target: "es2022",
+    rolldownOptions: {
+      output: {
+        // Keep the initial chunk lean: React core + Tauri IPC separate from
+        // route chunks (three.js splash, exam runners load on demand).
+        // (Rolldown-native; Vite 8 does not accept the old manualChunks object.)
+        codeSplitting: {
+          groups: [
+            { name: "vendor-react", test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
+            {
+              name: "vendor-tauri",
+              test: /node_modules[\\/]@tauri-apps[\\/]/,
+            },
+            {
+              name: "vendor-query",
+              test: /node_modules[\\/]_?(@tanstack|zustand)[\\/]/,
+            },
+          ],
+        },
+      },
+    },
   },
   resolve: {
     alias: {

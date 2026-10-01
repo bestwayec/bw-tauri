@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { clearSession, login } from "@/lib/api";
+import { API_BASE_URL, clearSession, isApiMisconfigured, login, normalizePhone } from "@/lib/api";
 import {
   buildAuthorizeUrl,
   clearBrowserLoginState,
@@ -8,7 +8,6 @@ import {
   newBrowserLoginState,
   openInBrowser,
   parseAuthCallbackUrl,
-  parseManualCallbackInput,
   exchangeCode,
   readBrowserLoginState,
   readInitialDeepLink,
@@ -22,58 +21,16 @@ type Props = {
 type Busy = "idle" | "browser" | "password" | "exchange";
 
 export default function Login({ onLogin }: Props) {
-  const [phone, setPhone] = useState("");
+  // Country code is pre-written so the number always reaches the backend
+  // in international format.
+  const [phone, setPhone] = useState("+998 ");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState<Busy>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [manualUrl, setManualUrl] = useState("");
-  const [authorizeUrl, setAuthorizeUrl] = useState<string | null>(null);
   const [pending, setPending] = useState<BrowserLoginState | null>(null);
   // Presentation-only view state: OAuth-first, manual form hidden until asked.
   const [mode, setMode] = useState<"oauth" | "manual">("oauth");
   const [showPw, setShowPw] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const copyTimer = useRef<number | null>(null);
-  // Brute-force throttle: 3 fails -> 30s cooldown (UI only, backend still authoritative).
-  const [failedAttempts, setFailedAttempts] = useState(0);
-  const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
-  const [, setNowTick] = useState(0);
-  useEffect(() => {
-    return () => {
-      if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (cooldownUntil == null) return;
-    if (Date.now() >= cooldownUntil) {
-      setCooldownUntil(null);
-      setFailedAttempts(0);
-      return;
-    }
-    const id = window.setInterval(() => {
-      if (Date.now() >= (cooldownUntil ?? 0)) {
-        setCooldownUntil(null);
-        setFailedAttempts(0);
-        window.clearInterval(id);
-      } else {
-        setNowTick((t) => t + 1);
-      }
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [cooldownUntil]);
-
-  async function copyAuthorize() {
-    if (!authorizeUrl) return;
-    try {
-      await navigator.clipboard?.writeText(authorizeUrl);
-    } catch {
-      return;
-    }
-    setCopied(true);
-    if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
-    copyTimer.current = window.setTimeout(() => setCopied(false), 2000);
-  }
 
   const pendingRef = useRef<BrowserLoginState | null>(null);
   const onLoginRef = useRef(onLogin);
@@ -172,7 +129,7 @@ export default function Login({ onLogin }: Props) {
         else unlistens.push(u);
       })
       .catch(() => {
-        if (!dead) setError("Deep-link plugin unavailable — use the manual paste below.");
+        if (!dead) setError("Deep-link plugin unavailable — please sign in manually instead.");
       });
     // Second-instance argv forwarded by Rust as `single-instance` event.
     listenSingleInstance(onUrl)
@@ -183,11 +140,11 @@ export default function Login({ onLogin }: Props) {
       .catch(() => {
         /* event plugin always present in Tauri; ignore outside Tauri */
       });
-    // Don't hang forever on "Waiting for browser login…" — hint at manual paste.
+    // Don't hang forever on "Waiting for browser login…" — nudge a retry.
     const timer = window.setTimeout(() => {
       if (!dead) {
         // Only nudge; the listeners stay alive until Cancel.
-        setError((prev) => prev ?? "Still waiting — if the browser didn't return, paste the callback URL or code below.");
+        setError((prev) => prev ?? "Still waiting — if the browser didn't return, cancel and try again.");
       }
     }, 120_000);
     return () => {
@@ -207,30 +164,31 @@ export default function Login({ onLogin }: Props) {
   async function handleBrowser() {
     setBusy("browser");
     setError(null);
-    setAuthorizeUrl(null);
-    // Build state + URL FIRST so an opener failure never loses the link.
-    // The old code threw the URL away inside startBrowserLogin() and fell
-    // back to idle with "copy the link below" but no link shown.
+    // The login link is never shown to the user: if the system browser
+    // cannot be opened, fall back to idle so the student retries with the
+    // exact same "Continue in browser" button.
     let s: BrowserLoginState;
     let url: string;
     try {
       s = await newBrowserLoginState();
       url = await buildAuthorizeUrl(s);
     } catch {
-      setError("Could not create the login link. Check connection and try again.");
+      setError("Could not start browser login. Check connection and try again.");
       setBusy("idle");
       return;
     }
     // Sync ref immediately — a fast deep link may arrive before re-render.
     pendingRef.current = s;
     setPending(s);
-    setAuthorizeUrl(url);
-    // busy stays "browser" until the callback (or cancel) resolves it —
-    // even when auto-open fails, so the copy/paste fallback stays visible.
     try {
       await openInBrowser(url);
+      // busy stays "browser" until the callback (or cancel) resolves it.
     } catch {
-      setError("Could not open the system browser automatically. Copy the login link below manually.");
+      void clearBrowserLoginState();
+      pendingRef.current = null;
+      setPending(null);
+      setError("Could not open the browser. Please try again.");
+      setBusy("idle");
     }
   }
 
@@ -238,57 +196,23 @@ export default function Login({ onLogin }: Props) {
     void clearBrowserLoginState();
     pendingRef.current = null;
     setPending(null);
-    setAuthorizeUrl(null);
-    setManualUrl("");
     setError(null);
     setBusy("idle");
   }
 
-  async function handleManualUrl(e: React.FormEvent) {
-    e.preventDefault();
-    const s = pendingRef.current ?? (await readBrowserLoginState());
-    const raw = manualUrl.trim();
-    if (!raw) {
-      setError("Paste the full callback URL or code from the browser first.");
-      return;
-    }
-    if (!s) {
-      setError("Login session expired. Start browser login again.");
-      return;
-    }
-    // Accept FULL callback URL (preferred) or RAW code (web "copy code" fallback).
-    const parsed = parseManualCallbackInput(raw, s);
-    if (parsed.error && !parsed.code) {
-      setError(parsed.error);
-      return;
-    }
-    const url =
-      raw.includes("://") || raw.toLowerCase().startsWith("bestway-exam:")
-        ? raw
-        : `bestway-exam://auth/callback?code=${encodeURIComponent(parsed.code!)}&state=${encodeURIComponent(parsed.state!)}`;
-    await handleCallback(url, s);
-  }
-
   async function handlePassword(e: React.FormEvent) {
     e.preventDefault();
-    if (cooldownUntil != null && Date.now() < cooldownUntil) {
-      const sec = Math.ceil((cooldownUntil - Date.now()) / 1000);
-      setError(`Too many attempts. Try again in ${sec}s.`);
-      return;
-    }
-    // Normalize like web (login-form.tsx): strip spaces so
-    // "+998 90 123 45 67" matches stored "+998901234567".
-    const normalizedPhone = phone.replace(/\s/g, "");
-    if (!normalizedPhone || !password) {
-      setError("Enter phone number and password.");
+    // Same normalization as the web form: "+998 90 123 45 67",
+    // "90 123 45 67" and "998901234567" all reach the backend alike.
+    const normalizedPhone = normalizePhone(phone);
+    if (phone.replace(/\D/g, "").length < 9 || !password) {
+      setError("Enter your full phone number and password.");
       return;
     }
     setBusy("password");
     setError(null);
     try {
       const session = await login(normalizedPhone, password);
-      setFailedAttempts(0);
-      setCooldownUntil(null);
       // Fail-closed: missing/unknown role must NOT default to student.
       const role = String(session.user?.role ?? "");
       if (role !== "student") {
@@ -305,13 +229,8 @@ export default function Login({ onLogin }: Props) {
       }
       onLogin({ id: session.user.id, name: session.user.name ?? null, phone: session.user.phone ?? null });
     } catch (err) {
-      const nextFails = failedAttempts + 1;
-      setFailedAttempts(nextFails);
-      if (nextFails >= 3) {
-        setCooldownUntil(Date.now() + 30_000);
-      }
-      const apiErr = err as { code?: string; message?: string } | null;
-      const msg =
+      const apiErr = err as { code?: string; message?: string; status?: number } | null;
+      const base =
         typeof apiErr?.message === "string" && apiErr.message
           ? apiErr.code
             ? `${apiErr.message} (${apiErr.code})`
@@ -319,7 +238,11 @@ export default function Login({ onLogin }: Props) {
           : err instanceof Error
             ? err.message
             : "Login failed. Check phone/password.";
-      setError(nextFails >= 3 ? `${msg} — cooldown 30s after 3 fails.` : msg);
+      // On a credentials rejection show the exact number that was tried, so a
+      // formatting mismatch is visible instead of a mystery 401.
+      const msg =
+        apiErr?.status === 401 ? `${base} — tried «${normalizedPhone}».` : base;
+      setError(msg);
       setBusy("idle");
     }
   }
@@ -327,15 +250,22 @@ export default function Login({ onLogin }: Props) {
   // OAuth flow is active (a browser round-trip is in flight or finishing).
   const oauthActive = busy === "browser" || busy === "exchange";
   const pwBusy = busy === "password" || busy === "exchange";
-  const inCooldown = cooldownUntil != null && Date.now() < cooldownUntil;
-  const cooldownSec = inCooldown ? Math.ceil((cooldownUntil! - Date.now()) / 1000) : 0;
 
   return (
     <section className="mx-auto w-full max-w-[440px]">
+      {isApiMisconfigured() && (
+        <p
+          role="alert"
+          className="mb-3 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs leading-relaxed text-red-200"
+        >
+          This app was built without a backend address and points at localhost ({API_BASE_URL}).
+          You will not be able to sign in — ask your administrator for a correct install.
+        </p>
+      )}
       <div className="card rounded-3xl p-8 shadow-[0_24px_80px_rgba(0,0,0,0.55)] sm:p-10">
         {/* Brand header */}
         <div className="flex items-center gap-3">
-          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 text-lg font-black text-black shadow-[0_0_28px_rgba(56,199,101,0.5)]">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-brand to-accent text-lg font-black text-brand-fg shadow-[0_0_28px_rgba(137,243,54,0.5)]">
             B
           </div>
           <div className="min-w-0 flex-1 leading-tight">
@@ -356,15 +286,15 @@ export default function Login({ onLogin }: Props) {
         {mode === "oauth" ? (
           <div key="oauth" className="animate-view">
             <h2 className="mt-10 text-[32px] font-bold leading-[1.15] tracking-tight text-white">
-              Log in <span className="text-emerald-400">to&nbsp;continue</span>
+              Log in <span className="text-gradient-brand">to&nbsp;continue</span>
             </h2>
             <p className="mt-2 text-sm text-white/50">Open the link in your browser to sign in.</p>
 
             {oauthActive ? (
               <div className="mt-6">
                 {busy === "exchange" ? (
-                  <p className="flex items-center gap-2.5 text-[13px] font-medium text-emerald-300" role="status">
-                    <span className="grid h-5 w-5 place-items-center rounded-full bg-emerald-400/15 ring-1 ring-emerald-400/40">
+                  <p className="flex items-center gap-2.5 text-[13px] font-medium text-brand" role="status">
+                    <span className="grid h-5 w-5 place-items-center rounded-full bg-brand/15 ring-1 ring-brand/40">
                       <Icon size={12}>
                         <path d="M20 6 9 17l-5-5" />
                       </Icon>
@@ -374,98 +304,14 @@ export default function Login({ onLogin }: Props) {
                 ) : (
                   <p className="flex items-center gap-2.5 text-[13px] text-white/60" role="status">
                     <span className="relative flex h-2 w-2">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand opacity-60" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-brand" />
                     </span>
-                    {authorizeUrl ? "Continue in your browser" : "Waiting for browser…"}
+                    Continue in your browser
                   </p>
                 )}
 
-                {authorizeUrl && (
-                  <>
-                    <div className="mt-3 flex h-[54px] items-center gap-2.5 rounded-2xl border border-white/10 bg-black/50 pl-3.5 pr-2 transition focus-within:border-emerald-400/60 hover:border-white/20">
-                      <span className="shrink-0 text-white/35">
-                        <Icon>
-                          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                        </Icon>
-                      </span>
-                      <input
-                        readOnly
-                        value={authorizeUrl}
-                        onFocus={(e) => e.target.select()}
-                        autoComplete="off"
-                        spellCheck={false}
-                        aria-label="Login link"
-                        className="min-w-0 flex-1 truncate bg-transparent font-mono text-xs text-emerald-200/90 outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => void copyAuthorize()}
-                        title={copied ? "Copied" : "Copy link"}
-                        aria-label={copied ? "Copied" : "Copy login link"}
-                        className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-white/50 transition hover:bg-white/5 hover:text-white"
-                      >
-                        {copied ? (
-                          <span className="text-emerald-300">
-                            <Icon>
-                              <path d="M20 6 9 17l-5-5" />
-                            </Icon>
-                          </span>
-                        ) : (
-                          <Icon>
-                            <rect width="14" height="14" x="8" y="8" rx="2" />
-                            <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                          </Icon>
-                        )}
-                      </button>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        // Never a plain <a href>: navigating the kiosk webview to an
-                        // external origin would load untrusted content with IPC access.
-                        // Route via the opener plugin (system browser, allowlisted).
-                        void openInBrowser(authorizeUrl).catch(() => {
-                          setError("Could not open the system browser automatically. Copy the login link above manually.");
-                        });
-                      }}
-                      className="mt-2.5 inline-flex items-center gap-1 text-[13px] font-medium text-emerald-300/90 transition hover:text-emerald-200"
-                    >
-                      Open login link
-                      <Icon size={13}>
-                        <path d="M15 3h6v6" />
-                        <path d="M10 14 21 3" />
-                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                      </Icon>
-                    </button>
-                  </>
-                )}
-
                 {error && <InlineError message={error} />}
-
-                <details className="mt-3">
-                  <summary className="cursor-pointer text-xs text-white/40 transition hover:text-white/70">
-                    Trouble? Paste a code instead
-                  </summary>
-                  <form onSubmit={handleManualUrl} className="mt-2 flex gap-2">
-                    <input
-                      value={manualUrl}
-                      onChange={(e) => setManualUrl(e.target.value)}
-                      placeholder="bestway-exam://auth/callback?code=… or paste code"
-                      autoComplete="off"
-                      spellCheck={false}
-                      aria-label="Callback URL or code"
-                      className="field min-w-0 flex-1 rounded-xl px-3.5 py-2 font-mono text-xs"
-                    />
-                    <button
-                      type="submit"
-                      className="btn-ghost shrink-0 rounded-xl px-3.5 py-2 text-xs font-medium text-white"
-                    >
-                      Verify
-                    </button>
-                  </form>
-                </details>
 
                 <button
                   type="button"
@@ -478,7 +324,8 @@ export default function Login({ onLogin }: Props) {
             ) : (
               <div className="mt-6">
                 <button
-                  onClick={handleBrowser}
+                  type="button"
+                  onClick={() => void handleBrowser()}
                   disabled={busy !== "idle"}
                   className="btn-brand flex h-[54px] w-full items-center justify-center gap-2 rounded-xl px-4 text-[15px] font-semibold disabled:opacity-60"
                 >
@@ -504,7 +351,7 @@ export default function Login({ onLogin }: Props) {
                   setError(null);
                   setMode("manual");
                 }}
-                className="text-[13px] font-medium text-white/45 transition hover:text-emerald-300"
+                className="text-[13px] font-medium text-white/45 transition hover:text-brand"
               >
                 Sign in manually →
               </button>
@@ -539,8 +386,13 @@ export default function Login({ onLogin }: Props) {
                 </span>
                 <input
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+998 __ ___ __ __"
+                  onChange={(e) => {
+                    // Keep the pre-written +998 prefix: if the user wipes the
+                    // field, restore the prefix instead of leaving it empty.
+                    const v = e.target.value;
+                    setPhone(v.startsWith("+998") ? v : "+998 ");
+                  }}
+                  placeholder="+998 90 123 45 67"
                   inputMode="tel"
                   autoComplete="tel"
                   aria-label="Phone number"
@@ -594,7 +446,7 @@ export default function Login({ onLogin }: Props) {
               <div className="pt-1">
                 <button
                   type="submit"
-                  disabled={pwBusy || inCooldown}
+                  disabled={pwBusy}
                   className="btn-brand flex h-[52px] w-full items-center justify-center gap-2 rounded-xl px-4 text-[15px] font-semibold disabled:opacity-60"
                 >
                   {pwBusy ? (
@@ -605,8 +457,6 @@ export default function Login({ onLogin }: Props) {
                       />
                       Signing in…
                     </>
-                  ) : inCooldown ? (
-                    <>Try again in {cooldownSec}s</>
                   ) : (
                     <>
                       Sign in

@@ -1,23 +1,29 @@
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
-import Login from "@/pages/Login";
-import Dashboard from "@/pages/Dashboard";
-import Exams from "@/pages/Exams";
-import History from "@/pages/History";
-import Profile from "@/pages/Profile";
-import Runner from "@/pages/Runner";
-import MockSectionPicker from "@/pages/MockSectionPicker";
-import MockRunner from "@/pages/MockRunner";
-import Locked from "@/pages/Locked";
-import Result from "@/pages/Result";
+// Route-split: heavy screens (three.js splash, exam runners) load on demand
+// so the initial bundle stays lean on lab hardware.
+const Login = lazy(() => import("@/pages/Login"));
+const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const Exams = lazy(() => import("@/pages/Exams"));
+const History = lazy(() => import("@/pages/History"));
+const Profile = lazy(() => import("@/pages/Profile"));
+const Settings = lazy(() => import("@/pages/Settings"));
+const TestRunner = lazy(() => import("@/pages/TestRunner"));
+const MockSectionPicker = lazy(() => import("@/pages/MockSectionPicker"));
+const MockExam = lazy(() => import("@/pages/MockExam"));
+const Locked = lazy(() => import("@/pages/Locked"));
+const Result = lazy(() => import("@/pages/Result"));
+const BootSplash = lazy(() => import("@/components/BootSplash"));
+const Particles = lazy(() => import("@/components/Particles"));
 import Sidebar from "@/components/Sidebar";
-import BootSplash from "@/components/BootSplash";
-import Particles from "@/components/Particles";
 import UpdateNotifier from "@/components/UpdateNotifier";
 import ExitConfirmModal from "@/components/ExitConfirmModal";
+import ReauthModal from "@/components/ReauthModal";
 import { checkForUpdate, getDismissedVersion, type UpdateInfo } from "@/lib/version";
 import ClickSpark from "@/components/ClickSpark";
-import { clearSession, getAccessToken, getRefreshToken, initSecureSession, logout, me, refresh } from "@/lib/api";
+import CrashRecovery from "@/components/CrashRecovery";
+import { logout } from "@/lib/api";
+import { useSessionStore } from "@/lib/session-store";
 import type { StartResult, TestListItem } from "@/lib/tests";
 import type {
   MockExamListItem,
@@ -32,6 +38,7 @@ export type Route =
   | "exams"
   | "history"
   | "profile"
+  | "settings"
   | "runner"
   | "mockSections"
   | "mockRunner"
@@ -49,6 +56,7 @@ const TITLES: Record<Exclude<Route, "login">, string> = {
   exams: "Exams",
   history: "History",
   profile: "Profile",
+  settings: "Settings",
   runner: "Exam runner",
   mockSections: "Choose section",
   mockRunner: "Mock runner",
@@ -73,7 +81,7 @@ function OnlineDot() {
   return (
     <span className="flex items-center gap-1.5 text-[11px] text-white/45">
       <span
-        className={`h-1.5 w-1.5 rounded-full ${online ? "bg-emerald-400 shadow-[0_0_8px_#38c765]" : "bg-red-400"}`}
+        className={`h-1.5 w-1.5 rounded-full ${online ? "bg-brand shadow-[0_0_8px_#89F336]" : "bg-red-400"}`}
       />
       {online ? "Online" : "Offline"}
     </span>
@@ -90,7 +98,7 @@ export default function App() {
   const [activeTest, setActiveTest] = useState<TestListItem | null>(null);
   const [activeStart, setActiveStart] = useState<StartResult | null>(null);
   const [lastScore, setLastScore] = useState<{ autoScore: number | null } | null>(null);
-  // Mock (IELTS) section-by-section flow — parallel to the legacy tests flow.
+  // Mock (IELTS) section-by-section flow — parallel to the tests flow.
   const [activeMock, setActiveMock] = useState<MockExamListItem | null>(null);
   const [activeMockStart, setActiveMockStart] = useState<MockStartResult | null>(null);
   const [activeMockSection, setActiveMockSection] = useState<MockShapedSection | null>(null);
@@ -146,52 +154,58 @@ export default function App() {
     return () => window.clearTimeout(t);
   }, [student]);
 
-  // Restore persisted session (api.ts stores tokens AES-GCM encrypted in localStorage).
-  // Without this, every reload forced re-login even with valid tokens.
+  // Single session store drives auth UI. The store renders the cached profile
+  // immediately and revalidates in the background — a network failure never
+  // sends the student to the login screen while tokens exist.
   useEffect(() => {
     let dead = false;
-    (async () => {
-      try {
-        await initSecureSession();
-        if (!(await getAccessToken()) && (await getRefreshToken())) {
-          try {
-            await refresh();
-          } catch {
-            await clearSession();
-          }
+    const applySession = (status: string, profile: { id: string; name?: string | null; phone?: string | null; role?: string } | null) => {
+      if (dead) return;
+      if (status !== "ready" || !profile?.id) {
+        if (status === "logged-out") {
+          setStudent(null);
+          setRoute("login");
         }
-        if (await getAccessToken()) {
-          const profile = await me();
-          if (!dead) {
-            if (profile?.user?.role === "student" && profile.user.id) {
-              setStudent({
-                id: profile.user.id,
-                name: typeof profile.user.name === "string" ? profile.user.name : null,
-                phone: typeof profile.user.phone === "string" ? profile.user.phone : null,
-              });
-              setRoute("dashboard");
-            } else {
-              await clearSession();
-            }
-          }
-        }
-      } catch {
-        // Offline / expired — stay on login; request() already tried refresh.
-        try {
-          if (!(await getAccessToken())) await clearSession();
-        } catch {
-          /* ignore */
-        }
-      } finally {
-        if (!dead) setRestoring(false);
+        setRestoring(false);
+        return;
       }
-    })();
+      setStudent({
+        id: profile.id,
+        name: typeof profile.name === "string" ? profile.name : null,
+        phone: typeof profile.phone === "string" ? profile.phone : null,
+      });
+      setRoute((r) => (r === "login" ? "dashboard" : r));
+      setRestoring(false);
+    };
+    const unsub = useSessionStore.subscribe((s) => applySession(s.status, s.profile));
+    const cur = useSessionStore.getState();
+    applySession(cur.status, cur.profile);
+    void cur.initialize();
     return () => {
       dead = true;
+      unsub();
     };
   }, []);
 
   const navigate = (next: Route) => setRoute(next);
+
+  // Mid-exam re-login: definitive auth failures dispatch
+  // `exam:reauth-required` — show the modal over the attempt, never navigate.
+  const [showReauth, setShowReauth] = useState(false);
+  const routeRef = useRef<Route>("login");
+  useEffect(() => {
+    routeRef.current = route;
+  }, [route]);
+  useEffect(() => {
+    const onReauth = () => {
+      const r = routeRef.current;
+      if (r === "runner" || r === "mockSections" || r === "mockRunner" || r === "locked") {
+        setShowReauth(true);
+      }
+    };
+    window.addEventListener("exam:reauth-required", onReauth);
+    return () => window.removeEventListener("exam:reauth-required", onReauth);
+  }, []);
 
   const handleStartExam = (test: TestListItem, start: StartResult) => {
     setActiveTest(test);
@@ -251,21 +265,19 @@ export default function App() {
 
   const handleLogout = async () => {
     if (!confirm("Log out of Bestway Exam on this device?")) return;
-    try {
-      await logout();
-    } finally {
-      await clearSession();
-      setStudent(null);
-      setActiveTest(null);
-      setActiveStart(null);
-      setActiveMock(null);
-      setActiveMockStart(null);
-      setActiveMockSection(null);
-      setLastMockResult(null);
-      setStats(null);
-      setUpdate(null);
-      setRoute("login");
-    }
+    // logout() revokes server-side and wipes locally; the store subscription
+    // flips the UI back to login.
+    await logout().catch(() => undefined);
+    setStudent(null);
+    setActiveTest(null);
+    setActiveStart(null);
+    setActiveMock(null);
+    setActiveMockStart(null);
+    setActiveMockSection(null);
+    setLastMockResult(null);
+    setStats(null);
+    setUpdate(null);
+    setRoute("login");
   };
 
   // Student-only gate: force login when unauthenticated.
@@ -288,31 +300,40 @@ export default function App() {
   if (activeRoute === "login") {
     return (
       <>
-        <div className="relative h-screen overflow-y-auto bg-[#050807] text-white">
+        <div className="relative h-screen overflow-y-auto bg-bg text-white">
           {!reduceMotion && (
             <div
               aria-hidden="true"
               className="pointer-events-none absolute inset-0 opacity-85 [mask-image:radial-gradient(ellipse_85%_75%_at_50%_45%,black_30%,transparent_100%)]"
             >
-              <Particles
-                particleCount={220}
-                particleSpread={10}
-                speed={0.15}
-                particleColors={["#f7e37c", "#eed154", "#d9b73c"]}
-                alphaParticles
-                particleBaseSize={150}
-                sizeRandomness={0.8}
-                cameraDistance={20}
-              />
+              <Suspense fallback={null}>
+                <Particles
+                  particleCount={220}
+                  particleSpread={10}
+                  speed={0.15}
+                  particleColors={["#89F336", "#FFED29", "#FF991C"]}
+                  alphaParticles
+                  particleBaseSize={150}
+                  sizeRandomness={0.8}
+                  cameraDistance={20}
+                />
+              </Suspense>
             </div>
           )}
           <main className="relative flex min-h-full items-center justify-center p-6">
             <div className="w-full max-w-md">
-              <Login onLogin={handleLogin} />
+              <Suspense fallback={null}>
+                <Login onLogin={handleLogin} />
+              </Suspense>
             </div>
           </main>
         </div>
-        {showSplash && <BootSplash exiting={introLeaving} />}
+        {showSplash && (
+          <Suspense fallback={null}>
+            <BootSplash exiting={introLeaving} />
+          </Suspense>
+        )}
+        <CrashRecovery />
       </>
     );
   }
@@ -342,21 +363,55 @@ export default function App() {
           </div>
         )}
 
-        <ClickSpark sparkColor="#38c765" sparkSize={10} sparkRadius={22} sparkCount={8} duration={420} className="flex min-h-0 flex-1 flex-col">
-          <main
-            className={
-              examActive
-                ? "flex min-h-0 flex-1 flex-col overflow-hidden"
-                : "min-h-0 flex-1 overflow-y-auto px-6 pb-8 pt-6 2xl:px-10"
-            }
-          >
+        {examActive ? (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <div className="flex min-h-0 flex-1 flex-col">
+                <Suspense fallback={null}>
+                  {activeRoute === "runner" && activeTest && activeStart && (
+                    <TestRunner
+                      test={activeTest}
+                      start={activeStart}
+                      studentName={student?.name ?? null}
+                      onExit={handleExitExam}
+                      onFinish={handleFinishExam}
+                    />
+                  )}
+                  {activeRoute === "mockSections" && activeMockStart && (
+                    <MockSectionPicker
+                      start={activeMockStart}
+                      onPick={(section) => {
+                        setActiveMockSection(section);
+                        navigate("mockRunner");
+                      }}
+                      onBack={handleBackToExams}
+                    />
+                  )}
+                  {activeRoute === "mockRunner" && activeMockStart && activeMockSection && (
+                    <MockExam
+                      start={activeMockStart}
+                      section={activeMockSection}
+                      studentName={student?.name ?? null}
+                      onExit={handleExitExam}
+                      onBackToSections={() => navigate("mockSections")}
+                      onFinish={handleFinishMock}
+                    />
+                  )}
+                  {activeRoute === "locked" && <Locked onBack={handleBackToExams} />}
+                </Suspense>
+              </div>
+            </main>
+          </div>
+        ) : (
+          <ClickSpark sparkColor="#89F336" sparkSize={10} sparkRadius={22} sparkCount={8} duration={420} className="flex min-h-0 flex-1 flex-col">
+          <main className="min-h-0 flex-1 overflow-y-auto px-6 pb-8 pt-6 2xl:px-10">
             <motion.div
               key={activeRoute + (activeRoute === "result" ? historyKey : "")}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.18, ease: "easeOut" }}
-              className={examActive ? "flex min-h-0 flex-1 flex-col" : undefined}
             >
+              <Suspense fallback={null}>
               {activeRoute === "dashboard" && (
                 <Dashboard
                   studentName={student?.name ?? null}
@@ -382,56 +437,13 @@ export default function App() {
                   onLogout={() => void handleLogout()}
                 />
               )}
-              {activeRoute === "runner" && activeTest && activeStart && (
-                <Runner
-                  test={activeTest}
-                  start={activeStart}
-                  onLocked={() => navigate("locked")}
-                  onExit={handleExitExam}
-                  onFinish={handleFinishExam}
-                />
-              )}
-              {activeRoute === "runner" && (!activeTest || !activeStart) && (
-                <Exams
+              {activeRoute === "settings" && (
+                <Settings
                   studentName={student?.name ?? null}
-                  onStart={handleStartExam}
-                  onStartMock={handleStartMock}
+                  studentPhone={student?.phone ?? null}
+                  onLogout={() => void handleLogout()}
                 />
               )}
-              {activeRoute === "mockSections" && activeMockStart && (
-                <MockSectionPicker
-                  start={activeMockStart}
-                  onPick={(section) => {
-                    setActiveMockSection(section);
-                    navigate("mockRunner");
-                  }}
-                  onBack={handleBackToExams}
-                />
-              )}
-              {activeRoute === "mockSections" && !activeMockStart && (
-                <Exams
-                  studentName={student?.name ?? null}
-                  onStart={handleStartExam}
-                  onStartMock={handleStartMock}
-                />
-              )}
-              {activeRoute === "mockRunner" && activeMockStart && activeMockSection && (
-                <MockRunner
-                  start={activeMockStart}
-                  section={activeMockSection}
-                  onExit={handleExitExam}
-                  onBackToSections={() => navigate("mockSections")}
-                  onFinish={handleFinishMock}
-                />
-              )}
-              {activeRoute === "mockRunner" && (!activeMockStart || !activeMockSection) && (
-                <Exams
-                  studentName={student?.name ?? null}
-                  onStart={handleStartExam}
-                  onStartMock={handleStartMock}
-                />
-              )}
-              {activeRoute === "locked" && <Locked onBack={handleBackToExams} />}
               {activeRoute === "result" && (
                 <Result
                   testTitle={activeMock?.title ?? activeTest?.title ?? null}
@@ -453,14 +465,22 @@ export default function App() {
                   onHistory={() => navigate("history")}
                 />
               )}
+              </Suspense>
             </motion.div>
           </main>
-        </ClickSpark>
+          </ClickSpark>
+        )}
       </div>
     </div>
-    {update && <UpdateNotifier update={update} onClose={() => setUpdate(null)} />}
-    {showSplash && <BootSplash exiting={introLeaving} />}
+    {update && <UpdateNotifier update={update} onClose={() => setUpdate(null)} deferInstall={examActive} />}
+    {showSplash && (
+      <Suspense fallback={null}>
+        <BootSplash exiting={introLeaving} />
+      </Suspense>
+    )}
     <ExitConfirmModal open={showExitConfirm} onCancel={handleCancelExit} onConfirm={handleConfirmExit} />
+    <ReauthModal open={showReauth} phone={student?.phone ?? null} onDone={() => setShowReauth(false)} />
+    <CrashRecovery />
     </>
   );
 }

@@ -25,7 +25,7 @@ function Toggle({
       aria-label={label}
       onClick={() => onChange(!checked)}
       className={`relative h-6 w-11 shrink-0 rounded-full transition ${
-        checked ? "bg-[#19D36B]" : "bg-white/15"
+        checked ? "bg-[#89F336]" : "bg-white/15"
       }`}
     >
       <span
@@ -68,11 +68,11 @@ export default function Profile({ name, phone, onLogout, stats }: Props) {
 
       {/* Main profile account */}
       <div className="card relative mt-6 overflow-hidden rounded-2xl">
-        <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-emerald-400/10 blur-2xl" aria-hidden="true" />
+        <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-brand/10 blur-2xl" aria-hidden="true" />
         <div className="p-6 sm:p-7">
           {/* Primary identity */}
           <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:items-center sm:text-left">
-            <div className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 text-2xl font-black text-black shadow-[0_0_32px_rgba(56,199,101,0.45)]">
+            <div className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-brand to-accent text-2xl font-black text-black shadow-[0_0_32px_rgba(137, 243, 54,0.45)]">
               {initial}
             </div>
             <div className="min-w-0 flex-1">
@@ -82,8 +82,8 @@ export default function Profile({ name, phone, onLogout, stats }: Props) {
               {phone && (
                 <p className="mt-1 font-mono text-[13px] text-white/60">{phone}</p>
               )}
-              <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-emerald-400/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-200 ring-1 ring-emerald-400/30">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
+              <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-brand/10 px-2.5 py-1 text-[11px] font-semibold text-brand-subtle-fg ring-1 ring-brand/30">
+                <span className="h-1.5 w-1.5 rounded-full bg-brand" aria-hidden="true" />
                 Student
               </span>
             </div>
@@ -105,7 +105,7 @@ export default function Profile({ name, phone, onLogout, stats }: Props) {
                 <p className="mt-1 text-[11px] font-medium uppercase tracking-widest text-white/40">Graded</p>
               </div>
               <div className="rounded-xl bg-black/30 px-3 py-4 text-center ring-1 ring-white/10">
-                <p className="text-2xl font-black tabular-nums text-emerald-300">
+                <p className="text-2xl font-black tabular-nums text-brand">
                   {stats?.avgScore == null ? "—" : Math.round(stats.avgScore * 10) / 10}
                 </p>
                 <p className="mt-1 text-[11px] font-medium uppercase tracking-widest text-white/40">Avg score</p>

@@ -13,6 +13,7 @@
  * (Paginated -> `{ data: items[], meta }`), so callers get the array directly.
  */
 import { API_BASE_URL, get, post } from "./api";
+import { TestListSchema, parseOrThrow } from "./schemas";
 
 export type TestSection = "listening" | "reading" | "writing" | "speaking";
 export type QuestionType =
@@ -70,9 +71,10 @@ export interface StartResult {
   savedMarks?: Record<string, { highlights: string[]; note: string | null }>;
 }
 
-/** Active tests visible to the signed-in student. */
-export function listTests(limit = 50): Promise<TestListItem[]> {
-  return get<TestListItem[]>("/tests", { limit });
+/** Active tests visible to the signed-in student. Validated against the backend shape. */
+export async function listTests(limit = 50): Promise<TestListItem[]> {
+  const raw = await get<unknown>("/tests", { limit });
+  return parseOrThrow("GET /tests", TestListSchema, raw);
 }
 
 export function startTest(testId: string): Promise<StartResult> {
