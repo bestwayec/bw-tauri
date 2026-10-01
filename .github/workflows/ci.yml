@@ -63,3 +63,13 @@ jobs:
       - name: Cargo check
         working-directory: src-tauri
         run: cargo check
+
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --message-format short
+
+      - name: Cargo tests
+        working-directory: src-tauri
+        # Needs a full codegen build (heavy); on small machines prefer
+        # `cargo check --tests`. CI runners handle it fine.
+        run: cargo test
