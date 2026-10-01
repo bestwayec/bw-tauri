@@ -51,7 +51,7 @@ function ScoreRing({ score, max }: { score: number; max: number | null }) {
         )}
         <defs>
           <linearGradient id="scoreGrad" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#38c765" />
+            <stop offset="0%" stopColor="#89F336" />
             <stop offset="100%" stopColor="#4cc9f0" />
           </linearGradient>
         </defs>
@@ -72,7 +72,7 @@ export default function Result({ testTitle, autoScore, maxScore, attemptId, mock
     const band = mock.sectionBands?.[mock.skill] ?? mock.overallBand;
     return (
       <section>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-300/70">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-brand/70">
           submitted ✓
         </p>
         <h1 className="mt-1 text-2xl font-black tracking-tight">
@@ -93,7 +93,7 @@ export default function Result({ testTitle, autoScore, maxScore, attemptId, mock
               </>
             ) : (
               <>
-                <p className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-emerald-400/10 text-2xl ring-1 ring-emerald-400/30">📨</p>
+                <p className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-brand/10 text-2xl ring-1 ring-brand/30">📨</p>
                 <p className="mt-3 text-sm font-semibold text-white">Submitted for grading</p>
                 <p className="mt-1 text-xs text-white/40">
                   {MOCK_SKILL_LABEL[mock.skill]} answers are with your teacher now. Check History for the final band.
@@ -106,11 +106,11 @@ export default function Result({ testTitle, autoScore, maxScore, attemptId, mock
             <h2 className="text-sm font-bold text-white">What's next?</h2>
             <ul className="mt-3 space-y-2 text-xs leading-relaxed text-white/50">
               <li className="flex gap-2">
-                <span className="text-emerald-300">→</span>
+                <span className="text-brand">→</span>
                 Pick another section from the exam to keep going.
               </li>
               <li className="flex gap-2">
-                <span className="text-emerald-300">→</span>
+                <span className="text-brand">→</span>
                 Head back to Exams to start your next assigned test.
               </li>
             </ul>
@@ -129,7 +129,7 @@ export default function Result({ testTitle, autoScore, maxScore, attemptId, mock
   }
   return (
     <section>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-300/70">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-brand/70">
         submitted ✓
       </p>
       <h1 className="mt-1 text-2xl font-black tracking-tight">
@@ -148,7 +148,7 @@ export default function Result({ testTitle, autoScore, maxScore, attemptId, mock
             </>
           ) : (
             <>
-              <p className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-emerald-400/10 text-2xl ring-1 ring-emerald-400/30">📨</p>
+              <p className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-brand/10 text-2xl ring-1 ring-brand/30">📨</p>
               <p className="mt-3 text-sm font-semibold text-white">Submitted for grading</p>
               <p className="mt-1 text-xs text-white/40">
                 Writing / speaking answers are with your teacher now. Check History for the final score.
@@ -161,15 +161,15 @@ export default function Result({ testTitle, autoScore, maxScore, attemptId, mock
           <h2 className="text-sm font-bold text-white">What's next?</h2>
           <ul className="mt-3 space-y-2 text-xs leading-relaxed text-white/50">
             <li className="flex gap-2">
-              <span className="text-emerald-300">→</span>
+              <span className="text-brand">→</span>
               Review each answer below — find where it came from in the material.
             </li>
             <li className="flex gap-2">
-              <span className="text-emerald-300">→</span>
+              <span className="text-brand">→</span>
               Open History to track grading progress and final totals.
             </li>
             <li className="flex gap-2">
-              <span className="text-emerald-300">→</span>
+              <span className="text-brand">→</span>
               Head back to Exams to start your next assigned test.
             </li>
           </ul>

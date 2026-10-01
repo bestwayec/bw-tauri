@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AnswerWidgets from "@/components/exam/AnswerWidgets";
+import BlobImage from "@/components/exam/BlobImage";
+import GappedContent, { gapNumbersIn, hasGappedDocument } from "@/components/exam/GappedContent";
 import ListeningPane from "@/components/exam/ListeningPane";
 import SpeakingPane from "@/components/exam/SpeakingPane";
 import {
@@ -242,6 +244,16 @@ export default function MockRunner({ start, section, onExit, onBackToSections, o
   const isLast = groupIdx >= groups.length - 1;
   const audioSrc = group ? mockGroupAudioUrl(group, attemptId, timed && skill === "listening") : null;
   const imageSrc = group ? resolveMockMediaUrl(group.imageUrl) : null;
+  // Gapped rich document (notes/table/summary completion): questions live
+  // INSIDE the document as inline gap inputs, mapped by question number.
+  const hasGapped = hasGappedDocument(group?.contentHtml);
+  const gappedNumbers = useMemo(
+    () => (hasGapped && group ? gapNumbersIn(group.contentHtml!) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- group identity is stable per page; contentHtml read once per group
+    [hasGapped, groupIdx],
+  );
+  const gappedSet = useMemo(() => new Set(gappedNumbers), [gappedNumbers]);
+  const leftoverQuestions = (group?.questions ?? []).filter((q) => !gappedSet.has(q.number));
 
   if (!group) {
     return (
@@ -266,7 +278,7 @@ export default function MockRunner({ start, section, onExit, onBackToSections, o
           ← Sections
         </button>
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-300/70">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-brand/70">
             {MOCK_SKILL_LABEL[skill]} · Part {groupIdx + 1} of {groups.length}
           </p>
           <h1 className="truncate text-lg font-black text-white">
@@ -324,12 +336,15 @@ export default function MockRunner({ start, section, onExit, onBackToSections, o
             </div>
           )}
           {imageSrc && (
-            // eslint-disable-next-line @next/next/no-img-element -- Tauri app (no next/image optimizer); authenticated exam media URL with lazy loading
-            <img src={imageSrc} alt="" loading="lazy" className="mt-3 max-h-96 w-full rounded-2xl border border-white/10 object-contain" />
+            <BlobImage
+              src={imageSrc}
+              alt=""
+              className="mt-3 max-h-96 w-full rounded-2xl border border-white/10 object-contain"
+            />
           )}
-          {group.instructions && skill !== "listening" && (
-            <div className="mt-3 rounded-xl bg-[#19D36B]/[0.06] px-3.5 py-2.5 text-xs leading-relaxed text-emerald-100/90 ring-1 ring-[#19D36B]/20">
-              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#19D36B]/80">Instructions</p>
+          {group.instructions && skill !== "listening" && !hasGapped && (
+            <div className="mt-3 rounded-xl bg-[#89F336]/[0.06] px-3.5 py-2.5 text-xs leading-relaxed text-fg-muted ring-1 ring-[#89F336]/20">
+              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#89F336]/80">Instructions</p>
               <p className="mt-1 whitespace-pre-wrap">{group.instructions}</p>
             </div>
           )}
@@ -337,7 +352,44 @@ export default function MockRunner({ start, section, onExit, onBackToSections, o
 
         {/* Questions — one group per page */}
         <div className="min-w-0 space-y-4">
-          {groupQuestions.map((mq) => {
+          {hasGapped && (
+            <div className="rounded-2xl bg-black/30 p-4 ring-1 ring-white/10">
+              {group.instructions && (
+                <div className="mb-3">
+                  <p className="text-sm font-semibold text-white">
+                    Questions {groupQuestions[0]?.number ?? ""}–{groupQuestions[groupQuestions.length - 1]?.number ?? ""}
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-white/70">{group.instructions}</p>
+                </div>
+              )}
+              <GappedContent
+                contentHtml={group.contentHtml!}
+                questions={groupQuestions}
+                renderGap={({ number, question }) =>
+                  question ? (
+                    <span className="mx-1 inline-flex max-w-full items-center gap-1.5 align-middle">
+                      <span className="grid size-6 shrink-0 place-items-center rounded-full bg-brand-subtle text-xs font-bold text-brand-subtle-fg tabular-nums">
+                        {number}
+                      </span>
+                      <input
+                        value={answers[question.id] ?? ""}
+                        onChange={(e) => setAnswer(question.id, e.target.value)}
+                        aria-label={`Answer for question ${number}`}
+                        autoComplete="off"
+                        spellCheck={false}
+                        className="field inline-flex h-8 min-w-24 w-32 rounded-lg px-2 text-sm sm:w-40"
+                      />
+                    </span>
+                  ) : (
+                    <span className="mx-1 inline-flex rounded bg-red-500/15 px-2 py-1 text-xs text-red-300" role="alert">
+                      Q{number}
+                    </span>
+                  )
+                }
+              />
+            </div>
+          )}
+          {(hasGapped ? leftoverQuestions : groupQuestions).map((mq) => {
             const wq = toWidgetQuestion(mq, skill, group.instructions);
             return (
               <div key={mq.id} className="rounded-2xl bg-black/30 p-4 ring-1 ring-white/10">
@@ -438,12 +490,12 @@ function MultiSelect({ options, value, onChange }: { options: string[]; value: s
               onClick={() => toggle(o)}
               aria-pressed={active}
               className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] ring-1 transition ${
-                active ? "bg-[#19D36B]/12 text-white ring-[#19D36B]/50" : "bg-black/30 text-white/70 ring-white/10 hover:ring-white/25"
+                active ? "bg-[#89F336]/12 text-white ring-[#89F336]/50" : "bg-black/30 text-white/70 ring-white/10 hover:ring-white/25"
               }`}
             >
               <span
                 className={`grid size-5 shrink-0 place-items-center rounded-md border text-[11px] font-bold ${
-                  active ? "border-[#19D36B] bg-[#19D36B] text-black" : "border-white/25 text-white/50"
+                  active ? "border-[#89F336] bg-[#89F336] text-black" : "border-white/25 text-white/50"
                 }`}
               >
                 {active ? "✓" : ""}

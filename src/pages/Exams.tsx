@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { API_BASE_URL } from "@/lib/api";
 import { listTests, startTest, type StartResult, type TestListItem } from "@/lib/tests";
 import {
   listMockExams,
@@ -30,7 +31,7 @@ function Greeting({ name }: { name: string | null }) {
   const part = hour < 5 ? "Good night" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   return (
     <div>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-300/70">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-brand/70">
         {part}{name ? `, ${name.split(" ")[0]}` : ""}
       </p>
       <h1 className="mt-1 text-2xl font-black tracking-tight text-white">Ready for your exam?</h1>
@@ -45,26 +46,43 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
   const [tests, setTests] = useState<TestListItem[] | null>(null);
   const [mocks, setMocks] = useState<MockExamListItem[] | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Per-source errors: a failed source must NEVER look like "no exams".
+  // Each fetch reports its own failure; the empty state renders only when a
+  // source genuinely succeeded with zero items.
+  const [testsError, setTestsError] = useState<string | null>(null);
+  const [mocksError, setMocksError] = useState<string | null>(null);
   const [startingId, setStartingId] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
 
   const load = useCallback(async (showSpinner = true) => {
     if (showSpinner) setLoading(true);
-    setError(null);
-    try {
-      const [tItems, mItems] = await Promise.all([
-        listTests().catch(() => [] as TestListItem[]),
-        listMockExams().catch(() => [] as MockExamListItem[]),
-      ]);
-      setTests(tItems);
-      // Only show published mocks to students; keep demos visible
-      setMocks(mItems.filter((m) => m.isPublished || m.isDemo));
-    } catch (e) {
-      setError(friendlyError(e));
-    } finally {
-      if (showSpinner) setLoading(false);
+    setTestsError(null);
+    setMocksError(null);
+    const [tRes, mRes] = await Promise.all([
+      listTests().then(
+        (v): { ok: true; value: TestListItem[] } => ({ ok: true, value: v }),
+        (e): { ok: false; error: string } => ({ ok: false, error: friendlyError(e) }),
+      ),
+      listMockExams().then(
+        (v): { ok: true; value: MockExamListItem[] } => ({ ok: true, value: v }),
+        (e): { ok: false; error: string } => ({ ok: false, error: friendlyError(e) }),
+      ),
+    ]);
+    if (tRes.ok) {
+      // Students can never start a 0-question exam (backend throws TEST_EMPTY),
+      // so hide them outright — an empty row is always junk (seed leftover or
+      // unfinished admin draft), never a real assigned exam.
+      setTests(tRes.value.filter((t) => t.questionCount > 0));
+    } else {
+      setTestsError(tRes.error);
     }
+    if (mRes.ok) {
+      // Only show published mocks to students; keep demos visible
+      setMocks(mRes.value.filter((m) => (m.isPublished || m.isDemo) && m.questionCount > 0));
+    } else {
+      setMocksError(mRes.error);
+    }
+    if (showSpinner) setLoading(false);
   }, []);
 
   // Auto-fetch on mount + poll + on focus/visibility/online
@@ -129,12 +147,12 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
       <div className="flex items-start justify-between gap-3">
         <Greeting name={studentName} />
         <span className="hidden items-center gap-1.5 text-[11px] text-white/35 sm:inline-flex" aria-live="polite">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" aria-hidden />
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand" aria-hidden />
           Auto-sync
         </span>
       </div>
 
-      {!loading && !error && (tests !== null || mocks !== null) && (
+      {!loading && (tests !== null || mocks !== null) && (
         <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
           <div className="card rounded-2xl p-3 text-center">
             <p className="text-xl font-black text-white">{totalAssigned}</p>
@@ -145,7 +163,7 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
             <p className="mt-0.5 text-[10px] uppercase tracking-widest text-white/40">questions</p>
           </div>
           <div className="card rounded-2xl p-3 text-center">
-            <p className="text-xl font-black text-emerald-300">{readyCount}</p>
+            <p className="text-xl font-black text-brand">{readyCount}</p>
             <p className="mt-0.5 text-[10px] uppercase tracking-widest text-white/40">ready</p>
           </div>
         </div>
@@ -162,15 +180,26 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
         </div>
       )}
 
-      {!loading && error && (
-        <div className="card mt-4 rounded-2xl border border-red-500/30 p-5">
-          <p className="text-sm font-medium text-red-300">Could not load exams</p>
-          <p className="mt-1 text-xs text-white/60">{error}</p>
-          <p className="mt-1 text-[11px] text-white/30">Retrying automatically… check your connection.</p>
+      {!loading && (testsError || mocksError) && (
+        <div className="mt-4 space-y-3" role="alert">
+          {testsError && (
+            <SourceErrorCard
+              source="Tests"
+              detail={testsError}
+              onRetry={() => void load(true)}
+            />
+          )}
+          {mocksError && (
+            <SourceErrorCard
+              source="Mock exams"
+              detail={mocksError}
+              onRetry={() => void load(true)}
+            />
+          )}
         </div>
       )}
 
-      {!loading && !error && allMocks.length === 0 && (
+      {!loading && !testsError && !mocksError && allMocks.length === 0 && (
         <div className="card mt-4 rounded-2xl p-6 text-center">
           <p className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-white/5 text-xl">🎯</p>
           <p className="mt-3 text-sm font-semibold text-white">No exams assigned yet</p>
@@ -180,7 +209,7 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
         </div>
       )}
 
-      {!loading && !error && allMocks.length > 0 && (
+      {!loading && allMocks.length > 0 && (
         <ul className="mt-4 grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
           {allMocks.map((item, idx) => {
             if (item.kind === "test") {
@@ -189,7 +218,7 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
               return (
                 <li
                   key={`test-${t.id}`}
-                  className="card animate-rise group rounded-2xl p-5 transition hover:border-emerald-400/25"
+                  className="card animate-rise group rounded-2xl p-5 transition hover:border-brand/25"
                   style={{ animationDelay: `${Math.min(idx, 8) * 40}ms` }}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -332,6 +361,39 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
         </p>
       )}
     </section>
+  );
+}
+
+/**
+ * Actionable per-source failure card: what failed, why (status/code), which
+ * backend was contacted, and a manual retry. A failed source must never be
+ * mistaken for "no exams assigned".
+ */
+function SourceErrorCard({
+  source,
+  detail,
+  onRetry,
+}: {
+  source: string;
+  detail: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="card rounded-2xl border border-red-500/30 p-5">
+      <p className="text-sm font-medium text-red-300">Could not load {source}</p>
+      <p className="mt-1 text-xs text-white/60">{detail}</p>
+      <p className="mt-1 break-all font-mono text-[11px] text-white/30">API: {API_BASE_URL}</p>
+      <p className="mt-1 text-[11px] text-white/30">
+        Check your connection and that the backend is reachable, then retry. The list also refreshes automatically.
+      </p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="btn-brand mt-3 rounded-xl px-4 py-2 text-sm font-semibold"
+      >
+        Retry
+      </button>
+    </div>
   );
 }
 

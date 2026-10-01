@@ -48,11 +48,13 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
         listMockExams().catch(() => []),
       ]);
       // Include live mock count in assigned so new mocks appear without manual refresh
-      // For overview stats we count tests + published mocks as assigned
-      const publishedMocks = m.filter((x) => x.isPublished || x.isDemo);
+      // For overview stats we count tests + published mocks as assigned.
+      // 0-question rows are junk (never startable) — hide them like Exams does.
+      const tVisible = t.filter((x) => x.questionCount > 0);
+      const publishedMocks = m.filter((x) => (x.isPublished || x.isDemo) && x.questionCount > 0);
       // Merge for display purposes: tests are primary, mocks are additive for stats
       // Keep tests separate for resume logic; mocks only affect assigned/ready counts
-      setTests([...t, ...publishedMocks.map((mm) => ({
+      setTests([...tVisible, ...publishedMocks.map((mm) => ({
         id: mm.id,
         type: mm.type === "multilevel" ? "multilevel" : "ielts",
         title: mm.title,
@@ -126,10 +128,10 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
             src="/logo-transparent.png"
             alt="BestWay"
             draggable={false}
-            className="h-14 w-auto shrink-0 drop-shadow-[0_0_18px_rgba(56,199,101,0.35)]"
+            className="h-14 w-auto shrink-0 drop-shadow-[0_0_18px_rgba(137, 243, 54,0.35)]"
           />
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-300/70">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-brand/70">
               Overview
             </p>
             <h1 className="mt-1 text-2xl font-black tracking-tight text-white">
@@ -144,7 +146,7 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
         </div>
         <div className="flex items-center gap-2">
           <span className="hidden items-center gap-1.5 text-[11px] text-white/35 sm:inline-flex" aria-live="polite">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" aria-hidden />
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand" aria-hidden />
             Auto-sync
           </span>
           <button
@@ -181,7 +183,7 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
               { value: completed > 0 || avg != null ? `${completed}` : "—", label: "completed", accent: false },
             ].map((s) => (
               <div key={s.label} className="card rounded-2xl p-5">
-                <p className={`text-3xl font-black tabular-nums ${s.accent ? "text-emerald-300" : "text-white"}`}>
+                <p className={`text-3xl font-black tabular-nums ${s.accent ? "text-brand" : "text-white"}`}>
                   {s.value}
                 </p>
                 <p className="mt-1 text-[11px] uppercase tracking-widest text-white/40">{s.label}</p>
@@ -234,7 +236,7 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
                 <h2 className="text-sm font-bold text-white">Recent activity</h2>
                 <button
                   onClick={() => onNavigate("history")}
-                  className="text-xs font-semibold text-emerald-300 hover:text-emerald-200"
+                  className="text-xs font-semibold text-brand hover:text-brand-subtle-fg"
                 >
                   Full history →
                 </button>
@@ -250,7 +252,7 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
                       <span
                         className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-xs font-black ${
                           a.status === "completed"
-                            ? "bg-emerald-400/15 text-emerald-200"
+                            ? "bg-brand/15 text-brand-subtle-fg"
                             : a.status === "grading"
                               ? "bg-amber-400/15 text-amber-200"
                               : "bg-sky-400/15 text-sky-200"

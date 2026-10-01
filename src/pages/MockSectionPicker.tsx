@@ -66,7 +66,7 @@ export default function MockSectionPicker({ start, onPick, onBack }: Props) {
                 type="button"
                 disabled={!enabled}
                 onClick={() => section && onPick(section)}
-                className="card group flex w-full items-center gap-4 rounded-2xl p-5 text-left transition enabled:hover:border-emerald-400/25 disabled:opacity-40"
+                className="card group flex w-full items-center gap-4 rounded-2xl p-5 text-left transition enabled:hover:border-brand/25 disabled:opacity-40"
               >
                 <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/5 text-2xl ring-1 ring-white/10">
                   {SKILL_ICON[skill]}

@@ -81,6 +81,12 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Backend the RELEASE build talks to (baked in by Vite at build time).
+          # Required: set the `VITE_API_URL` repo variable (e.g. https://api.bestway.uz/v1).
+          # If it is missing/empty the app falls back to http://localhost:3001/v1 and
+          # shows a fail-loud "points at localhost" banner instead of an empty exam list.
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_WEB_URL: ${{ vars.VITE_WEB_URL }}
           # Updater signing: signs `latest.json` + bundles via minisign.
           # Private key must be stored as a CI secret (never committed).
           # Generate: `npm run tauri signer generate -w ~/.tauri/bestway.key`

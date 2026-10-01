@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useBlobMedia } from "@/lib/media";
 import { getVolume, setVolume, VOLUME_EVENT } from "@/lib/volume";
 
 function fmtTime(sec: number): string {
@@ -31,6 +32,9 @@ type Props = {
  * the real once-only rule without being blocked during practice.
  */
 export default function ListeningPane({ src, title, instructions, strict, onEnded }: Props) {
+  // Remote exam audio needs the student Bearer token (only demo audio is
+  // public), so it is fetched through the API client into a Blob URL.
+  const media = useBlobMedia(src);
   const elRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [cur, setCur] = useState(0);
@@ -89,13 +93,50 @@ export default function ListeningPane({ src, title, instructions, strict, onEnde
 
   const pct = dur > 0 ? Math.min(100, (cur / dur) * 100) : 0;
 
+  if (media.loading) {
+    return (
+      <div>
+        <div className="rounded-2xl bg-black/40 p-4 ring-1 ring-white/10">
+          <p className="flex items-center gap-2 text-xs text-white/50" role="status">
+            <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
+            Loading audio…
+          </p>
+        </div>
+        {instructions && (
+          <div className="mt-3 rounded-xl bg-[#89F336]/[0.06] px-3.5 py-2.5 text-xs leading-relaxed text-fg-muted ring-1 ring-[#89F336]/20">
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#89F336]/80">Instructions</p>
+            <p className="mt-1 whitespace-pre-wrap">{instructions}</p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (media.error || !media.url) {
+    return (
+      <div>
+        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 ring-1 ring-white/10">
+          <p className="text-xs font-semibold text-red-300">Audio failed to load</p>
+          <p className="mt-1 text-[11px] text-red-200/70">{media.error ?? "Unknown media error."}</p>
+          <p className="mt-1 font-mono text-[10px] text-white/30">Sign-in may have expired — re-login and retry.</p>
+        </div>
+        {instructions && (
+          <div className="mt-3 rounded-xl bg-[#89F336]/[0.06] px-3.5 py-2.5 text-xs leading-relaxed text-fg-muted ring-1 ring-[#89F336]/20">
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#89F336]/80">Instructions</p>
+            <p className="mt-1 whitespace-pre-wrap">{instructions}</p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="rounded-2xl bg-black/40 p-4 ring-1 ring-white/10">
         <audio
-          key={src}
+          key={media.url}
           ref={elRef}
-          src={src}
+          src={media.url}
           preload="metadata"
           onPlay={() => {
             setPlaying(true);
@@ -121,7 +162,7 @@ export default function ListeningPane({ src, title, instructions, strict, onEnde
             onClick={toggle}
             disabled={locked}
             aria-label={playing ? "Pause audio" : "Play audio"}
-            className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#19D36B] text-black shadow-[0_0_24px_rgba(25,211,107,0.35)] transition hover:brightness-110 disabled:opacity-40"
+            className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#89F336] text-black shadow-[0_0_24px_rgba(137, 243, 54,0.35)] transition hover:brightness-110 disabled:opacity-40"
           >
             {playing ? (
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -185,7 +226,7 @@ export default function ListeningPane({ src, title, instructions, strict, onEnde
           />
           <span className="font-mono text-[11px] tabular-nums text-white/45">{vol}%</span>
           <div className="ml-auto h-1.5 w-24 overflow-hidden rounded-full bg-white/10" aria-hidden="true">
-            <div className="h-full rounded-full bg-[#19D36B] transition-all" style={{ width: `${pct}%` }} />
+            <div className="h-full rounded-full bg-[#89F336] transition-all" style={{ width: `${pct}%` }} />
           </div>
         </div>
       </div>
@@ -198,8 +239,8 @@ export default function ListeningPane({ src, title, instructions, strict, onEnde
         )}
       </p>
       {instructions && (
-        <div className="mt-3 rounded-xl bg-[#19D36B]/[0.06] px-3.5 py-2.5 text-xs leading-relaxed text-emerald-100/90 ring-1 ring-[#19D36B]/20">
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#19D36B]/80">Instructions</p>
+        <div className="mt-3 rounded-xl bg-[#89F336]/[0.06] px-3.5 py-2.5 text-xs leading-relaxed text-fg-muted ring-1 ring-[#89F336]/20">
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#89F336]/80">Instructions</p>
           <p className="mt-1 whitespace-pre-wrap">{instructions}</p>
         </div>
       )}

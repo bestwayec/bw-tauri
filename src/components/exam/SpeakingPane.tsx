@@ -7,7 +7,7 @@ type Props = {
   fontSize: number;
   /**
    * Mock-exam mode: called with the recorded take so the caller can upload
-   * it for teacher grading. Absent in the legacy tests flow (device-only).
+   * it for teacher grading. Absent in the tests flow (device-only).
    */
   onBlob?: (blob: Blob) => void;
   /** Upload state text shown under the recorder (mock mode only). */
@@ -197,7 +197,7 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote }: P
   return (
     <div>
       <div className="rounded-2xl bg-black/40 p-4 ring-1 ring-white/10">
-        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#19D36B]/80">
+        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#89F336]/80">
           Cue card · Q{num}{part ? ` · ${part}` : ""}
         </p>
         <p className="mt-1.5 whitespace-pre-wrap leading-relaxed text-white/85" style={{ fontSize }}>
@@ -207,9 +207,9 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote }: P
 
       {/* Timers */}
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <div className={`rounded-xl px-3 py-2.5 ring-1 ${prepDone ? "bg-[#19D36B]/10 ring-[#19D36B]/30" : "bg-black/30 ring-white/10"}`}>
+        <div className={`rounded-xl px-3 py-2.5 ring-1 ${prepDone ? "bg-[#89F336]/10 ring-[#89F336]/30" : "bg-black/30 ring-white/10"}`}>
           <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/40">✎ Prepare</p>
-          <p className={`mt-0.5 font-mono text-xl font-black tabular-nums ${prepDone ? "text-[#19D36B]" : "text-white"}`}>
+          <p className={`mt-0.5 font-mono text-xl font-black tabular-nums ${prepDone ? "text-[#89F336]" : "text-white"}`}>
             {prepDone ? "Go! ✓" : fmt(prepLeft)}
           </p>
           <div className="mt-1.5 flex gap-1.5">
@@ -235,9 +235,9 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote }: P
             )}
           </div>
         </div>
-        <div className={`rounded-xl px-3 py-2.5 ring-1 ${speakDone ? "bg-[#19D36B]/10 ring-[#19D36B]/30" : speakRunning ? "bg-amber-400/10 ring-amber-400/30" : "bg-black/30 ring-white/10"}`}>
+        <div className={`rounded-xl px-3 py-2.5 ring-1 ${speakDone ? "bg-[#89F336]/10 ring-[#89F336]/30" : speakRunning ? "bg-amber-400/10 ring-amber-400/30" : "bg-black/30 ring-white/10"}`}>
           <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/40">🎙 Speak</p>
-          <p className={`mt-0.5 font-mono text-xl font-black tabular-nums ${speakDone ? "text-[#19D36B]" : speakRunning ? "text-amber-200" : "text-white"}`}>
+          <p className={`mt-0.5 font-mono text-xl font-black tabular-nums ${speakDone ? "text-[#89F336]" : speakRunning ? "text-amber-200" : "text-white"}`}>
             {speakDone ? "Done ✓" : fmt(speakLeft)}
           </p>
           <div className="mt-1.5 flex gap-1.5">
@@ -279,7 +279,7 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote }: P
               <button
                 type="button"
                 onClick={() => void startRecording()}
-                className="rounded-lg bg-[#19D36B]/10 px-2.5 py-1 text-[11px] font-bold text-[#19D36B] ring-1 ring-[#19D36B]/30 hover:bg-[#19D36B]/20"
+                className="rounded-lg bg-[#89F336]/10 px-2.5 py-1 text-[11px] font-bold text-[#89F336] ring-1 ring-[#89F336]/30 hover:bg-[#89F336]/20"
               >
                 ● Record
               </button>
@@ -301,7 +301,7 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote }: P
           <p role="alert" className="mt-2 text-[11px] leading-relaxed text-amber-200/90">{recError}</p>
         )}
         {uploadNote && (
-          <p className="mt-2 text-[11px] leading-relaxed text-emerald-200/80">{uploadNote}</p>
+          <p className="mt-2 text-[11px] leading-relaxed text-brand-subtle-fg/80">{uploadNote}</p>
         )}
         <p className="mt-1.5 text-[11px] leading-relaxed text-white/25">
           Stays on this device — teachers grade your written notes on the right.

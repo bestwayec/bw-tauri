@@ -5,6 +5,7 @@ import Dashboard from "@/pages/Dashboard";
 import Exams from "@/pages/Exams";
 import History from "@/pages/History";
 import Profile from "@/pages/Profile";
+import Settings from "@/pages/Settings";
 import Runner from "@/pages/Runner";
 import MockSectionPicker from "@/pages/MockSectionPicker";
 import MockRunner from "@/pages/MockRunner";
@@ -32,6 +33,7 @@ export type Route =
   | "exams"
   | "history"
   | "profile"
+  | "settings"
   | "runner"
   | "mockSections"
   | "mockRunner"
@@ -49,6 +51,7 @@ const TITLES: Record<Exclude<Route, "login">, string> = {
   exams: "Exams",
   history: "History",
   profile: "Profile",
+  settings: "Settings",
   runner: "Exam runner",
   mockSections: "Choose section",
   mockRunner: "Mock runner",
@@ -73,7 +76,7 @@ function OnlineDot() {
   return (
     <span className="flex items-center gap-1.5 text-[11px] text-white/45">
       <span
-        className={`h-1.5 w-1.5 rounded-full ${online ? "bg-emerald-400 shadow-[0_0_8px_#38c765]" : "bg-red-400"}`}
+        className={`h-1.5 w-1.5 rounded-full ${online ? "bg-brand shadow-[0_0_8px_#89F336]" : "bg-red-400"}`}
       />
       {online ? "Online" : "Offline"}
     </span>
@@ -90,7 +93,7 @@ export default function App() {
   const [activeTest, setActiveTest] = useState<TestListItem | null>(null);
   const [activeStart, setActiveStart] = useState<StartResult | null>(null);
   const [lastScore, setLastScore] = useState<{ autoScore: number | null } | null>(null);
-  // Mock (IELTS) section-by-section flow — parallel to the legacy tests flow.
+  // Mock (IELTS) section-by-section flow — parallel to the tests flow.
   const [activeMock, setActiveMock] = useState<MockExamListItem | null>(null);
   const [activeMockStart, setActiveMockStart] = useState<MockStartResult | null>(null);
   const [activeMockSection, setActiveMockSection] = useState<MockShapedSection | null>(null);
@@ -288,7 +291,7 @@ export default function App() {
   if (activeRoute === "login") {
     return (
       <>
-        <div className="relative h-screen overflow-y-auto bg-[#050807] text-white">
+        <div className="relative h-screen overflow-y-auto bg-bg text-white">
           {!reduceMotion && (
             <div
               aria-hidden="true"
@@ -298,7 +301,7 @@ export default function App() {
                 particleCount={220}
                 particleSpread={10}
                 speed={0.15}
-                particleColors={["#f7e37c", "#eed154", "#d9b73c"]}
+                particleColors={["#89F336", "#FFED29", "#FF991C"]}
                 alphaParticles
                 particleBaseSize={150}
                 sizeRandomness={0.8}
@@ -342,7 +345,7 @@ export default function App() {
           </div>
         )}
 
-        <ClickSpark sparkColor="#38c765" sparkSize={10} sparkRadius={22} sparkCount={8} duration={420} className="flex min-h-0 flex-1 flex-col">
+        <ClickSpark sparkColor="#89F336" sparkSize={10} sparkRadius={22} sparkCount={8} duration={420} className="flex min-h-0 flex-1 flex-col">
           <main
             className={
               examActive
@@ -379,6 +382,13 @@ export default function App() {
                   name={student?.name ?? null}
                   phone={student?.phone ?? null}
                   stats={stats}
+                  onLogout={() => void handleLogout()}
+                />
+              )}
+              {activeRoute === "settings" && (
+                <Settings
+                  studentName={student?.name ?? null}
+                  studentPhone={student?.phone ?? null}
                   onLogout={() => void handleLogout()}
                 />
               )}

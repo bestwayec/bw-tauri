@@ -3,6 +3,7 @@ dist/
 src-tauri/target/
 .env
 .env.*
+!.env.example
 *.key
 *.pem
 *.log

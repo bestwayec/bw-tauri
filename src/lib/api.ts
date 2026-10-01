@@ -73,6 +73,35 @@ function resolveBaseUrl(): string {
 
 export const API_BASE_URL = resolveBaseUrl();
 
+/** True for vite production builds (tauri bundles + `vite build`). */
+export function isProdBuild(): boolean {
+  try {
+    return typeof import.meta !== "undefined" && import.meta.env?.PROD === true;
+  } catch {
+    return false;
+  }
+}
+
+/** True when a URL points at this device (dev-only backends). */
+export function isLoopbackUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Release-build misconfiguration detector: a PRODUCTION bundle talking to
+ * loopback can only happen when VITE_API_URL was not provided at build time
+ * (see .env.example + release-desktop.yml). Surfaces as a visible banner —
+ * students must never silently get an empty exam list from their own machine.
+ */
+export function isApiMisconfigured(): boolean {
+  return isProdBuild() && isLoopbackUrl(API_BASE_URL);
+}
+
 const ACCESS_KEY = "bestway.accessToken";
 const REFRESH_KEY = "bestway.refreshToken";
 
@@ -341,10 +370,29 @@ export interface AuthSession {
   refreshToken: string;
 }
 
+/**
+ * Normalize a phone number the way the web login form does, so the desktop
+ * never fails lookup on formatting:
+ * - strips spaces, dashes, parens (anything except a leading `+`)
+ * - adds the `+998` country code for bare 9-digit Uzbek numbers
+ *   (`90 123 45 67` -> `+998901234567`)
+ * - adds the missing `+` for `998…` input (`998901234567` -> `+998901234567`)
+ * Anything else is passed through digit-cleaned for the backend to validate.
+ */
+export function normalizePhone(raw: string): string {
+  const t = raw.trim();
+  if (!t) return t;
+  const hasPlus = t.startsWith("+");
+  const digits = t.replace(/\D/g, "");
+  if (!digits) return t;
+  if (hasPlus) return `+${digits}`;
+  if (digits.length === 12 && digits.startsWith("998")) return `+${digits}`;
+  if (digits.length === 9) return `+998${digits}`;
+  return digits;
+}
+
 export async function login(phone: string, password: string): Promise<AuthSession> {
-  // Defense-in-depth: strip spaces like web login-form.tsx so UI callers
-  // can't break lookup with "+998 90 ..." vs stored "+99890...".
-  const normalizedPhone = phone.replace(/\s/g, "");
+  const normalizedPhone = normalizePhone(phone);
   const session = await post<AuthSession>("/auth/login", { phone: normalizedPhone, password }, { token: null });
   if (session?.accessToken) {
     await setSession(session.accessToken, session.refreshToken ?? null);
