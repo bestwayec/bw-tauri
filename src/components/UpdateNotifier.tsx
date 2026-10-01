@@ -7,6 +7,12 @@ import { isSafeHttpUrl } from "@/lib/secure-storage";
 type Props = {
   update: UpdateInfo;
   onClose: () => void;
+  /**
+   * True while an exam attempt is on screen. The install/relaunch button is
+   * hidden so an update can NEVER restart the app mid-exam; the toast simply
+   * waits until the exam ends (the update check itself already ran).
+   */
+  deferInstall?: boolean;
 };
 
 type Status = "idle" | "checking" | "downloading" | "installing" | "opening" | "error";
@@ -25,7 +31,7 @@ type Status = "idle" | "checking" | "downloading" | "installing" | "opening" | "
  * Dismissal plays a soft blur + scale-down exit via motion, persists the
  * dismissed version (same version never nags twice), then unmounts.
  */
-export default function UpdateNotifier({ update, onClose }: Props) {
+export default function UpdateNotifier({ update, onClose, deferInstall }: Props) {
   const [dismissed, setDismissed] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
   const [progress, setProgress] = useState<number | null>(null);
@@ -185,15 +191,21 @@ export default function UpdateNotifier({ update, onClose }: Props) {
               </div>
             </div>
 
-            {(update.downloadUrl || status !== "idle") && (
-              <button
-                type="button"
-                onClick={() => void handleAction()}
-                disabled={busy}
-                className="btn-ghost w-full rounded-lg px-3 py-2 text-[13px] font-semibold text-white disabled:opacity-60"
-              >
-                {label}
-              </button>
+            {deferInstall ? (
+              <p className="w-full text-xs leading-snug text-white/50">
+                An exam is in progress — the update will install after you finish. Nothing restarts meanwhile.
+              </p>
+            ) : (
+              (update.downloadUrl || status !== "idle") && (
+                <button
+                  type="button"
+                  onClick={() => void handleAction()}
+                  disabled={busy}
+                  className="btn-ghost w-full rounded-lg px-3 py-2 text-[13px] font-semibold text-white disabled:opacity-60"
+                >
+                  {label}
+                </button>
+              )
             )}
             {status === "downloading" && progress != null && (
               <div

@@ -61,11 +61,10 @@ pub fn should_reuse_stored(stored_access: Option<&str>, expected_access: Option<
     }
 }
 
-/// Backend verdicts that definitively end a session live in JS
-/// (`DEFINITIVE_LOGOUT_CODES` in `src/lib/session-store.ts`, unit-tested
-/// there next to the wipe policy). Rust only transports the verdict code.
-/// Same split for offline backoff: the retry loop runs in JS.
-
+// Backend verdicts that definitively end a session live in JS
+// (`DEFINITIVE_LOGOUT_CODES` in `src/lib/session-store.ts`, unit-tested
+// there next to the wipe policy). Rust only transports the verdict code.
+// Same split for offline backoff: the retry loop runs in JS.
 
 // ---------------------------------------------------------------------------
 // Disk layout: keyring first, atomic file fallback
@@ -83,7 +82,7 @@ fn read_file_store(dir: &Path) -> Option<SessionData> {
 /// Atomic write (temp file + rename) with restricted permissions on unix.
 fn write_file_store(dir: &Path, data: &SessionData) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
-    let raw = serde_json::to_vec(data).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let raw = serde_json::to_vec(data).map_err(std::io::Error::other)?;
     let tmp = dir.join(format!("{SESSION_FILE}.tmp"));
     std::fs::write(&tmp, raw)?;
     #[cfg(unix)]

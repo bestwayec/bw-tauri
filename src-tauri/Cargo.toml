@@ -43,3 +43,13 @@ x11rb = { version = "0.13", features = ["allow-unsafe-code"] }
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+# Exam PCs are slow: optimize for speed, strip symbols for size.
+# If installer size matters more than cold start, try opt-level = "s"
+# and compare cold-start + bundle numbers before keeping it.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

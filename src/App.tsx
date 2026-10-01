@@ -19,6 +19,7 @@ import ExitConfirmModal from "@/components/ExitConfirmModal";
 import ReauthModal from "@/components/ReauthModal";
 import { checkForUpdate, getDismissedVersion, type UpdateInfo } from "@/lib/version";
 import ClickSpark from "@/components/ClickSpark";
+import CrashRecovery from "@/components/CrashRecovery";
 import { logout } from "@/lib/api";
 import { useSessionStore } from "@/lib/session-store";
 import type { StartResult, TestListItem } from "@/lib/tests";
@@ -475,10 +476,11 @@ export default function App() {
         </ClickSpark>
       </div>
     </div>
-    {update && <UpdateNotifier update={update} onClose={() => setUpdate(null)} />}
+    {update && <UpdateNotifier update={update} onClose={() => setUpdate(null)} deferInstall={examActive} />}
     {showSplash && <BootSplash exiting={introLeaving} />}
     <ExitConfirmModal open={showExitConfirm} onCancel={handleCancelExit} onConfirm={handleConfirmExit} />
     <ReauthModal open={showReauth} phone={student?.phone ?? null} onDone={() => setShowReauth(false)} />
+    <CrashRecovery />
     </>
   );
 }

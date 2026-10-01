@@ -2,6 +2,7 @@
 
 mod battery;
 mod lockdown;
+mod logger;
 mod session;
 mod tray;
 
@@ -14,11 +15,6 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 pub struct LockState(pub AtomicBool);
 
 #[tauri::command]
-fn get_battery() -> battery::BatteryInfo {
-    battery::get_battery()
-}
-
-#[tauri::command]
 fn set_locked(
     app: tauri::AppHandle,
     locked: bool,
@@ -28,6 +24,7 @@ fn set_locked(
 
     if let Some(window) = app.get_webview_window("main") {
         lockdown::set_kiosk(&window, locked)?;
+        logger::log_line("INFO", if locked { "exam lock engaged" } else { "exam lock released" });
     } else {
         return Err("main window not found".to_string());
     }
@@ -80,6 +77,7 @@ fn main() {
     tauri::Builder::default()
         .manage(LockState(AtomicBool::new(false)))
         .manage(session::SessionStore::new())
+        .manage(battery::BatteryCache::new())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
@@ -120,6 +118,8 @@ fn main() {
                     if let Err(e) = std::fs::create_dir_all(&dir) {
                         eprintln!("[session] app data dir unavailable: {e}");
                     }
+                    logger::init(&dir);
+                    logger::log_line("INFO", "app starting");
                     app.state::<session::SessionStore>().init_app_dir(dir);
                 }
                 Err(e) => eprintln!("[session] app data dir unavailable: {e}"),
@@ -127,6 +127,10 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                // The window is gone: no kiosk state may survive it.
+                lockdown::release_all();
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let locked = window
                     .app_handle()
@@ -145,7 +149,7 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            get_battery,
+            battery::get_battery,
             set_locked,
             clear_clipboard,
             minimize_to_tray,
@@ -160,6 +164,11 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building Bestway Exam")
         .run(|app, event| {
+            // Any process exit path releases OS lockdown primitives first.
+            // (Borrow only — the ExitRequested branch below moves `event`.)
+            if matches!(&event, tauri::RunEvent::Exit) {
+                lockdown::release_all();
+            }
             // Cmd+Q / Alt+F4 / tray-quit arrive here as ExitRequested.
             // Veto while locked so the exam cannot be bypassed.
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
@@ -170,6 +179,8 @@ fn main() {
                 if locked {
                     api.prevent_exit();
                     tray::show_main(app);
+                } else {
+                    lockdown::release_all();
                 }
             }
         });
