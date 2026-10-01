@@ -33,7 +33,7 @@ function webBaseUrl(): string {
       ? ((import.meta.env?.BESTWAY_WEB_URL as string | undefined) ??
         (import.meta.env?.VITE_WEB_URL as string | undefined))
       : undefined;
-  const raw = (fromEnv ?? "http://localhost:3005").trim().replace(/\/+$/, "");
+  const raw = (fromEnv || "http://localhost:3005").trim().replace(/\/+$/, "");
   // Block javascript:/data: injection via env tampering; fallback to default.
   const lower = raw.toLowerCase();
   if (

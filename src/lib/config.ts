@@ -13,7 +13,7 @@ function resolveBaseUrl(): string {
       ? ((import.meta.env?.BESTWAY_API_URL as string | undefined) ??
         (import.meta.env?.VITE_API_URL as string | undefined))
       : undefined;
-  const raw = (fromEnv ?? DEFAULT_BASE_URL).trim();
+  const raw = (fromEnv || DEFAULT_BASE_URL).trim();
   // Block javascript:/data:/file: injection if env is tampered.
   const lower = raw.toLowerCase();
   if (
