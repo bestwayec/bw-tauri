@@ -163,9 +163,20 @@ export default function ExamRunner(p: ExamRunnerProps) {
   useEffect(
     () => () => {
       if (persistTimer.current) window.clearTimeout(persistTimer.current);
+      if (flushTimer.current) window.clearTimeout(flushTimer.current);
     },
     [],
   );
+  const flushTimer = useRef<number | null>(null);
+
+  // Debounced autosave: flush ~800ms after the last keystroke (batched via
+  // /answers), on top of the 15s interval + part-change + submit flushes.
+  function scheduleFlush() {
+    if (flushTimer.current) window.clearTimeout(flushTimer.current);
+    flushTimer.current = window.setTimeout(() => {
+      void flush().catch(() => undefined);
+    }, 800);
+  }
   const submittingRef = useRef(false);
   const submittedRef = useRef(false);
   const dividerRef = useRef<HTMLDivElement | null>(null);
@@ -242,6 +253,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
       dirty.current.add(qid);
       setSaveState("saving");
       persistQueue();
+      scheduleFlush();
     }
   }
 

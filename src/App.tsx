@@ -1,19 +1,21 @@
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
-import Login from "@/pages/Login";
-import Dashboard from "@/pages/Dashboard";
-import Exams from "@/pages/Exams";
-import History from "@/pages/History";
-import Profile from "@/pages/Profile";
-import Settings from "@/pages/Settings";
-import TestRunner from "@/pages/TestRunner";
-import MockSectionPicker from "@/pages/MockSectionPicker";
-import MockExam from "@/pages/MockExam";
-import Locked from "@/pages/Locked";
-import Result from "@/pages/Result";
+// Route-split: heavy screens (three.js splash, exam runners) load on demand
+// so the initial bundle stays lean on lab hardware.
+const Login = lazy(() => import("@/pages/Login"));
+const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const Exams = lazy(() => import("@/pages/Exams"));
+const History = lazy(() => import("@/pages/History"));
+const Profile = lazy(() => import("@/pages/Profile"));
+const Settings = lazy(() => import("@/pages/Settings"));
+const TestRunner = lazy(() => import("@/pages/TestRunner"));
+const MockSectionPicker = lazy(() => import("@/pages/MockSectionPicker"));
+const MockExam = lazy(() => import("@/pages/MockExam"));
+const Locked = lazy(() => import("@/pages/Locked"));
+const Result = lazy(() => import("@/pages/Result"));
+const BootSplash = lazy(() => import("@/components/BootSplash"));
+const Particles = lazy(() => import("@/components/Particles"));
 import Sidebar from "@/components/Sidebar";
-import BootSplash from "@/components/BootSplash";
-import Particles from "@/components/Particles";
 import UpdateNotifier from "@/components/UpdateNotifier";
 import ExitConfirmModal from "@/components/ExitConfirmModal";
 import ReauthModal from "@/components/ReauthModal";
@@ -304,25 +306,34 @@ export default function App() {
               aria-hidden="true"
               className="pointer-events-none absolute inset-0 opacity-85 [mask-image:radial-gradient(ellipse_85%_75%_at_50%_45%,black_30%,transparent_100%)]"
             >
-              <Particles
-                particleCount={220}
-                particleSpread={10}
-                speed={0.15}
-                particleColors={["#89F336", "#FFED29", "#FF991C"]}
-                alphaParticles
-                particleBaseSize={150}
-                sizeRandomness={0.8}
-                cameraDistance={20}
-              />
+              <Suspense fallback={null}>
+                <Particles
+                  particleCount={220}
+                  particleSpread={10}
+                  speed={0.15}
+                  particleColors={["#89F336", "#FFED29", "#FF991C"]}
+                  alphaParticles
+                  particleBaseSize={150}
+                  sizeRandomness={0.8}
+                  cameraDistance={20}
+                />
+              </Suspense>
             </div>
           )}
           <main className="relative flex min-h-full items-center justify-center p-6">
             <div className="w-full max-w-md">
-              <Login onLogin={handleLogin} />
+              <Suspense fallback={null}>
+                <Login onLogin={handleLogin} />
+              </Suspense>
             </div>
           </main>
         </div>
-        {showSplash && <BootSplash exiting={introLeaving} />}
+        {showSplash && (
+          <Suspense fallback={null}>
+            <BootSplash exiting={introLeaving} />
+          </Suspense>
+        )}
+        <CrashRecovery />
       </>
     );
   }
@@ -352,21 +363,55 @@ export default function App() {
           </div>
         )}
 
-        <ClickSpark sparkColor="#89F336" sparkSize={10} sparkRadius={22} sparkCount={8} duration={420} className="flex min-h-0 flex-1 flex-col">
-          <main
-            className={
-              examActive
-                ? "flex min-h-0 flex-1 flex-col overflow-hidden"
-                : "min-h-0 flex-1 overflow-y-auto px-6 pb-8 pt-6 2xl:px-10"
-            }
-          >
+        {examActive ? (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <div className="flex min-h-0 flex-1 flex-col">
+                <Suspense fallback={null}>
+                  {activeRoute === "runner" && activeTest && activeStart && (
+                    <TestRunner
+                      test={activeTest}
+                      start={activeStart}
+                      studentName={student?.name ?? null}
+                      onExit={handleExitExam}
+                      onFinish={handleFinishExam}
+                    />
+                  )}
+                  {activeRoute === "mockSections" && activeMockStart && (
+                    <MockSectionPicker
+                      start={activeMockStart}
+                      onPick={(section) => {
+                        setActiveMockSection(section);
+                        navigate("mockRunner");
+                      }}
+                      onBack={handleBackToExams}
+                    />
+                  )}
+                  {activeRoute === "mockRunner" && activeMockStart && activeMockSection && (
+                    <MockExam
+                      start={activeMockStart}
+                      section={activeMockSection}
+                      studentName={student?.name ?? null}
+                      onExit={handleExitExam}
+                      onBackToSections={() => navigate("mockSections")}
+                      onFinish={handleFinishMock}
+                    />
+                  )}
+                  {activeRoute === "locked" && <Locked onBack={handleBackToExams} />}
+                </Suspense>
+              </div>
+            </main>
+          </div>
+        ) : (
+          <ClickSpark sparkColor="#89F336" sparkSize={10} sparkRadius={22} sparkCount={8} duration={420} className="flex min-h-0 flex-1 flex-col">
+          <main className="min-h-0 flex-1 overflow-y-auto px-6 pb-8 pt-6 2xl:px-10">
             <motion.div
               key={activeRoute + (activeRoute === "result" ? historyKey : "")}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.18, ease: "easeOut" }}
-              className={examActive ? "flex min-h-0 flex-1 flex-col" : undefined}
             >
+              <Suspense fallback={null}>
               {activeRoute === "dashboard" && (
                 <Dashboard
                   studentName={student?.name ?? null}
@@ -399,57 +444,6 @@ export default function App() {
                   onLogout={() => void handleLogout()}
                 />
               )}
-              {activeRoute === "runner" && activeTest && activeStart && (
-                <TestRunner
-                  test={activeTest}
-                  start={activeStart}
-                  studentName={student?.name ?? null}
-                  onExit={handleExitExam}
-                  onFinish={handleFinishExam}
-                />
-              )}
-              {activeRoute === "runner" && (!activeTest || !activeStart) && (
-                <Exams
-                  studentName={student?.name ?? null}
-                  onStart={handleStartExam}
-                  onStartMock={handleStartMock}
-                />
-              )}
-              {activeRoute === "mockSections" && activeMockStart && (
-                <MockSectionPicker
-                  start={activeMockStart}
-                  onPick={(section) => {
-                    setActiveMockSection(section);
-                    navigate("mockRunner");
-                  }}
-                  onBack={handleBackToExams}
-                />
-              )}
-              {activeRoute === "mockSections" && !activeMockStart && (
-                <Exams
-                  studentName={student?.name ?? null}
-                  onStart={handleStartExam}
-                  onStartMock={handleStartMock}
-                />
-              )}
-              {activeRoute === "mockRunner" && activeMockStart && activeMockSection && (
-                <MockExam
-                  start={activeMockStart}
-                  section={activeMockSection}
-                  studentName={student?.name ?? null}
-                  onExit={handleExitExam}
-                  onBackToSections={() => navigate("mockSections")}
-                  onFinish={handleFinishMock}
-                />
-              )}
-              {activeRoute === "mockRunner" && (!activeMockStart || !activeMockSection) && (
-                <Exams
-                  studentName={student?.name ?? null}
-                  onStart={handleStartExam}
-                  onStartMock={handleStartMock}
-                />
-              )}
-              {activeRoute === "locked" && <Locked onBack={handleBackToExams} />}
               {activeRoute === "result" && (
                 <Result
                   testTitle={activeMock?.title ?? activeTest?.title ?? null}
@@ -471,13 +465,19 @@ export default function App() {
                   onHistory={() => navigate("history")}
                 />
               )}
+              </Suspense>
             </motion.div>
           </main>
-        </ClickSpark>
+          </ClickSpark>
+        )}
       </div>
     </div>
     {update && <UpdateNotifier update={update} onClose={() => setUpdate(null)} deferInstall={examActive} />}
-    {showSplash && <BootSplash exiting={introLeaving} />}
+    {showSplash && (
+      <Suspense fallback={null}>
+        <BootSplash exiting={introLeaving} />
+      </Suspense>
+    )}
     <ExitConfirmModal open={showExitConfirm} onCancel={handleCancelExit} onConfirm={handleConfirmExit} />
     <ReauthModal open={showReauth} phone={student?.phone ?? null} onDone={() => setShowReauth(false)} />
     <CrashRecovery />
