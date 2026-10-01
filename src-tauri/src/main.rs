@@ -2,6 +2,7 @@
 
 mod battery;
 mod lockdown;
+mod session;
 mod tray;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -78,6 +79,7 @@ fn quit_app(app: tauri::AppHandle, state: tauri::State<'_, LockState>) -> Result
 fn main() {
     tauri::Builder::default()
         .manage(LockState(AtomicBool::new(false)))
+        .manage(session::SessionStore::new())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
@@ -111,6 +113,17 @@ fn main() {
             if let Err(e) = tray::build_tray(app.handle()) {
                 eprintln!("[tray] failed to build tray icon: {e}");
             }
+            // Resolve the durable session dir, then reload disk state so a
+            // refresh that landed just before a restart is never lost.
+            match app.path().app_data_dir() {
+                Ok(dir) => {
+                    if let Err(e) = std::fs::create_dir_all(&dir) {
+                        eprintln!("[session] app data dir unavailable: {e}");
+                    }
+                    app.state::<session::SessionStore>().init_app_dir(dir);
+                }
+                Err(e) => eprintln!("[session] app data dir unavailable: {e}"),
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -137,7 +150,12 @@ fn main() {
             clear_clipboard,
             minimize_to_tray,
             show_main_window,
-            quit_app
+            quit_app,
+            session::session_get,
+            session::session_set,
+            session::session_clear,
+            session::auth_refresh,
+            session::auth_logout
         ])
         .build(tauri::generate_context!())
         .expect("error while building Bestway Exam")

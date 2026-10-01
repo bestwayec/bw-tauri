@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getAccessToken, getRefreshToken, refresh } from "./api";
+import { getAccessToken, refresh } from "./api";
 
 /**
  * Authenticated media loading for exam audio/images.
@@ -36,15 +36,13 @@ export async function fetchAuthenticatedMedia(url: string, signal?: AbortSignal)
 
   let res = await attempt(await getAccessToken());
   if (res.status === 401) {
-    const refreshToken = await getRefreshToken();
-    if (refreshToken) {
-      try {
-        await refresh();
-      } catch {
-        /* refresh failed — fall through to the 401 below */
-      }
-      res = await attempt(await getAccessToken());
+    // Single-flight refresh (throws when no session or verdict definitive).
+    try {
+      await refresh();
+    } catch {
+      /* refresh failed — fall through to the 401 below */
     }
+    res = await attempt(await getAccessToken());
   }
   if (!res.ok) throw toMediaError(res.status);
   return await res.blob();

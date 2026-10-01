@@ -1,22 +1,18 @@
-import {
-  enforceSecureOrigin,
-  getMemoryCached,
-  primeMemoryCache,
-  secureGetItemAsync,
-  secureRemoveItemAsync,
-  secureSetItemAsync,
-} from "./secure-storage";
+import { enforceSecureOrigin } from "./secure-storage";
+import { API_BASE_URL } from "./config";
+import { getSessionAccessToken, useSessionStore } from "./session-store";
+
+export { API_BASE_URL, isApiMisconfigured, isLoopbackUrl, isProdBuild } from "./config";
 
 /**
  * Direct fetch client for the BestWay backend.
  *
  * - Base URL: `VITE_API_URL` or `http://localhost:3001/v1`
- * - Auth: Bearer access token from session (memory + AES-GCM encrypted localStorage)
+ * - Auth: Bearer access token from the single session store
+ *   (session-store.ts; Rust-owned in Tauri, encrypted localStorage in browser)
  * - No Next.js proxy — Tauri talks straight to the backend.
- * - At-rest: tokens are AES-GCM-256 encrypted via crypto.subtle (PBKDF2 120k
- *   from deviceId + per-value salt), format `enc:v2:<salt>:<iv>:<ct>`
- *   (secure-storage.ts). Legacy `enc:v1:` (XOR) / plaintext migrate silently.
- *   When subtle is unavailable, tokens stay memory-only (fail safe).
+ * - Refresh is single-flight and Rust-owned; the session is wiped ONLY on
+ *   definitive backend verdicts, never on network errors.
  * - Network: 15s default timeout (10s auth), https-enforce warning outside loopback.
  */
 
@@ -49,65 +45,6 @@ export type QueryValue =
 
 export type QueryParams = Record<string, QueryValue>;
 
-const DEFAULT_BASE_URL = "http://localhost:3001/v1";
-
-function resolveBaseUrl(): string {
-  const fromEnv =
-    typeof import.meta !== "undefined"
-      ? ((import.meta.env?.BESTWAY_API_URL as string | undefined) ??
-        (import.meta.env?.VITE_API_URL as string | undefined))
-      : undefined;
-  const raw = (fromEnv ?? DEFAULT_BASE_URL).trim();
-  // Block javascript:/data:/file: injection if env is tampered.
-  const lower = raw.toLowerCase();
-  if (
-    lower.startsWith("javascript:") ||
-    lower.startsWith("data:") ||
-    lower.startsWith("file:") ||
-    lower.startsWith("vbscript:")
-  ) {
-    return DEFAULT_BASE_URL;
-  }
-  return raw.replace(/\/+$/, "");
-}
-
-export const API_BASE_URL = resolveBaseUrl();
-
-/** True for vite production builds (tauri bundles + `vite build`). */
-export function isProdBuild(): boolean {
-  try {
-    return typeof import.meta !== "undefined" && import.meta.env?.PROD === true;
-  } catch {
-    return false;
-  }
-}
-
-/** True when a URL points at this device (dev-only backends). */
-export function isLoopbackUrl(url: string): boolean {
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    return host === "localhost" || host === "127.0.0.1" || host === "::1";
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Release-build misconfiguration detector: a PRODUCTION bundle talking to
- * loopback can only happen when VITE_API_URL was not provided at build time
- * (see .env.example + release-desktop.yml). Surfaces as a visible banner —
- * students must never silently get an empty exam list from their own machine.
- */
-export function isApiMisconfigured(): boolean {
-  return isProdBuild() && isLoopbackUrl(API_BASE_URL);
-}
-
-const ACCESS_KEY = "bestway.accessToken";
-const REFRESH_KEY = "bestway.refreshToken";
-
-let memoryAccessToken: string | null = null;
-let memoryRefreshToken: string | null = null;
-
 // Warn once if prod build left on cleartext http outside loopback.
 try {
   enforceSecureOrigin(API_BASE_URL);
@@ -115,85 +52,46 @@ try {
   /* ignore */
 }
 
-async function readStorage(key: string): Promise<string | null> {
-  const v = await secureGetItemAsync(key);
-  primeMemoryCache(key, v);
-  return v;
-}
-
-async function writeStorage(key: string, value: string | null): Promise<void> {
-  primeMemoryCache(key, value);
-  if (value === null) await secureRemoveItemAsync(key);
-  else await secureSetItemAsync(key, value);
-}
-
-/** Sync in-memory read for hot paths (request headers). Hydrated by init/set. */
+/** Sync in-memory read for hot paths (request headers). Owned by the session store. */
 export function getAccessTokenCached(): string | null {
-  return memoryAccessToken ?? getMemoryCached(ACCESS_KEY);
+  return getSessionAccessToken();
 }
 
-/** Sync in-memory read for hot paths. Hydrated by init/set. */
+/**
+ * Sync in-memory read for hot paths. The refresh token is Rust-owned and
+ * never exposed to JS — this always returns null. Kept for compatibility.
+ */
 export function getRefreshTokenCached(): string | null {
-  return memoryRefreshToken ?? getMemoryCached(REFRESH_KEY);
+  return null;
 }
 
 export async function getAccessToken(): Promise<string | null> {
-  if (memoryAccessToken) return memoryAccessToken;
-  const cached = getMemoryCached(ACCESS_KEY);
-  if (cached) {
-    memoryAccessToken = cached;
-    return cached;
-  }
-  const v = await readStorage(ACCESS_KEY);
-  if (v) memoryAccessToken = v;
-  return v;
+  return getSessionAccessToken();
 }
 
+/** Refresh tokens are Rust-owned (or encrypted at-rest in browser dev) — never exposed. */
 export async function getRefreshToken(): Promise<string | null> {
-  if (memoryRefreshToken) return memoryRefreshToken;
-  const cached = getMemoryCached(REFRESH_KEY);
-  if (cached) {
-    memoryRefreshToken = cached;
-    return cached;
-  }
-  const v = await readStorage(REFRESH_KEY);
-  if (v) memoryRefreshToken = v;
-  return v;
+  return null;
 }
 
-/** Hydrate in-memory tokens from encrypted disk (runs v1/plaintext migration). */
+/** Boot the single session store (migrates legacy storage, revalidates). */
 export async function initSecureSession(): Promise<void> {
-  try {
-    const [a, r] = await Promise.all([readStorage(ACCESS_KEY), readStorage(REFRESH_KEY)]);
-    memoryAccessToken = a;
-    memoryRefreshToken = r;
-  } catch {
-    /* storage failure is non-fatal — session simply starts empty */
-  }
+  await useSessionStore.getState().initialize();
 }
 
 export async function setSession(
   accessToken: string | null,
   refreshToken?: string | null,
 ): Promise<void> {
-  memoryAccessToken = accessToken;
-  await writeStorage(ACCESS_KEY, accessToken);
-  if (refreshToken !== undefined) {
-    memoryRefreshToken = refreshToken;
-    await writeStorage(REFRESH_KEY, refreshToken);
-  } else if (accessToken === null) {
-    // Clearing the access token without an explicit refresh value must not
-    // leave a stale refresh token behind (split-brain logout).
-    memoryRefreshToken = null;
-    await writeStorage(REFRESH_KEY, null);
+  if (accessToken === null) {
+    await useSessionStore.getState().wipeLocal();
+    return;
   }
+  await useSessionStore.getState().setSession({ accessToken, refreshToken });
 }
 
 export async function clearSession(): Promise<void> {
-  memoryAccessToken = null;
-  memoryRefreshToken = null;
-  await writeStorage(ACCESS_KEY, null);
-  await writeStorage(REFRESH_KEY, null);
+  await useSessionStore.getState().wipeLocal();
 }
 
 /** Build `?a=1&b=2` query string from a params object. Returns `""` when empty. */
@@ -255,7 +153,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   const { query, body, token, headers, _retried, signal: callerSignal, ...rest } = options as RequestOptions & { signal?: AbortSignal };
   const url = `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}${buildQuery(query)}`;
 
-  const accessToken = token !== undefined ? token : getAccessTokenCached() ?? (await getAccessToken());
+  const accessToken = token !== undefined ? token : getAccessTokenCached();
   const hasJsonBody = body !== undefined && typeof body !== "string";
 
   const isAuthEndpoint = isAuthPath(path);
@@ -295,20 +193,17 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
   if (!res.ok) {
     const err = toApiError(res.status, payload, `Request failed: ${res.status}`);
-    // Transparent refresh like the web proxy (frontend/src/app/api/backend/[...path]/route.ts):
-    // on first 401, try POST /auth/refresh once, then retry the original request.
+    // Transparent single-flight refresh (session-store owns rotation):
+    // on first 401, refresh once, then retry the original request.
     // Skip for auth endpoints themselves to avoid infinite loops.
+    // The store wipes ONLY on definitive verdicts; transient failures keep
+    // the session and fall through to the original error below.
     if ((res.status === 401 || err.code === "SESSION_EXPIRED") && !_retried && !isAuthEndpoint) {
       try {
         await refresh();
         return request<T>(path, { ...options, _retried: true });
       } catch {
         // Refresh failed — fall through to the original 401 below.
-        // If the refresh token was reused, backend returns SESSION_EXPIRED;
-        // wipe local session so the user is forced to re-login.
-        if (await getRefreshToken()) {
-          // Keep tokens; caller decides. Only wipe when refresh itself says expired.
-        }
       }
     }
     throw err;
@@ -395,29 +290,29 @@ export async function login(phone: string, password: string): Promise<AuthSessio
   const normalizedPhone = normalizePhone(phone);
   const session = await post<AuthSession>("/auth/login", { phone: normalizedPhone, password }, { token: null });
   if (session?.accessToken) {
-    await setSession(session.accessToken, session.refreshToken ?? null);
+    await useSessionStore.getState().setSession({
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken ?? null,
+      profile: session.user?.id
+        ? {
+            id: session.user.id,
+            name: typeof session.user.name === "string" ? session.user.name : null,
+            phone: typeof session.user.phone === "string" ? session.user.phone : null,
+            role: typeof session.user.role === "string" ? session.user.role : undefined,
+          }
+        : null,
+    });
   }
   return session;
 }
 
-export async function refresh(): Promise<AuthSession> {
-  const refreshToken = await getRefreshToken();
-  if (!refreshToken) {
-    throw { code: "NO_REFRESH_TOKEN", message: "No refresh token in session", status: 401 } as ApiError;
-  }
-  try {
-    const session = await post<AuthSession>("/auth/refresh", { refreshToken }, { token: null });
-    if (session?.accessToken) {
-      await setSession(session.accessToken, session.refreshToken ?? refreshToken);
-    }
-    return session;
-  } catch (e) {
-    // Reuse detection / expiry means the whole family is revoked server-side.
-    // Wipe local tokens so the UI falls back to login instead of looping 401s.
-    const code = (e as ApiError)?.code;
-    if (code === "SESSION_EXPIRED" || code === "INVALID_REFRESH_TOKEN") await clearSession();
-    throw e;
-  }
+/**
+ * Single-flight refresh owned by the session store (Rust serializes the
+ * actual rotation). Resolves the fresh access token; the store has already
+ * wiped the session when the backend verdict is definitive.
+ */
+export async function refresh(): Promise<string> {
+  return useSessionStore.getState().refreshNow();
 }
 
 export interface MeResponse {
@@ -431,18 +326,7 @@ export async function me(): Promise<MeResponse> {
 }
 
 export async function logout(): Promise<void> {
-  const refreshToken = await getRefreshToken();
-  // No refresh token: local-only logout. POSTing `{}` would make the backend
-  // revoke ALL sessions for the user (deleteMany by userId) — not intended.
-  if (!refreshToken) {
-    await clearSession();
-    return;
-  }
-  try {
-    await post<void>("/auth/logout", { refreshToken });
-  } catch {
-    // Logout is best-effort; always clear local session.
-  } finally {
-    await clearSession();
-  }
+  // Server revoke (Rust-owned refresh token, or legacy POST) + local wipe.
+  // Best-effort either way: explicit sign-out always ends the local session.
+  await useSessionStore.getState().logout();
 }

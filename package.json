@@ -9,6 +9,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "mock:server": "node tools/mock-server/server.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

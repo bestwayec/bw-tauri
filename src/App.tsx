@@ -16,9 +16,11 @@ import BootSplash from "@/components/BootSplash";
 import Particles from "@/components/Particles";
 import UpdateNotifier from "@/components/UpdateNotifier";
 import ExitConfirmModal from "@/components/ExitConfirmModal";
+import ReauthModal from "@/components/ReauthModal";
 import { checkForUpdate, getDismissedVersion, type UpdateInfo } from "@/lib/version";
 import ClickSpark from "@/components/ClickSpark";
-import { clearSession, getAccessToken, getRefreshToken, initSecureSession, logout, me, refresh } from "@/lib/api";
+import { logout } from "@/lib/api";
+import { useSessionStore } from "@/lib/session-store";
 import type { StartResult, TestListItem } from "@/lib/tests";
 import type {
   MockExamListItem,
@@ -149,52 +151,58 @@ export default function App() {
     return () => window.clearTimeout(t);
   }, [student]);
 
-  // Restore persisted session (api.ts stores tokens AES-GCM encrypted in localStorage).
-  // Without this, every reload forced re-login even with valid tokens.
+  // Single session store drives auth UI. The store renders the cached profile
+  // immediately and revalidates in the background — a network failure never
+  // sends the student to the login screen while tokens exist.
   useEffect(() => {
     let dead = false;
-    (async () => {
-      try {
-        await initSecureSession();
-        if (!(await getAccessToken()) && (await getRefreshToken())) {
-          try {
-            await refresh();
-          } catch {
-            await clearSession();
-          }
+    const applySession = (status: string, profile: { id: string; name?: string | null; phone?: string | null; role?: string } | null) => {
+      if (dead) return;
+      if (status !== "ready" || !profile?.id) {
+        if (status === "logged-out") {
+          setStudent(null);
+          setRoute("login");
         }
-        if (await getAccessToken()) {
-          const profile = await me();
-          if (!dead) {
-            if (profile?.user?.role === "student" && profile.user.id) {
-              setStudent({
-                id: profile.user.id,
-                name: typeof profile.user.name === "string" ? profile.user.name : null,
-                phone: typeof profile.user.phone === "string" ? profile.user.phone : null,
-              });
-              setRoute("dashboard");
-            } else {
-              await clearSession();
-            }
-          }
-        }
-      } catch {
-        // Offline / expired — stay on login; request() already tried refresh.
-        try {
-          if (!(await getAccessToken())) await clearSession();
-        } catch {
-          /* ignore */
-        }
-      } finally {
-        if (!dead) setRestoring(false);
+        setRestoring(false);
+        return;
       }
-    })();
+      setStudent({
+        id: profile.id,
+        name: typeof profile.name === "string" ? profile.name : null,
+        phone: typeof profile.phone === "string" ? profile.phone : null,
+      });
+      setRoute((r) => (r === "login" ? "dashboard" : r));
+      setRestoring(false);
+    };
+    const unsub = useSessionStore.subscribe((s) => applySession(s.status, s.profile));
+    const cur = useSessionStore.getState();
+    applySession(cur.status, cur.profile);
+    void cur.initialize();
     return () => {
       dead = true;
+      unsub();
     };
   }, []);
 
   const navigate = (next: Route) => setRoute(next);
+
+  // Mid-exam re-login: definitive auth failures dispatch
+  // `exam:reauth-required` — show the modal over the attempt, never navigate.
+  const [showReauth, setShowReauth] = useState(false);
+  const routeRef = useRef<Route>("login");
+  useEffect(() => {
+    routeRef.current = route;
+  }, [route]);
+  useEffect(() => {
+    const onReauth = () => {
+      const r = routeRef.current;
+      if (r === "runner" || r === "mockSections" || r === "mockRunner" || r === "locked") {
+        setShowReauth(true);
+      }
+    };
+    window.addEventListener("exam:reauth-required", onReauth);
+    return () => window.removeEventListener("exam:reauth-required", onReauth);
+  }, []);
 
   const handleStartExam = (test: TestListItem, start: StartResult) => {
     setActiveTest(test);
@@ -254,21 +262,19 @@ export default function App() {
 
   const handleLogout = async () => {
     if (!confirm("Log out of Bestway Exam on this device?")) return;
-    try {
-      await logout();
-    } finally {
-      await clearSession();
-      setStudent(null);
-      setActiveTest(null);
-      setActiveStart(null);
-      setActiveMock(null);
-      setActiveMockStart(null);
-      setActiveMockSection(null);
-      setLastMockResult(null);
-      setStats(null);
-      setUpdate(null);
-      setRoute("login");
-    }
+    // logout() revokes server-side and wipes locally; the store subscription
+    // flips the UI back to login.
+    await logout().catch(() => undefined);
+    setStudent(null);
+    setActiveTest(null);
+    setActiveStart(null);
+    setActiveMock(null);
+    setActiveMockStart(null);
+    setActiveMockSection(null);
+    setLastMockResult(null);
+    setStats(null);
+    setUpdate(null);
+    setRoute("login");
   };
 
   // Student-only gate: force login when unauthenticated.
@@ -472,6 +478,7 @@ export default function App() {
     {update && <UpdateNotifier update={update} onClose={() => setUpdate(null)} />}
     {showSplash && <BootSplash exiting={introLeaving} />}
     <ExitConfirmModal open={showExitConfirm} onCancel={handleCancelExit} onConfirm={handleConfirmExit} />
+    <ReauthModal open={showReauth} phone={student?.phone ?? null} onDone={() => setShowReauth(false)} />
     </>
   );
 }

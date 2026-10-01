@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getVolume, setVolume, VOLUME_EVENT } from "@/lib/volume";
+import { isDefinitiveLogout, verdictOf } from "@/lib/session-store";
 import BlobImage from "@/components/exam/BlobImage";
 import GappedContent, { gapNumbersIn, hasGappedDocument } from "@/components/exam/GappedContent";
 import BottomNav from "./BottomNav";
@@ -47,6 +48,47 @@ function friendlyError(e: unknown): string {
   return "Request failed. Check connection.";
 }
 
+function errorCode(e: unknown): string | undefined {
+  return verdictOf(e);
+}
+
+/** Persisted offline answer queue (survives reloads/crashes mid-exam). */
+function queueKey(attemptId: string): string {
+  return `examui.queue.${attemptId}`;
+}
+
+function loadQueue(attemptId: string): { answers: Record<string, string>; dirty: string[] } {
+  try {
+    const raw = localStorage.getItem(queueKey(attemptId));
+    if (!raw) return { answers: {}, dirty: [] };
+    const p = JSON.parse(raw) as { answers?: unknown; dirty?: unknown };
+    return {
+      answers:
+        p.answers && typeof p.answers === "object"
+          ? (p.answers as Record<string, string>)
+          : {},
+      dirty: Array.isArray(p.dirty) ? p.dirty.filter((x): x is string => typeof x === "string") : [],
+    };
+  } catch {
+    return { answers: {}, dirty: [] };
+  }
+}
+
+/**
+ * Auth errors during an attempt must NEVER navigate away. Definitive session
+ * verdicts surface a re-login modal over the exam (answers stay intact);
+ * everything else is a banner + queued retry.
+ */
+export function notifyExamAuthIssue(e: unknown): boolean {
+  if (!isDefinitiveLogout(errorCode(e))) return false;
+  try {
+    window.dispatchEvent(new CustomEvent("exam:reauth-required"));
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
+
 /**
  * Unified IELTS exam runner (mock + legacy flows). Split-pane reading with
  * a draggable divider, question tabs + jump buttons, server-time deadlines,
@@ -54,7 +96,21 @@ function friendlyError(e: unknown): string {
  */
 export default function ExamRunner(p: ExamRunnerProps) {
   const [partIdx, setPartIdx] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, string>>(() => p.initialAnswers);
+  const [answers, setAnswers] = useState<Record<string, string>>(() => {
+    // Merge the persisted offline queue: only ids that were still unsaved
+    // (dirty) overlay the server snapshot — saved answers are authoritative.
+    try {
+      const q = loadQueue(p.attemptId);
+      const dirtySet = new Set(q.dirty);
+      const merged = { ...p.initialAnswers };
+      for (const [qid, v] of Object.entries(q.answers)) {
+        if (dirtySet.has(qid) && typeof v === "string") merged[qid] = v;
+      }
+      return merged;
+    } catch {
+      return p.initialAnswers;
+    }
+  });
   const [audioDone] = useState<Record<string, boolean>>(() => p.initialAudioDone ?? {});
   const [flags, setFlags] = useState<Record<string, boolean>>(() => ({}));
   const [currentQ, setCurrentQ] = useState(0);
@@ -69,11 +125,47 @@ export default function ExamRunner(p: ExamRunnerProps) {
   const [timeUp, setTimeUp] = useState(false);
   const [leftWidth, setLeftWidth] = useState(50);
 
-  const dirty = useRef<Set<string>>(new Set());
+  const dirty = useRef<Set<string>>(
+    new Set(
+      (() => {
+        try {
+          return loadQueue(p.attemptId).dirty;
+        } catch {
+          return [];
+        }
+      })(),
+    ),
+  );
   const answersRef = useRef(answers);
   useEffect(() => {
     answersRef.current = answers;
   }, [answers]);
+  const persistTimer = useRef<number | null>(null);
+
+  // Durable queue: every keystroke lands in localStorage (debounced) so a
+  // crash/reload mid-exam loses nothing. Cleared when fully flushed.
+  function persistQueue() {
+    if (persistTimer.current) window.clearTimeout(persistTimer.current);
+    persistTimer.current = window.setTimeout(() => {
+      try {
+        if (dirty.current.size === 0) localStorage.removeItem(queueKey(p.attemptId));
+        else {
+          const snap: Record<string, string> = {};
+          for (const id of dirty.current) snap[id] = answersRef.current[id] ?? "";
+          localStorage.setItem(queueKey(p.attemptId), JSON.stringify({ answers: snap, dirty: [...dirty.current] }));
+        }
+      } catch {
+        /* private mode — memory only */
+      }
+    }, 500);
+  }
+
+  useEffect(
+    () => () => {
+      if (persistTimer.current) window.clearTimeout(persistTimer.current);
+    },
+    [],
+  );
   const submittingRef = useRef(false);
   const submittedRef = useRef(false);
   const dividerRef = useRef<HTMLDivElement | null>(null);
@@ -114,10 +206,19 @@ export default function ExamRunner(p: ExamRunnerProps) {
     try {
       if (payload.length === 1) await p.saveOne(payload[0].questionId, payload[0].response);
       else await p.saveMany(payload);
-      if (dirty.current.size === 0) setSaveState(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "saved");
+      if (dirty.current.size === 0) {
+        try {
+          localStorage.removeItem(queueKey(p.attemptId));
+        } catch {
+          /* ignore */
+        }
+        setSaveState(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "saved");
+      }
     } catch (e) {
       for (const id of ids) dirty.current.add(id);
+      persistQueue();
       setSaveState(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "saving");
+      notifyExamAuthIssue(e);
       throw e;
     }
   }, [p]);
@@ -133,12 +234,14 @@ export default function ExamRunner(p: ExamRunnerProps) {
         })
         .catch((e: unknown) => {
           dirty.current.add(qid);
+          persistQueue();
           setSaveState("offline");
-          setError(friendlyError(e));
+          if (!notifyExamAuthIssue(e)) setError(friendlyError(e));
         });
     } else {
       dirty.current.add(qid);
       setSaveState("saving");
+      persistQueue();
     }
   }
 
@@ -183,7 +286,8 @@ export default function ExamRunner(p: ExamRunnerProps) {
         submittedRef.current = false;
         submittingRef.current = false;
         setSubmitting(false);
-        setError(friendlyError(e));
+        if (!notifyExamAuthIssue(e)) setError(friendlyError(e));
+        else setError("Session expired — sign in again to finish submitting. Your answers are queued.");
       }
     },
     [flush, p],

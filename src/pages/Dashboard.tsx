@@ -124,12 +124,6 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
     <section>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-4">
-          <img
-            src="/logo-transparent.png"
-            alt="BestWay"
-            draggable={false}
-            className="h-14 w-auto shrink-0 drop-shadow-[0_0_18px_rgba(137, 243, 54,0.35)]"
-          />
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-brand/70">
               Overview
