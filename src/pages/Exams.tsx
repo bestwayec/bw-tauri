@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { API_BASE_URL } from "@/lib/api";
 import { listTests, startTest, type StartResult, type TestListItem } from "@/lib/tests";
 import {
@@ -42,68 +43,57 @@ function Greeting({ name }: { name: string | null }) {
   );
 }
 
+/**
+ * TanStack Query fetching: cached per source (stale-while-revalidate),
+ * exponential-backoff retries, refetch on focus/online, background refresh
+ * every 30s. This screen unmounts during an exam, so no exam-time polling;
+ * background refills also pause while the window is hidden.
+ */
+const QUERY_OPTS = {
+  staleTime: 30_000,
+  refetchInterval: 30_000,
+  refetchIntervalInBackground: false,
+  refetchOnWindowFocus: true,
+  refetchOnReconnect: true,
+  retry: 3,
+  retryDelay: (attempt: number) => Math.min(1_000 * 2 ** attempt, 15_000),
+} as const;
+
 export default function Exams({ studentName, onStart, onStartMock }: Props) {
-  const [tests, setTests] = useState<TestListItem[] | null>(null);
-  const [mocks, setMocks] = useState<MockExamListItem[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  // Per-source errors: a failed source must NEVER look like "no exams".
-  // Each fetch reports its own failure; the empty state renders only when a
-  // source genuinely succeeded with zero items.
-  const [testsError, setTestsError] = useState<string | null>(null);
-  const [mocksError, setMocksError] = useState<string | null>(null);
   const [startingId, setStartingId] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
 
-  const load = useCallback(async (showSpinner = true) => {
-    if (showSpinner) setLoading(true);
-    setTestsError(null);
-    setMocksError(null);
-    const [tRes, mRes] = await Promise.all([
-      listTests().then(
-        (v): { ok: true; value: TestListItem[] } => ({ ok: true, value: v }),
-        (e): { ok: false; error: string } => ({ ok: false, error: friendlyError(e) }),
-      ),
-      listMockExams().then(
-        (v): { ok: true; value: MockExamListItem[] } => ({ ok: true, value: v }),
-        (e): { ok: false; error: string } => ({ ok: false, error: friendlyError(e) }),
-      ),
-    ]);
-    if (tRes.ok) {
-      // Students can never start a 0-question exam (backend throws TEST_EMPTY),
-      // so hide them outright — an empty row is always junk (seed leftover or
-      // unfinished admin draft), never a real assigned exam.
-      setTests(tRes.value.filter((t) => t.questionCount > 0));
-    } else {
-      setTestsError(tRes.error);
-    }
-    if (mRes.ok) {
-      // Only show published mocks to students; keep demos visible
-      setMocks(mRes.value.filter((m) => (m.isPublished || m.isDemo) && m.questionCount > 0));
-    } else {
-      setMocksError(mRes.error);
-    }
-    if (showSpinner) setLoading(false);
-  }, []);
+  const testsQuery = useQuery({
+    queryKey: ["tests"],
+    queryFn: () => listTests(),
+    ...QUERY_OPTS,
+  });
+  const mocksQuery = useQuery({
+    queryKey: ["mock-exams"],
+    queryFn: listMockExams,
+    ...QUERY_OPTS,
+  });
 
-  // Auto-fetch on mount + poll + on focus/visibility/online
-  useEffect(() => {
-    void load(true);
-    const interval = window.setInterval(() => void load(false), 30000);
-    const onFocus = () => void load(false);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") void load(false);
-    };
-    const onOnline = () => void load(false);
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("online", onOnline);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("online", onOnline);
-    };
-  }, [load]);
+  // Per-source errors: a failed source must NEVER look like "no exams".
+  // Each fetch reports its own failure; the empty state renders only when a
+  // source genuinely succeeded with zero items.
+  const testsError = testsQuery.error ? friendlyError(testsQuery.error) : null;
+  const mocksError = mocksQuery.error ? friendlyError(mocksQuery.error) : null;
+  const loading = (testsQuery.isPending && testsQuery.fetchStatus !== "idle") || (mocksQuery.isPending && mocksQuery.fetchStatus !== "idle");
+
+  // Students can never start a 0-question exam (backend throws TEST_EMPTY),
+  // so hide them outright — an empty row is always junk (seed leftover or
+  // unfinished admin draft), never a real assigned exam.
+  const tests = (testsQuery.data ?? []).filter((t) => t.questionCount > 0);
+  // Only show published mocks to students; keep demos visible.
+  const mocks = (mocksQuery.data ?? []).filter((m) => (m.isPublished || m.isDemo) && m.questionCount > 0);
+  const testsLoaded = testsQuery.status === "success";
+  const mocksLoaded = mocksQuery.status === "success";
+
+  const retry = () => {
+    void testsQuery.refetch();
+    void mocksQuery.refetch();
+  };
 
   async function handleStartTest(test: TestListItem) {
     setStartingId(test.id);
@@ -131,16 +121,16 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
     }
   }
 
-  const allTests = tests ?? [];
+  const allTests = tests;
   const allMocks: UnifiedItem[] = [
     ...allTests.map((t) => ({ kind: "test" as const, data: t })),
-    ...(mocks ?? []).map((m) => ({ kind: "mock" as const, data: m })),
+    ...mocks.map((m) => ({ kind: "mock" as const, data: m })),
   ];
 
   // Stats over real server data
-  const totalAssigned = allTests.length + (mocks?.length ?? 0);
-  const totalQuestions = allTests.reduce((s, t) => s + t.questionCount, 0) + (mocks ?? []).reduce((s, m) => s + m.questionCount, 0);
-  const readyCount = allTests.filter((t) => t.questionCount > 0).length + (mocks ?? []).filter((m) => m.questionCount > 0).length;
+  const totalAssigned = allTests.length + mocks.length;
+  const totalQuestions = allTests.reduce((s, t) => s + t.questionCount, 0) + mocks.reduce((s, m) => s + m.questionCount, 0);
+  const readyCount = allTests.filter((t) => t.questionCount > 0).length + mocks.filter((m) => m.questionCount > 0).length;
 
   return (
     <section>
@@ -152,7 +142,7 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
         </span>
       </div>
 
-      {!loading && (tests !== null || mocks !== null) && (
+      {!loading && (testsLoaded || mocksLoaded) && (
         <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
           <div className="card rounded-2xl p-3 text-center">
             <p className="text-xl font-black text-white">{totalAssigned}</p>
@@ -186,14 +176,14 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
             <SourceErrorCard
               source="Tests"
               detail={testsError}
-              onRetry={() => void load(true)}
+              onRetry={retry}
             />
           )}
           {mocksError && (
             <SourceErrorCard
               source="Mock exams"
               detail={mocksError}
-              onRetry={() => void load(true)}
+              onRetry={retry}
             />
           )}
         </div>
@@ -343,10 +333,16 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
                     </div>
                   )}
                   {!empty && m.access === "pending" && (
-                    <p className="mt-2 text-[11px] text-amber-300/80">Waiting for admin confirmation before you can start this mock.</p>
+                    <p className="mt-2 text-[11px] text-amber-300/80">
+                      Admin tasdig‘ini kuting — bu mock hali ochilmagan.
+                      <span className="block text-white/40">Waiting for admin confirmation before you can start this mock.</span>
+                    </p>
                   )}
                   {!empty && m.access === "locked" && (
-                    <p className="mt-2 text-[11px] text-white/30">This mock needs a purchase — ask your admin.</p>
+                    <p className="mt-2 text-[11px] text-white/30">
+                      Bu mock sotuvda — admin bilan bog‘laning.
+                      <span className="block text-white/25">This mock needs a purchase — ask your admin.</span>
+                    </p>
                   )}
                 </li>
               );

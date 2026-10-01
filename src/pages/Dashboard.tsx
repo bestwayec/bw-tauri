@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { useQueries } from "@tanstack/react-query";
 import type { Route } from "@/App";
 import {
   listTests,
@@ -31,87 +32,79 @@ function formatDate(iso: string | null): string {
 }
 
 /** Desktop overview: stats, in-progress resume, recent activity, quick actions. */
+const OVERVIEW_QUERY_OPTS = {
+  staleTime: 30_000,
+  refetchInterval: 30_000,
+  refetchIntervalInBackground: false,
+  refetchOnWindowFocus: true,
+  refetchOnReconnect: true,
+  retry: 3,
+  retryDelay: (attempt: number) => Math.min(1_000 * 2 ** attempt, 15_000),
+} as const;
+
 export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
-  const [tests, setTests] = useState<TestListItem[] | null>(null);
-  const [attempts, setAttempts] = useState<AttemptSummary[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [resumeError, setResumeError] = useState<string | null>(null);
   const [resumingId, setResumingId] = useState<string | null>(null);
 
-  const load = useCallback(async (showSpinner = true) => {
-    if (showSpinner) setLoading(true);
-    setError(null);
-    try {
-      const [t, a, m] = await Promise.all([
-        listTests().catch(() => [] as TestListItem[]),
-        myAttempts().catch(() => [] as AttemptSummary[]),
-        listMockExams().catch(() => []),
-      ]);
-      // Include live mock count in assigned so new mocks appear without manual refresh
-      // For overview stats we count tests + published mocks as assigned.
-      // 0-question rows are junk (never startable) — hide them like Exams does.
-      const tVisible = t.filter((x) => x.questionCount > 0);
-      const publishedMocks = m.filter((x) => (x.isPublished || x.isDemo) && x.questionCount > 0);
-      // Merge for display purposes: tests are primary, mocks are additive for stats
-      // Keep tests separate for resume logic; mocks only affect assigned/ready counts
-      setTests([...tVisible, ...publishedMocks.map((mm) => ({
-        id: mm.id,
-        type: mm.type === "multilevel" ? "multilevel" : "ielts",
-        title: mm.title,
-        level: mm.level,
-        isDemo: mm.isDemo,
-        isActive: mm.isPublished,
-        durationMinutes: mm.durationMinutes,
-        questionCount: mm.questionCount,
-        sections: mm.skills as unknown as TestListItem["sections"],
-        // marker for mock-origin so resume won't try to find it in tests
-        _isMock: true,
-      } as unknown as TestListItem))]);
-      setAttempts(a);
-    } catch {
-      setError("Could not load overview. Retrying automatically…");
-    } finally {
-      if (showSpinner) setLoading(false);
-    }
-  }, []);
+  const [testsQuery, attemptsQuery, mocksQuery] = useQueries({
+    queries: [
+      { queryKey: ["tests"], queryFn: () => listTests(), ...OVERVIEW_QUERY_OPTS },
+      { queryKey: ["my-attempts"], queryFn: () => myAttempts(), ...OVERVIEW_QUERY_OPTS },
+      { queryKey: ["mock-exams"], queryFn: listMockExams, ...OVERVIEW_QUERY_OPTS },
+    ],
+  });
 
-  useEffect(() => {
-    void load(true);
-    const interval = window.setInterval(() => void load(false), 30000);
-    const onFocus = () => void load(false);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") void load(false);
-    };
-    const onOnline = () => void load(false);
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("online", onOnline);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("online", onOnline);
-    };
-  }, [load]);
+  const loading = testsQuery.isPending || attemptsQuery.isPending || mocksQuery.isPending;
+  const error =
+    testsQuery.isError || attemptsQuery.isError || mocksQuery.isError
+      ? "Could not load overview. Retrying automatically…"
+      : null;
+
+  // Include live mock count in assigned so new mocks appear without manual refresh.
+  // 0-question rows are junk (never startable) — hide them like Exams does.
+  const tVisible = (testsQuery.data ?? []).filter((x) => x.questionCount > 0);
+  const publishedMocks = (mocksQuery.data ?? []).filter((x) => (x.isPublished || x.isDemo) && x.questionCount > 0);
+  // Merge for display purposes: tests are primary, mocks are additive for stats.
+  // Mock-origin rows carry _isMock so resume never sends them to /tests/start.
+  const tests: TestListItem[] = [
+    ...tVisible,
+    ...publishedMocks.map(
+      (mm) =>
+        ({
+          id: mm.id,
+          type: mm.type === "multilevel" ? "multilevel" : "ielts",
+          title: mm.title,
+          level: mm.level,
+          isDemo: mm.isDemo,
+          isActive: mm.isPublished,
+          durationMinutes: mm.durationMinutes,
+          questionCount: mm.questionCount,
+          sections: mm.skills as unknown as TestListItem["sections"],
+          _isMock: true,
+        }) as unknown as TestListItem,
+    ),
+  ];
+  const attempts: AttemptSummary[] | null = attemptsQuery.data ?? null;
 
   async function handleResume(a: AttemptSummary) {
-    const test = tests?.find((t) => t.id === a.testId);
+    const test = tests.find((t) => t.id === a.testId);
     if (!test) return;
     // Mock attempts are not resumable via test endpoint – they use mock flow on web
     if ((test as unknown as { _isMock?: boolean })._isMock) return;
     setResumingId(a.id);
+    setResumeError(null);
     try {
       const start = await startTest(test.id);
       onStart(test, start);
     } catch {
-      setError("Could not resume the attempt. Try again from Exams.");
+      setResumeError("Could not resume the attempt. Try again from Exams.");
     } finally {
       setResumingId(null);
     }
   }
 
-  const assigned = tests?.length ?? 0;
-  const ready = tests?.filter((t) => t.questionCount > 0).length ?? 0;
+  const assigned = tests.length;
+  const ready = tests.filter((t) => t.questionCount > 0).length;
   const inProgress = attempts?.filter((a) => a.status === "in_progress") ?? [];
   const completed = attempts?.filter((a) => a.status === "completed").length ?? 0;
   const scored = attempts?.filter((a) => a.totalScore != null) ?? [];
@@ -194,6 +187,11 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
                   {inProgress.length}
                 </span>
               </div>
+              {resumeError && (
+                <p role="alert" className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                  {resumeError}
+                </p>
+              )}
               {inProgress.length === 0 ? (
                 <p className="mt-2 text-xs leading-relaxed text-white/40">
                   Nothing in progress. Starting an exam from the Exams tab lets you resume it here if you leave.

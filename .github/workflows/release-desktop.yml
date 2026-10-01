@@ -70,6 +70,15 @@ jobs:
       - name: Install frontend deps
         run: npm ci
 
+      - name: Require backend URL
+        # A release without VITE_API_URL bakes in localhost: every installed
+        # client would talk to the student's own machine. Fail loudly instead.
+        run: |
+          if [ -z "${{ vars.VITE_API_URL }}" ]; then
+            echo "::error::VITE_API_URL repo variable is missing. Set it to the production backend (https://…/v1) before releasing."
+            exit 1
+          fi
+
       - name: Build + Release
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         with:
