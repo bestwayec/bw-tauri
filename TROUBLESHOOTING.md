@@ -53,6 +53,64 @@ reproduces the auth path in one click.
 8. **Double submit** — backend rejects with `MOCK_ATTEMPT_FINISHED`; the
    client treats it as already-done, not as a crash.
 
+## Exam UI (Job 2) — IELTS-style runner
+
+- One unified runner: `src/components/exam-ui/` (`ExamRunner`, `TopBar`,
+  `BottomNav`, `PassagePane`, `QuestionGroup`, `widgets/*`,
+  `ListeningEngine`). Both mock sections and legacy tests adapt into the same
+  `UIPart[]` model (`model.ts`); the old `Runner`/`MockRunner` and their
+  single-use panes are deleted.
+- Light paper theme by default, dark toggle in the top bar. No particles or
+  glow inside the exam.
+- Reading: passage (letters A/B/C, highlight/clear/note tools, localStorage +
+  server marks sync for legacy tests) left, questions right, draggable
+  divider. Gapped groups (`contentHtml` + `data-gap` tokens) render inline
+  numbered inputs; groups without it fall back to per-question cards.
+- Listening: strict timed mode plays once + 2:00 review countdown;
+  practice mode replays. Audio/images load via authenticated Blob URLs.
+- Bottom bar: part tabs with answered/total, every question as a stateful
+  jump button (answered/unanswered/flagged/current), flag toggle, Prev/Next,
+  section Submit on the last part.
+- Autosave: debounced per-answer + bulk flush, offline queue retried on
+  reconnect, Saved/Saving…/Offline indicator. Deadlines use the server clock
+  (`serverTime` offset); auto-submit on expiry; section submit via `skills`.
+- Unit tests: `npm test` (vitest) — widget mapping for all 15 mock types,
+  gap parsing, navigation state, timer/deadline math.
+
+### Screen descriptions (no GUI capture in CI; verified in dev)
+
+1. **Listening part** — top bar (name, Reading/listening title, countdown,
+   volume, text size, theme, Saved), single column: once-only player with
+   Play/volume + "once only" notice, then one radio card per question.
+2. **Reading split-pane + table completion** — left: lettered passage with
+   yellow highlights + notes toggle; right: "Questions 1–7" + instructions,
+   bordered table with numbered gap badges and inline inputs.
+3. **Writing Task 2** — single column essay editor with live word count and
+   "250+ needed" hint.
+4. **Bottom navigation** — part tabs (`Passage 1  13/13`), 40 numbered jump
+   buttons colored by state, Flag/Prev/Next-or-Submit.
+
+### 15-type verification checklist (local backend, 2026-10-01)
+
+Real data — `IELTS Academic Reading Practice Test 1` (39 Q, seed student):
+`summary_completion`×10, `note_completion`×5, `multi_select`×1,
+`true_false_notgiven`×10, `map_labelling`×3, `matching`×4,
+`yes_no_notgiven`×3, `table_completion`×3 (5/10 groups gapped `contentHtml`).
+Mocked only (vitest, no local exam covers them yet): `multiple_choice`,
+`matching_headings`, `sentence_completion`, `short_answer`, `essay_task1`,
+`essay_task2`, `speaking_task` (speaking upload flow preserved from the old
+runner; verify against a real speaking mock before release).
+
+### Decisions worth knowing
+
+- Multi-select count is shown live ("N selected") but not hard-capped: the
+  backend scores the exact set and the required count lives in free text.
+- Legacy tests have no server clock in `start` — deadlines use the client
+  clock there (offset 0); mocks use `serverTime`.
+- Flags are per-session (in-memory); answers persist server-side.
+- `contentLayout` is accepted and validated but not yet used for layout
+  variants — groups render notes/table/summary identically.
+
 ## Frozen contract (never change)
 
 - Deep-link scheme `bestway-exam://`, Tauri identifier `uz.bestway.exam`.

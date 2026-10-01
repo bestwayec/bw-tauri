@@ -6,9 +6,9 @@ import Exams from "@/pages/Exams";
 import History from "@/pages/History";
 import Profile from "@/pages/Profile";
 import Settings from "@/pages/Settings";
-import Runner from "@/pages/Runner";
+import TestRunner from "@/pages/TestRunner";
 import MockSectionPicker from "@/pages/MockSectionPicker";
-import MockRunner from "@/pages/MockRunner";
+import MockExam from "@/pages/MockExam";
 import Locked from "@/pages/Locked";
 import Result from "@/pages/Result";
 import Sidebar from "@/components/Sidebar";
@@ -393,10 +393,10 @@ export default function App() {
                 />
               )}
               {activeRoute === "runner" && activeTest && activeStart && (
-                <Runner
+                <TestRunner
                   test={activeTest}
                   start={activeStart}
-                  onLocked={() => navigate("locked")}
+                  studentName={student?.name ?? null}
                   onExit={handleExitExam}
                   onFinish={handleFinishExam}
                 />
@@ -426,9 +426,10 @@ export default function App() {
                 />
               )}
               {activeRoute === "mockRunner" && activeMockStart && activeMockSection && (
-                <MockRunner
+                <MockExam
                   start={activeMockStart}
                   section={activeMockSection}
+                  studentName={student?.name ?? null}
                   onExit={handleExitExam}
                   onBackToSections={() => navigate("mockSections")}
                   onFinish={handleFinishMock}

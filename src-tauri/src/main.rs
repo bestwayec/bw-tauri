@@ -2,14 +2,15 @@
 
 mod battery;
 mod lockdown;
+mod tray;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{Emitter, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
-/// Shared exam-lock flag. When true, close requests are vetoed.
-struct LockState(AtomicBool);
+/// Shared exam-lock flag. When true, close/quit requests are vetoed.
+pub struct LockState(pub AtomicBool);
 
 #[tauri::command]
 fn get_battery() -> battery::BatteryInfo {
@@ -49,6 +50,31 @@ fn clear_clipboard(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Hide the main window to the tray (keeps running in background).
+#[tauri::command]
+fn minimize_to_tray(app: tauri::AppHandle) -> Result<(), String> {
+    tray::hide_main(&app);
+    Ok(())
+}
+
+/// Restore the main window from the tray.
+#[tauri::command]
+fn show_main_window(app: tauri::AppHandle) -> Result<(), String> {
+    tray::show_main(&app);
+    Ok(())
+}
+
+/// Quit from UI. Vetoed while an exam lock is active.
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle, state: tauri::State<'_, LockState>) -> Result<(), String> {
+    if state.0.load(Ordering::SeqCst) {
+        tray::show_main(&app);
+        return Err("Cannot quit while exam is locked".to_string());
+    }
+    app.exit(0);
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(LockState(AtomicBool::new(false)))
@@ -79,20 +105,54 @@ fn main() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .setup(|app| {
+            // Tray must exist before any window hides, otherwise the app
+            // would look like it vanished with no way back.
+            if let Err(e) = tray::build_tray(app.handle()) {
+                eprintln!("[tray] failed to build tray icon: {e}");
+            }
+            Ok(())
+        })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if let Some(state) = window.app_handle().try_state::<LockState>() {
-                    if state.0.load(Ordering::SeqCst) {
-                        api.prevent_close();
-                    }
+                let locked = window
+                    .app_handle()
+                    .try_state::<LockState>()
+                    .map(|s| s.0.load(Ordering::SeqCst))
+                    .unwrap_or(false);
+                // Locked exam → stay visible. Unlocked → hide to tray and
+                // keep running in the background instead of exiting.
+                api.prevent_close();
+                if locked {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                } else if let Err(e) = window.hide() {
+                    eprintln!("[tray] failed to hide window to tray: {e}");
                 }
             }
         })
         .invoke_handler(tauri::generate_handler![
             get_battery,
             set_locked,
-            clear_clipboard
+            clear_clipboard,
+            minimize_to_tray,
+            show_main_window,
+            quit_app
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Bestway Exam");
+        .build(tauri::generate_context!())
+        .expect("error while building Bestway Exam")
+        .run(|app, event| {
+            // Cmd+Q / Alt+F4 / tray-quit arrive here as ExitRequested.
+            // Veto while locked so the exam cannot be bypassed.
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                let locked = app
+                    .try_state::<LockState>()
+                    .map(|s| s.0.load(Ordering::SeqCst))
+                    .unwrap_or(false);
+                if locked {
+                    api.prevent_exit();
+                    tray::show_main(app);
+                }
+            }
+        });
 }

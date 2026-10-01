@@ -17,7 +17,7 @@ function SpeakerHigh() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"
       stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-      className="shrink-0 text-emerald-300">
+      className="shrink-0 text-brand">
       <path d="M11 5 6 9H2v6h4l5 4V5z" fill="currentColor" stroke="none" opacity="0.9" />
       <path d="M15.5 8.5a5 5 0 0 1 0 7" />
       <path d="M18.5 5.5a9 9 0 0 1 0 13" />

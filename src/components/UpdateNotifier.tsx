@@ -14,7 +14,7 @@ type Status = "idle" | "checking" | "downloading" | "installing" | "opening" | "
 /**
  * Version-update toast, top-right — same structure as the reference
  * Announcement card (leading icon, dismiss, title, description, full-width
- * secondary CTA), restyled to the app's dark + emerald identity.
+ * secondary CTA), restyled to the app's dark + brand identity.
  *
  * Update flow: tries the signed Tauri updater (`check()` →
  * `downloadAndInstall()` → relaunch) first so binary authenticity is
@@ -137,7 +137,7 @@ export default function UpdateNotifier({ update, onClose }: Props) {
             className="card pointer-events-auto relative flex w-full flex-col items-start gap-3 rounded-xl border-white/10 bg-black/70 p-3 shadow-[0_16px_50px_rgba(0,0,0,0.55)] backdrop-blur-xl"
           >
             <div className="flex w-full flex-col items-start gap-1">
-              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-emerald-400/10 text-emerald-300 ring-1 ring-emerald-400/25">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand/10 text-brand ring-1 ring-brand/25">
                 <svg
                   width="18"
                   height="18"
@@ -203,7 +203,7 @@ export default function UpdateNotifier({ update, onClose }: Props) {
                 aria-valuemin={0}
                 aria-valuemax={100}
               >
-                <div className="h-full bg-emerald-400 transition-all" style={{ width: `${progress}%` }} />
+                <div className="h-full bg-brand transition-all" style={{ width: `${progress}%` }} />
               </div>
             )}
             {error && (

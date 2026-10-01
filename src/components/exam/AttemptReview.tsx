@@ -38,7 +38,7 @@ function locateSnippet(passage: string, correct: string | null): { before: strin
 
 function ItemBadge({ item }: { item: AttemptReviewItem }) {
   if (item.isCorrect === true)
-    return <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[#19D36B] text-xs font-black text-black">✓</span>;
+    return <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[#89F336] text-xs font-black text-black">✓</span>;
   if (item.isCorrect === false)
     return <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-red-500/20 text-xs font-black text-red-300 ring-1 ring-red-500/40">✕</span>;
   return <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-amber-400/15 text-xs font-black text-amber-200 ring-1 ring-amber-400/30">…</span>;
@@ -122,7 +122,7 @@ export default function AttemptReview({ attemptId }: { attemptId: string }) {
       {/* Summary */}
       <div className="flex flex-wrap items-center gap-2">
         {band != null ? (
-          <span className="rounded-lg bg-[#19D36B]/12 px-2.5 py-1 text-xs font-black text-[#19D36B] ring-1 ring-[#19D36B]/40">
+          <span className="rounded-lg bg-[#89F336]/12 px-2.5 py-1 text-xs font-black text-[#89F336] ring-1 ring-[#89F336]/40">
             ≈ Band {band.toFixed(1)} · {correct}/{auto.length} auto-correct
           </span>
         ) : (
@@ -143,7 +143,7 @@ export default function AttemptReview({ attemptId }: { attemptId: string }) {
             aria-pressed={filter === f}
             className={`rounded-lg px-2.5 py-1 text-[11px] font-bold ring-1 transition ${
               filter === f
-                ? "bg-[#19D36B]/15 text-[#19D36B] ring-[#19D36B]/40"
+                ? "bg-[#89F336]/15 text-[#89F336] ring-[#89F336]/40"
                 : "bg-white/[0.04] text-white/50 ring-white/10 hover:text-white"
             }`}
           >
@@ -186,8 +186,8 @@ export default function AttemptReview({ attemptId }: { attemptId: string }) {
                       <span className="font-bold text-white/40">You: </span>{mine || <span className="italic text-white/30">no answer</span>}
                     </p>
                     {variant ? (
-                      <p className="rounded-lg bg-[#19D36B]/10 px-2.5 py-1.5 text-[#9ff0c3] ring-1 ring-[#19D36B]/30">
-                        <span className="font-bold text-[#19D36B]/70">Correct: </span>{variant}
+                      <p className="rounded-lg bg-[#89F336]/10 px-2.5 py-1.5 text-brand-subtle-fg ring-1 ring-[#89F336]/30">
+                        <span className="font-bold text-[#89F336]/70">Correct: </span>{variant}
                       </p>
                     ) : q.isCorrect == null ? (
                       <p className="rounded-lg bg-amber-400/10 px-2.5 py-1.5 text-amber-200 ring-1 ring-amber-400/30">
@@ -207,7 +207,7 @@ export default function AttemptReview({ attemptId }: { attemptId: string }) {
                   )}
                   {open && snippet && (
                     <div className="mt-1.5 rounded-lg bg-white/[0.03] px-3 py-2 text-xs leading-relaxed text-white/60 ring-1 ring-white/10">
-                      <p>{snippet.before}{snippet.hit && <mark className="rounded bg-[#19D36B]/30 px-0.5 text-emerald-50">{snippet.hit}</mark>}{snippet.after}</p>
+                      <p>{snippet.before}{snippet.hit && <mark className="rounded bg-[#89F336]/30 px-0.5 text-fg">{snippet.hit}</mark>}{snippet.after}</p>
                       {!snippet.hit && <p className="mt-1 text-[11px] text-white/30">Answer location not found verbatim — read the full passage above for context.</p>}
                     </div>
                   )}
