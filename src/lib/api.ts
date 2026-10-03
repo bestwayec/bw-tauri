@@ -7,7 +7,7 @@ export { API_BASE_URL, isApiMisconfigured, isLoopbackUrl, isProdBuild } from "./
 /**
  * Direct fetch client for the BestWay backend.
  *
- * - Base URL: `VITE_API_URL` or `http://localhost:3001/v1`
+ * - Base URL: `VITE_API_URL` or `https://api.bestwayec.uz/v1`
  * - Auth: Bearer access token from the single session store
  *   (session-store.ts; Rust-owned in Tauri, encrypted localStorage in browser)
  * - No Next.js proxy — Tauri talks straight to the backend.

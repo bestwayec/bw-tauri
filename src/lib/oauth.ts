@@ -24,16 +24,15 @@ import { isSafeHttpUrl, secureGetItemAsync, secureRemoveItemAsync, secureSetItem
 export const DESKTOP_SCHEME = "bestway-exam";
 export const DESKTOP_CALLBACK = `${DESKTOP_SCHEME}://auth/callback`;
 
-/** Web origin — NEVER derived from the API URL (api.* vs app.* differ in prod).
- * Default is the Docker frontend host port (:3005). :3000 is reserved by
- * another project (escrow-bot-backend) — do not use local `next dev`. */
+/** Web origin — NEVER derived from the API URL (api.bestwayec.uz vs bestwayec.uz differ in prod).
+ * Production default is https://bestwayec.uz (override with VITE_WEB_URL for local dev). */
 function webBaseUrl(): string {
   const fromEnv =
     typeof import.meta !== "undefined"
       ? ((import.meta.env?.BESTWAY_WEB_URL as string | undefined) ??
         (import.meta.env?.VITE_WEB_URL as string | undefined))
       : undefined;
-  const raw = (fromEnv ?? "http://localhost:3005").trim().replace(/\/+$/, "");
+  const raw = (fromEnv || "https://bestwayec.uz").trim().replace(/\/+$/, "");
   // Block javascript:/data: injection via env tampering; fallback to default.
   const lower = raw.toLowerCase();
   if (
@@ -42,7 +41,7 @@ function webBaseUrl(): string {
     lower.startsWith("file:") ||
     lower.startsWith("vbscript:")
   ) {
-    return "http://localhost:3005";
+    return "https://bestwayec.uz";
   }
   return raw;
 }
@@ -192,9 +191,14 @@ function isTauriRuntime(): boolean {
 /**
  * Open the system browser (Tauri opener).
  * Inside the real Tauri kiosk webview it never falls back to `window.open`
- * (that would trap the login page) — the caller shows the authorize URL
- * for manual copy instead. Outside Tauri (vite dev in a plain browser)
- * the opener IPC always fails, so fall back to a new tab.
+ * (that would trap the login page). Outside Tauri (vite dev in a plain
+ * browser) the opener IPC always fails, so fall back to a new tab.
+ *
+ * Two automatic layers, no user interaction needed:
+ * 1. The `opener` plugin (`openUrl`, capability-scoped `https://**`).
+ * 2. The app-owned `open_system_browser` Rust command, which enforces its
+ *    own strict allowlist (prod hosts + loopback) and bypasses the plugin
+ *    capability gate while using the same OS mechanism.
  *
  * Security: validates URL via isSafeHttpUrl (https or loopback http only,
  * no javascript:/data:) before any IPC to prevent open-redirect via XSS.
@@ -207,11 +211,22 @@ export async function openInBrowser(url: string): Promise<void> {
     // Dev/preview in a normal browser: opener plugin has no IPC backend.
     const w = window.open(url, "_blank", "noopener,noreferrer");
     if (w) return;
-    // Popup blocked — let the caller show the manual-copy UI.
-    throw new Error("Popup blocked. Copy the login link manually.");
+    throw new Error("Popup blocked by the browser.");
   }
-  const mod = await import("@tauri-apps/plugin-opener");
-  await mod.openUrl(url);
+  try {
+    const mod = await import("@tauri-apps/plugin-opener");
+    await mod.openUrl(url);
+    return;
+  } catch (e) {
+    console.error("[oauth] opener plugin failed, trying Rust fallback:", e);
+  }
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("open_system_browser", { url });
+  } catch (e2) {
+    const reason = e2 instanceof Error && e2.message ? e2.message : String(e2);
+    throw new Error(`System browser could not be opened (${reason})`);
+  }
 }
 
 export interface StartedBrowserLogin {

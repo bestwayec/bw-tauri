@@ -20,6 +20,7 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+url = "2"
 starship-battery = "0.11"
 # Auth token ownership (Phase 1): HTTP refresh + OS credential store.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

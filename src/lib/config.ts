@@ -5,7 +5,7 @@
  * import cycle (api.ts -> session-store.ts -> config.ts).
  */
 
-const DEFAULT_BASE_URL = "http://localhost:3001/v1";
+const DEFAULT_BASE_URL = "https://api.bestwayec.uz/v1";
 
 function resolveBaseUrl(): string {
   const fromEnv =
@@ -13,7 +13,7 @@ function resolveBaseUrl(): string {
       ? ((import.meta.env?.BESTWAY_API_URL as string | undefined) ??
         (import.meta.env?.VITE_API_URL as string | undefined))
       : undefined;
-  const raw = (fromEnv ?? DEFAULT_BASE_URL).trim();
+  const raw = (fromEnv || DEFAULT_BASE_URL).trim();
   // Block javascript:/data:/file: injection if env is tampered.
   const lower = raw.toLowerCase();
   if (
