@@ -19,7 +19,7 @@
     "@tauri-apps/plugin-deep-link": "^2.2.0",
     "@tauri-apps/plugin-opener": "^2.2.0",
     "@tauri-apps/plugin-process": "^2.2.0",
-    "@tauri-apps/plugin-updater": "^2.2.0",
+    "@tauri-apps/plugin-updater": "^2.13.0",
     "motion": "^13.2.0",
     "ogl": "^1.0.11",
     "react": "^19.0.0",
