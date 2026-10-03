@@ -164,9 +164,6 @@ export default function Login({ onLogin }: Props) {
   async function handleBrowser() {
     setBusy("browser");
     setError(null);
-    // The login link is never shown to the user: if the system browser
-    // cannot be opened, fall back to idle so the student retries with the
-    // exact same "Continue in browser" button.
     let s: BrowserLoginState;
     let url: string;
     try {
@@ -183,11 +180,12 @@ export default function Login({ onLogin }: Props) {
     try {
       await openInBrowser(url);
       // busy stays "browser" until the callback (or cancel) resolves it.
-    } catch {
+    } catch (e) {
       void clearBrowserLoginState();
       pendingRef.current = null;
       setPending(null);
-      setError("Could not open the browser. Please try again.");
+      const reason = e instanceof Error && e.message ? ` (${e.message})` : "";
+      setError(`Could not open the browser. Please try again.${reason}`);
       setBusy("idle");
     }
   }

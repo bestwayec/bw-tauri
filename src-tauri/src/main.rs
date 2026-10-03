@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod battery;
+mod browser;
 mod lockdown;
 mod logger;
 mod session;
@@ -150,6 +151,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             battery::get_battery,
+            browser::open_system_browser,
             set_locked,
             clear_clipboard,
             minimize_to_tray,

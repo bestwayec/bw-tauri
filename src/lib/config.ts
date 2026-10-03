@@ -5,7 +5,7 @@
  * import cycle (api.ts -> session-store.ts -> config.ts).
  */
 
-const DEFAULT_BASE_URL = "http://localhost:3001/v1";
+const DEFAULT_BASE_URL = "https://api.bestwayec.uz/v1";
 
 function resolveBaseUrl(): string {
   const fromEnv =
