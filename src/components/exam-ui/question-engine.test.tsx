@@ -3,10 +3,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { MockShapedGroupSchema, MockShapedQuestionSchema } from '@/lib/schemas';
 import type { MockShapedGroup, MockQuestionType, MockShapedSection } from '@/lib/mocks';
-import { answerRuleHint, exceedsAnswerConstraint } from '@/lib/objective-answers';
+import { answerRuleHint, exceedsAnswerConstraint, parseMultiSelectAnswer, serializeMultiSelectAnswer } from '@/lib/objective-answers';
 import { mockSectionToParts, widgetFor, type UIPart, type UIQuestion } from './model';
 import QuestionGroup from './QuestionGroup';
-import { MatchingWidget, ShortWidget } from './widgets';
+import { CheckWidget, MatchingWidget, ShortWidget } from './widgets';
 
 function group(type: MockQuestionType, layout: string | null, answerRule?: 'ONE_WORD' | 'ONE_WORD_AND_OR_NUMBER'): MockShapedGroup {
   return { id: 'synthetic-group', sortOrder: 0, title: 'Original park information', instructions: 'Use the original material.',
@@ -107,9 +107,58 @@ describe('explicit completion answer rules', () => {
     expect(exceedsAnswerConstraint('one two', { wordLimit: 2 })).toBe(false);
     expect(exceedsAnswerConstraint('one two three', { wordLimit: 2 })).toBe(true);
   });
+  it('uses actual Unicode words and a shared numeric grammar for explicit answer rules', () => {
+    for (const answer of ['-7', '07:30', '7%', '2026-10-05']) {
+      expect(exceedsAnswerConstraint(answer, one)).toBe(true);
+      expect(exceedsAnswerConstraint(answer, mixed)).toBe(false);
+    }
+    for (const answer of ['mother-in-law', 'teacher’s', 'café']) expect(exceedsAnswerConstraint(answer, one)).toBe(false);
+    for (const answer of ['!!!', 'word7', '7%%']) {
+      expect(exceedsAnswerConstraint(answer, one)).toBe(true);
+      expect(exceedsAnswerConstraint(answer, mixed)).toBe(true);
+    }
+    expect(exceedsAnswerConstraint('word7', { wordLimit: 1 })).toBe(false);
+  });
   it('renders the actual rule and preserves the exact typed answer without client grading', () => {
     const question: UIQuestion = { id: 'q', number: 1, kind: 'short_answer', prompt: 'Original prompt', options: null, points: 1, wordLimit: 5, answerRule: 'ONE_WORD' };
     const html = renderToStaticMarkup(<ShortWidget q={question} value="  North Gate  " fontSize={15} onChange={() => {}} />);
     expect(html).toContain('ONE WORD'); expect(html).toContain('aria-invalid="true"'); expect(html).toContain('value="  North Gate  "');
+  });
+});
+
+describe('multi-select serialization and resume', () => {
+  const options = ['Morning, afternoon', 'Parks; gardens', 'Evening'];
+  it('round-trips punctuation in selected option labels through autosave strings', () => {
+    const wire = serializeMultiSelectAnswer(options.slice(0, 2));
+    expect(JSON.parse(wire)).toEqual(options.slice(0, 2));
+    expect(parseMultiSelectAnswer(wire, options)).toEqual(options.slice(0, 2));
+    expect(serializeMultiSelectAnswer([])).toBe('');
+  });
+  it('restores legacy text, comma/semicolon keys and whitespace letter-key answers', () => {
+    expect(parseMultiSelectAnswer('Morning, afternoon', options)).toEqual([options[0]]);
+    for (const wire of ['A,B', 'A;B', 'A B', '["A","B"]']) expect(parseMultiSelectAnswer(wire, options)).toEqual(options.slice(0, 2));
+    expect(parseMultiSelectAnswer('river,lake', ['river', 'lake', 'hill'])).toEqual(['river', 'lake']);
+    expect(parseMultiSelectAnswer('["missing"]', options)).toEqual([]);
+    expect(parseMultiSelectAnswer('["A",2]', options)).toEqual([]);
+    expect(parseMultiSelectAnswer('[invalid', options)).toEqual([]);
+  });
+  it('selects the right resumed checkboxes and saves an unambiguous wire on toggle', () => {
+    const question: UIQuestion = { id: 'q', number: 1, kind: 'multi_select', prompt: 'Choose two', options, points: 1, wordLimit: null };
+    let saved = '';
+    const tree = CheckWidget({ q: question, value: '["A","B"]', fontSize: 15, onChange: (value) => { saved = value; } });
+    function inputs(node: ReactNode): ReactElement<{ checked: boolean; onChange: () => void }>[] {
+      return Children.toArray(node).flatMap((child) => {
+        if (!isValidElement(child)) return [];
+        const element = child as ReactElement<{ children?: ReactNode; checked: boolean; onChange: () => void }>;
+        return element.type === 'input' ? [element] : inputs(element.props.children);
+      });
+    }
+    const controls = inputs(tree);
+    expect(controls.map((input) => input.props.checked)).toEqual([true, true, false]);
+    controls[1].props.onChange();
+    expect(JSON.parse(saved)).toEqual([options[0]]);
+    const html = renderToStaticMarkup(<CheckWidget q={question} value={saved} fontSize={15} onChange={() => {}} />);
+    expect(html).toContain('1 selected');
+    expect(html).toContain('Morning, afternoon');
   });
 });

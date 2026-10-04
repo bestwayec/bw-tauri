@@ -8,7 +8,7 @@ type Props = {
   onNavigate: (route: Route) => void;
 };
 
-type NavId = "dashboard" | "exams" | "history" | "profile" | "settings";
+type NavId = "dashboard" | "exams" | "history" | "examTrack" | "profile" | "settings";
 
 function icon(path: ReactNode) {
   return (
@@ -61,6 +61,16 @@ const NAV: Array<{ id: NavId; label: string; hint: string; icon: ReactNode }> = 
     ),
   },
   {
+    id: "examTrack",
+    label: "Exam Track",
+    hint: "IELTS / Multilevel",
+    icon: icon(
+      <>
+        <path d="M4 7h16M16 3l4 4-4 4M20 17H4M8 13l-4 4 4 4" />
+      </>,
+    ),
+  },
+  {
     id: "profile",
     label: "Profile",
     hint: "Account",
@@ -91,7 +101,7 @@ const NAV: Array<{ id: NavId; label: string; hint: string; icon: ReactNode }> = 
 export default function Sidebar({ route, collapsed, onToggle, onNavigate }: Props) {
   return (
     <aside
-      className={`flex h-full shrink-0 flex-col border-r border-border bg-bg-subtle/80 backdrop-blur-xl transition-[width] duration-200 ease-out ${
+      className={`hidden h-full shrink-0 flex-col border-r border-border bg-bg-subtle/80 backdrop-blur-xl transition-[width] duration-200 ease-out lg:flex ${
         collapsed ? "w-[64px]" : "w-60"
       }`}
     >
@@ -171,4 +181,14 @@ export default function Sidebar({ route, collapsed, onToggle, onNavigate }: Prop
       </div>
     </aside>
   );
+}
+
+/** The same destinations and order remain available when the desktop rail is hidden. */
+export function MobileNavigation({ route, onNavigate }: Pick<Props, 'route' | 'onNavigate'>) {
+  return <nav aria-label="Mobile main" className="grid shrink-0 grid-cols-3 gap-1 border-b border-border bg-bg-subtle/80 p-2 lg:hidden">
+    {NAV.map((item) => <button key={item.id} type="button" onClick={() => onNavigate(item.id)} aria-current={route === item.id ? 'page' : undefined}
+      className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs ${route === item.id ? 'bg-brand-subtle text-brand-subtle-fg' : 'text-fg-muted hover:bg-surface-hover'}`}>
+      {item.icon}<span>{item.label}</span>
+    </button>)}
+  </nav>;
 }

@@ -7,6 +7,7 @@ const Login = lazy(() => import("@/pages/Login"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Exams = lazy(() => import("@/pages/Exams"));
 const History = lazy(() => import("@/pages/History"));
+const ExamTrack = lazy(() => import("@/pages/ExamTrack"));
 const Profile = lazy(() => import("@/pages/Profile"));
 const Settings = lazy(() => import("@/pages/Settings"));
 const TestRunner = lazy(() => import("@/pages/TestRunner"));
@@ -16,7 +17,7 @@ const Locked = lazy(() => import("@/pages/Locked"));
 const Result = lazy(() => import("@/pages/Result"));
 const BootSplash = lazy(() => import("@/components/BootSplash"));
 const Particles = lazy(() => import("@/components/Particles"));
-import Sidebar from "@/components/Sidebar";
+import Sidebar, { MobileNavigation } from "@/components/Sidebar";
 import UpdateNotifier from "@/components/UpdateNotifier";
 import ExitConfirmModal from "@/components/ExitConfirmModal";
 import ReauthModal from "@/components/ReauthModal";
@@ -39,6 +40,7 @@ export type Route =
   | "dashboard"
   | "exams"
   | "history"
+  | "examTrack"
   | "profile"
   | "settings"
   | "runner"
@@ -57,6 +59,7 @@ const TITLES: Record<Exclude<Route, "login">, string> = {
   dashboard: "Dashboard",
   exams: "Exams",
   history: "History",
+  examTrack: "Exam Track",
   profile: "Profile",
   settings: "Settings",
   runner: "Exam runner",
@@ -379,6 +382,7 @@ export default function App() {
             </div>
           </div>
         )}
+        {showChrome && <MobileNavigation route={activeRoute} onNavigate={navigate} />}
 
         {examActive ? (
           <div className="flex min-h-0 flex-1 flex-col">
@@ -448,6 +452,7 @@ export default function App() {
               {activeRoute === "history" && (
                 <History refreshKey={historyKey} onStats={setStats} />
               )}
+              {activeRoute === "examTrack" && <ExamTrack onBrowse={() => navigate('exams')} />}
               {activeRoute === "profile" && (
                 <Profile
                   name={student?.name ?? null}
