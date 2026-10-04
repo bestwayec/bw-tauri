@@ -87,7 +87,7 @@ export const MockShapedQuestionSchema = z.object({
   options: z.array(z.string()).nullable(),
   points: z.number(),
   wordLimit: nullableNumber,
-  guidance: z.object({ taskKey: z.string(), wordMin: z.number().optional(), wordMax: z.number().optional(), prepSeconds: z.number().optional(), responseSeconds: z.number().optional() }).optional(),
+  guidance: z.object({ taskKey: z.string(), wordMin: z.number().optional(), wordMax: z.number().optional(), prepSeconds: z.number().optional(), responseSeconds: z.number().optional(), speakingProfileVersion: z.string().nullable().optional(), profileLabel: z.string().optional(), rawMax: z.number().optional() }).optional(),
 });
 
 export const MockShapedGroupSchema = z.object({
@@ -134,6 +134,8 @@ export const MockStartResultSchema = z.object({
     id: z.string(),
     type: MockExamTypeSchema,
     specificationVersion: z.string().optional(),
+    speakingProfileVersion: z.string().nullable().optional(),
+    speakingProfile: z.object({ version: z.string(), isOfficialTiming: z.boolean(), parts: z.array(z.object({ key: z.string(), prepSeconds: z.array(z.number().nonnegative()), responseSeconds: z.array(z.number().positive()) })) }).optional(),
     title: z.string(),
     description: nullableString,
     level: nullableString,

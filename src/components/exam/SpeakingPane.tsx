@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { RunnerQuestion } from "@/lib/tests";
+import { markActiveRecording } from '@/lib/durable-recordings';
 
 type Props = {
   q: RunnerQuestion;
@@ -12,6 +13,7 @@ type Props = {
   onBlob?: (blob: Blob) => void;
   /** Upload state text shown under the recorder (mock mode only). */
   uploadNote?: string | null;
+  recordingKey?: string;
 };
 
 const PREP_SECONDS = 60;
@@ -35,7 +37,7 @@ type RecState = "idle" | "recording" | "recorded" | "error";
  * the notes/answer text saved on the right. Works without mic (timers + notes
  * still fully usable) and degrades gracefully when denied.
  */
-export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote }: Props) {
+export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, recordingKey }: Props) {
   const [prepLeft, setPrepLeft] = useState(PREP_SECONDS);
   const [prepRunning, setPrepRunning] = useState(false);
   const [speakLeft, setSpeakLeft] = useState(SPEAK_SECONDS);
@@ -47,6 +49,8 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote }: P
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const requesting = useRef(false);
+  const alive = useRef(true);
   // Speak timer needs to stop the recorder without stale closures.
   const stopRecordingRef = useRef<() => void>(() => {});
   // Upload callback needs the same treatment (fires from rec.onstop).
@@ -74,6 +78,7 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote }: P
       }
     } else {
       stopTracks();
+      if (recordingKey) markActiveRecording(recordingKey, false);
       setRecState((s) => (s === "recording" ? "idle" : s));
     }
   };
@@ -130,30 +135,36 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote }: P
 
   // Release mic + clip on unmount.
   useEffect(
-    () => () => {
+    () => { alive.current = true; return () => {
+      alive.current = false;
       try {
         recorderRef.current?.state !== "inactive" && recorderRef.current?.stop();
       } catch {
         /* ignore */
       }
       stopTracks();
+      if (recordingKey && !recorderRef.current) markActiveRecording(recordingKey, false);
       setClipUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
         return null;
       });
-    },
+    }; },
     [],
   );
 
   async function startRecording() {
+    if (requesting.current || recorderRef.current?.state === 'recording') return;
     setRecError(null);
     if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       setRecState("error");
       setRecError("Recording is not supported in this browser build — use the timers + notes instead.");
       return;
     }
+    requesting.current = true;
     try {
+      if (recordingKey) markActiveRecording(recordingKey, true);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!alive.current) { stream.getTracks().forEach((track) => track.stop()); if (recordingKey) markActiveRecording(recordingKey, false); return; }
       streamRef.current = stream;
       chunksRef.current = [];
       const rec = new MediaRecorder(stream);
@@ -177,17 +188,22 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote }: P
             /* caller surfaces upload errors */
           }
         }
+        if (recordingKey) markActiveRecording(recordingKey, false);
       };
       rec.onerror = () => {
+        if (rec.state === 'recording') rec.stop();
+        else { stopTracks(); if (recordingKey) markActiveRecording(recordingKey, false); }
         setRecState("error");
         setRecError("Recorder failed mid-session — your notes are still saved.");
       };
       rec.start();
       setRecState("recording");
     } catch {
+      stopTracks();
+      if (recordingKey) markActiveRecording(recordingKey, false);
       setRecState("error");
       setRecError("Microphone blocked — allow access in the OS prompt, or practice with timers + notes.");
-    }
+    } finally { requesting.current = false; }
   }
 
   const part = partLabel(q.prompt);
@@ -304,7 +320,7 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote }: P
           <p className="mt-2 text-[11px] leading-relaxed text-brand-subtle-fg/80">{uploadNote}</p>
         )}
         <p className="mt-1.5 text-[11px] leading-relaxed text-white/25">
-          Stays on this device — teachers grade your written notes on the right.
+          {onBlob ? 'Your original recording is uploaded for assessment and teacher review. Retry retained takes if the connection fails.' : 'Practice recording stays on this device.'}
         </p>
       </div>
     </div>

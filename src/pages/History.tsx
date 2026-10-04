@@ -3,6 +3,7 @@ import AttemptReview from "@/components/exam/AttemptReview";
 import { myAttempts, type AttemptSummary } from "@/lib/tests";
 import { usePrograms } from '@/components/ExamTracks';
 import MultilevelHistory from '@/components/MultilevelHistory';
+import MockAssessmentHistory from '@/components/assessment/MockAssessmentHistory';
 
 type Props = {
   /** Refresh signal — bump after each submitted exam so history stays fresh. */
@@ -87,6 +88,8 @@ export default function History({ refreshKey = 0, onStats }: Props) {
           </button>
         )}
       </div>
+
+      <div className="mt-4"><MockAssessmentHistory program="IELTS" refreshKey={refreshKey} /></div>
 
       {loading && (
         <div className="mt-4 space-y-3" aria-label="Loading history">

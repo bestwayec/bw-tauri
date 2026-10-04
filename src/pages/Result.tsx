@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import AttemptReview from "@/components/exam/AttemptReview";
 import { MOCK_SKILL_LABEL, type MockSkill } from "@/lib/mocks";
+import AssessmentFeedback from '@/components/assessment/AssessmentFeedback';
 
 export interface MockResultSummary {
   skill: MockSkill;
@@ -9,8 +10,8 @@ export interface MockResultSummary {
   overallBand: number | null;
   cefrLevel: string | null;
   specificationVersion?: string;
-  scoreMethod?: string;
-  scoreVersion?: string;
+  scoreMethod?: string | null;
+  scoreVersion?: string | null;
   overallScore?: number | null;
   standardScores?: Record<string, { estimatedStandardScore: number }> | null;
 }
@@ -102,7 +103,7 @@ export default function Result({ testTitle, autoScore, maxScore, attemptId, mock
                 <p className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-brand/10 text-2xl ring-1 ring-brand/30">📨</p>
                 <p className="mt-3 text-sm font-semibold text-white">Submitted for grading</p>
                 <p className="mt-1 text-xs text-white/40">
-                  {multilevel ? 'Writing and Speaking await teacher review. Check History for your estimated scores.' : `${MOCK_SKILL_LABEL[mock.skill]} answers are with your teacher now. Check History for the final band.`}
+                  Writing and Speaking await assessment or teacher review. Your submitted answers are saved; feedback appears below and in History.
                 </p>
               </>
             )}
@@ -131,6 +132,7 @@ export default function Result({ testTitle, autoScore, maxScore, attemptId, mock
             </div>
           </div>
         </div>
+        {attemptId && <AssessmentFeedback key={attemptId} attemptId={attemptId} />}
       </section>
     );
   }
