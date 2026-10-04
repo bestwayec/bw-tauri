@@ -23,14 +23,17 @@ pub struct BatteryCache {
 
 impl BatteryCache {
     pub fn new() -> Self {
-        Self { last: Mutex::new(None) }
+        Self {
+            last: Mutex::new(None),
+        }
     }
 
     fn fresh(&self) -> Option<BatteryInfo> {
-        self.last
-            .lock()
-            .ok()
-            .and_then(|g| g.as_ref().filter(|(_, at)| at.elapsed() < CACHE_TTL).map(|(info, _)| info.clone()))
+        self.last.lock().ok().and_then(|g| {
+            g.as_ref()
+                .filter(|(_, at)| at.elapsed() < CACHE_TTL)
+                .map(|(info, _)| info.clone())
+        })
     }
 
     fn store(&self, info: &BatteryInfo) {

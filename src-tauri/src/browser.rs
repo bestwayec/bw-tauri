@@ -99,6 +99,7 @@ mod tests {
         assert!(!url_allowed("https://evibestwayec.uz/"));
         assert!(!url_allowed("http://bestwayec.uz/")); // prod must be https
         assert!(!url_allowed("http://192.168.1.5:3005/")); // LAN IP is not loopback
+
         // Dangerous schemes.
         assert!(!url_allowed("javascript:alert(1)"));
         assert!(!url_allowed("data:text/html,hi"));

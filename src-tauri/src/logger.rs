@@ -36,7 +36,20 @@ fn today_ymd() -> String {
         y += 1;
     }
     let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
-    let lens = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let lens = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     for len in lens {
         if rest < len {
             break;
@@ -93,7 +106,11 @@ pub fn log_line(level: &str, msg: &str) {
     let line = format!("[{}] {level}: {msg}\n", timestamp());
     if let Some(path) = path {
         use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
             let _ = f.write_all(line.as_bytes());
         }
     }
@@ -157,7 +174,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         // 3 files x 2MB = 6MB > 5MB budget -> oldest goes.
-        for name in ["app-2026-01-01.log", "app-2026-01-02.log", "app-2026-01-03.log"] {
+        for name in [
+            "app-2026-01-01.log",
+            "app-2026-01-02.log",
+            "app-2026-01-03.log",
+        ] {
             std::fs::write(dir.join(name), vec![0u8; 2 * 1024 * 1024]).unwrap();
         }
         assert_eq!(prune(&dir), 1);

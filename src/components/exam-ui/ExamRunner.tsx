@@ -589,7 +589,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
 }
 
 /** Per-part material + questions (split right pane or single column). */
-function PartQuestions(props: {
+export function PartQuestions(props: {
   part: UIPart;
   gapped: boolean;
   cardQuestions: UIPart["questions"];
@@ -608,6 +608,7 @@ function PartQuestions(props: {
     <div>
       {part.audioUrl && (
         part.multilevelAudio ? <MultilevelListening
+          key={`${part.multilevelAudio.attemptId}:${part.multilevelAudio.groupId}`}
           prepare={() => post<MediaPhase>(`/mock/attempts/${part.multilevelAudio!.attemptId}/listening/${part.multilevelAudio!.groupId}/prepare`, {})}
           play={() => post<MediaPhase>(`/mock/attempts/${part.multilevelAudio!.attemptId}/listening/${part.multilevelAudio!.groupId}/play`, {})}
           load={() => fetchAuthenticatedMedia(part.audioUrl!)}
