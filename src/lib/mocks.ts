@@ -17,6 +17,7 @@
  * api.ts `request()` already unwraps `{ success, data }` -> `data`.
  */
 import { API_BASE_URL, get, getAccessTokenCached, post } from "./api";
+import type { ExamProgram, PracticeLevel } from './programs';
 import {
   MockExamListSchema,
   MockStartResultSchema,
@@ -37,6 +38,7 @@ export interface MockExamListItem {
   title: string;
   description: string | null;
   level: string | null;
+  practiceLevel?: PracticeLevel | null;
   isDemo: boolean;
   isPublished: boolean;
   skills: MockSkill[];
@@ -72,6 +74,7 @@ export interface MockShapedQuestion {
   options: string[] | null;
   points: number;
   wordLimit: number | null;
+  answerRule?: 'ONE_WORD' | 'ONE_WORD_AND_OR_NUMBER' | null;
   guidance?: { taskKey: string; wordMin?: number; wordMax?: number; prepSeconds?: number; responseSeconds?: number; speakingProfileVersion?: string | null; profileLabel?: string; rawMax?: number };
 }
 
@@ -85,6 +88,8 @@ export interface MockShapedGroup {
   contentHtml: string | null;
   /** Layout hint for the gapped document (e.g. notes/table/summary). Null = default. */
   contentLayout: string | null;
+  /** Null/absent preserves the legacy one-use matching interaction. */
+  optionsReusable?: boolean | null;
   hasAudio: boolean;
   /** Sanitized path like `/v1/mock/groups/:id/audio`, or null. */
   audioUrl: string | null;
@@ -115,6 +120,7 @@ export interface MockShapedExam {
   title: string;
   description: string | null;
   level: string | null;
+  practiceLevel?: PracticeLevel | null;
   isPublished: boolean;
   isDemo: boolean;
   createdAt: string;
@@ -154,8 +160,8 @@ export interface MockSubmitResult {
 }
 
 /** Published + demo mocks visible to the signed-in student. Validated against the backend shape. */
-export async function listMockExams(): Promise<MockExamListItem[]> {
-  const raw = await get<unknown>("/mock/exams");
+export async function listMockExams(program?: ExamProgram, practiceLevel?: PracticeLevel): Promise<MockExamListItem[]> {
+  const raw = await get<unknown>("/mock/exams", { program, practiceLevel });
   return parseOrThrow("GET /mock/exams", MockExamListSchema, raw);
 }
 

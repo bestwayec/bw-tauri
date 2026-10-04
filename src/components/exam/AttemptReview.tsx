@@ -48,7 +48,7 @@ function ItemBadge({ item }: { item: AttemptReviewItem }) {
  * Shared Locate & Explain review: band estimate + per-question right/wrong
  * with correct answer and passage location. Used by Result + History.
  */
-export default function AttemptReview({ attemptId }: { attemptId: string }) {
+export default function AttemptReview({ attemptId, showIeltsEstimate = true }: { attemptId: string; showIeltsEstimate?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<AttemptReviewItem[]>([]);
@@ -82,7 +82,7 @@ export default function AttemptReview({ attemptId }: { attemptId: string }) {
   const sections = useMemo(() => [...new Set(items.map((q) => q.section))], [items]);
   const auto = useMemo(() => items.filter((q) => q.isCorrect != null), [items]);
   const correct = auto.filter((q) => q.isCorrect).length;
-  const band = auto.length > 0 ? rawToBand(correct, auto.length) : null;
+  const band = showIeltsEstimate && auto.length > 0 ? rawToBand(correct, auto.length) : null;
 
   const visible = items.filter((q) => {
     if (section !== "all" && q.section !== section) return false;
@@ -125,12 +125,14 @@ export default function AttemptReview({ attemptId }: { attemptId: string }) {
           <span className="rounded-lg bg-[#89F336]/12 px-2.5 py-1 text-xs font-black text-[#89F336] ring-1 ring-[#89F336]/40">
             ≈ Band {band.toFixed(1)} · {correct}/{auto.length} auto-correct
           </span>
+        ) : auto.length > 0 ? (
+          <span className="rounded-lg bg-[#89F336]/12 px-2.5 py-1 text-xs font-black text-[#89F336]">{correct}/{auto.length} auto-correct</span>
         ) : (
           <span className="rounded-lg bg-amber-400/10 px-2.5 py-1 text-xs font-bold text-amber-200 ring-1 ring-amber-400/30">
             {status === "grading" ? "Auto parts scored — writing/speaking pending" : "Manual grading pending"}
           </span>
         )}
-        <span className="text-[11px] text-white/35">Band is an estimate from auto-marked parts only.</span>
+        {showIeltsEstimate && <span className="text-[11px] text-white/35">Band is an estimate from auto-marked parts only.</span>}
       </div>
 
       {/* Filters */}

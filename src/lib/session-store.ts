@@ -32,6 +32,7 @@ export interface StoredProfile {
   name?: string | null;
   phone?: string | null;
   role?: string;
+  activeProgram?: 'IELTS' | 'MULTILEVEL' | null;
 }
 
 export type SessionStatus = "booting" | "ready" | "logged-out";
@@ -441,6 +442,7 @@ export const useSessionStore = create<SessionState>()((set, get) => {
           name: typeof user.name === "string" ? user.name : null,
           phone: typeof user.phone === "string" ? user.phone : null,
           role: user.role,
+          activeProgram: user.activeProgram,
         };
         set({ profile, online: true });
         await persist(token, undefined, profile).catch(() => undefined);

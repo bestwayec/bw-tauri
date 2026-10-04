@@ -6,6 +6,7 @@ import { post } from '@/lib/api';
 import { uploadMockSpeaking } from '@/lib/mocks';
 import { recordingKey } from '@/lib/durable-recordings';
 import { countWords } from "@/lib/exam-types";
+import { answerRuleHint, exceedsAnswerConstraint } from '@/lib/objective-answers';
 import type { RunnerQuestion } from "@/lib/tests";
 import type { UIQuestion } from "./model";
 
@@ -123,14 +124,15 @@ export function MatchingWidget({
 /** Short completion input with live word-limit hint. */
 export function ShortWidget({ q, value, onChange, fontSize }: WidgetProps) {
   const words = countWords(value);
-  const over = q.wordLimit != null && words > q.wordLimit;
+  const over = exceedsAnswerConstraint(value, q);
+  const hint = answerRuleHint(q);
   return (
     <div>
-      {q.wordLimit != null && (
+      {hint && (
         <p className={`exam-limit${over ? " exam-limit-over" : ""}`}>
-          No more than {q.wordLimit} word{q.wordLimit === 1 ? "" : "s"}
-          {words > 0 ? ` — ${words}/${q.wordLimit}` : ""}
-          {over ? " — too many" : ""}
+          {hint}
+          {words > 0 && !q.answerRule ? ` — ${words}/${q.wordLimit}` : ""}
+          {over ? " — check the answer rule" : ""}
         </p>
       )}
       <input

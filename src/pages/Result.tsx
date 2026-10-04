@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import AttemptReview from "@/components/exam/AttemptReview";
-import { MOCK_SKILL_LABEL, type MockSkill } from "@/lib/mocks";
+import { MOCK_SKILL_LABEL, type MockSkill, type MockExamType } from "@/lib/mocks";
 import AssessmentFeedback from '@/components/assessment/AssessmentFeedback';
 
 export interface MockResultSummary {
   skill: MockSkill;
+  examType?: MockExamType;
   status: string;
   sectionBands: Record<string, number> | null;
   overallBand: number | null;
@@ -18,6 +19,7 @@ export interface MockResultSummary {
 
 type Props = {
   testTitle?: string | null;
+  testType?: string | null;
   autoScore?: number | null;
   maxScore?: number | null;
   attemptId?: string | null;
@@ -72,10 +74,10 @@ function ScoreRing({ score, max }: { score: number; max: number | null }) {
   );
 }
 
-export default function Result({ testTitle, autoScore, maxScore, attemptId, mock, onBack, onHistory }: Props) {
+export default function Result({ testTitle, testType, autoScore, maxScore, attemptId, mock, onBack, onHistory }: Props) {
   const hasScore = autoScore !== null && autoScore !== undefined;
   if (mock) {
-    const multilevel = !!mock.specificationVersion;
+    const multilevel = mock.examType === 'multilevel';
     const band = multilevel ? mock.overallScore ?? mock.standardScores?.[mock.skill]?.estimatedStandardScore : mock.sectionBands?.[mock.skill] ?? mock.overallBand;
     return (
       <section>
@@ -94,8 +96,8 @@ export default function Result({ testTitle, autoScore, maxScore, attemptId, mock
                 <p className="mt-2 text-sm font-semibold text-white">
                   {multilevel ? 'Estimated Multilevel Result /75' : `${MOCK_SKILL_LABEL[mock.skill]} band`}
                 </p>
-                {mock.cefrLevel && (
-                  <p className="mt-1 text-xs text-white/40">CEFR level: {mock.cefrLevel}</p>
+                {multilevel && mock.cefrLevel && (
+                  <p className="mt-1 text-xs text-white/40">Estimated level: {mock.cefrLevel === 'BELOW_B1' ? 'Below B1' : mock.cefrLevel}</p>
                 )}
               </>
             ) : (
@@ -200,7 +202,7 @@ export default function Result({ testTitle, autoScore, maxScore, attemptId, mock
             Green ✓ means auto-marked correct, red ✕ means wrong. Open ⌖ Locate to see the passage lines behind each answer.
           </p>
           <div className="mt-4">
-            <AttemptReview attemptId={attemptId} />
+            <AttemptReview attemptId={attemptId} showIeltsEstimate={testType !== 'multilevel'} />
           </div>
         </div>
       )}

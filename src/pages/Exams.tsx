@@ -1,5 +1,8 @@
 import { useState } from "react";
 import { ExamTracks, usePrograms } from '@/components/ExamTracks';
+import { PRACTICE_LEVELS, programQueryKey, type PracticeLevel } from '@/lib/programs';
+import { matchesCatalogue, type CatalogueCategory } from '@/lib/catalogue';
+import { useSessionStore } from '@/lib/session-store';
 import { useQuery } from "@tanstack/react-query";
 import { API_BASE_URL } from "@/lib/api";
 import { listTests, startTest, type StartResult, type TestListItem } from "@/lib/tests";
@@ -62,17 +65,23 @@ const QUERY_OPTS = {
 
 export default function Exams({ studentName, onStart, onStartMock }: Props) {
   const programs = usePrograms();
+  const program = programs.data?.activeProgram;
+  const userId = useSessionStore((state) => state.profile?.id);
+  const [practiceLevel, setPracticeLevel] = useState<PracticeLevel | 'All'>('All');
+  const [category, setCategory] = useState<CatalogueCategory>('all');
   const [startingId, setStartingId] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
 
   const testsQuery = useQuery({
-    queryKey: ["tests"],
-    queryFn: () => listTests(),
+    queryKey: programQueryKey('tests', userId, program),
+    queryFn: () => listTests(50, program ?? undefined),
+    enabled: !!program,
     ...QUERY_OPTS,
   });
   const mocksQuery = useQuery({
-    queryKey: ["mock-exams"],
-    queryFn: listMockExams,
+    queryKey: [...programQueryKey('mock-exams', userId, program), program === 'MULTILEVEL' ? practiceLevel : 'All'],
+    queryFn: () => listMockExams(program ?? undefined, program === 'MULTILEVEL' && practiceLevel !== 'All' ? practiceLevel : undefined),
+    enabled: !!program,
     ...QUERY_OPTS,
   });
 
@@ -81,14 +90,14 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
   // source genuinely succeeded with zero items.
   const testsError = testsQuery.error ? friendlyError(testsQuery.error) : null;
   const mocksError = mocksQuery.error ? friendlyError(mocksQuery.error) : null;
-  const loading = (testsQuery.isPending && testsQuery.fetchStatus !== "idle") || (mocksQuery.isPending && mocksQuery.fetchStatus !== "idle");
+  const loading = programs.isPending || (testsQuery.isPending && testsQuery.fetchStatus !== "idle") || (mocksQuery.isPending && mocksQuery.fetchStatus !== "idle");
 
   // Students can never start a 0-question exam (backend throws TEST_EMPTY),
   // so hide them outright — an empty row is always junk (seed leftover or
   // unfinished admin draft), never a real assigned exam.
-  const tests = (testsQuery.data ?? []).filter((t) => t.questionCount > 0 && (programs.data?.activeProgram === 'MULTILEVEL' ? t.type === 'multilevel' : t.type !== 'multilevel'));
+  const tests = (testsQuery.data ?? []).filter((t) => t.questionCount > 0 && !!program && matchesCatalogue(t, program, practiceLevel, category));
   // Only show published mocks to students; keep demos visible.
-  const mocks = (mocksQuery.data ?? []).filter((m) => (m.isPublished || m.isDemo) && m.questionCount > 0 && (programs.data?.activeProgram === 'MULTILEVEL' ? m.type === 'multilevel' : m.type !== 'multilevel'));
+  const mocks = (mocksQuery.data ?? []).filter((m) => (m.isPublished || m.isDemo) && m.questionCount > 0 && !!program && matchesCatalogue(m, program, practiceLevel, category));
   const testsLoaded = testsQuery.status === "success";
   const mocksLoaded = mocksQuery.status === "success";
 
@@ -123,7 +132,7 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
     }
   }
 
-  const allTests = tests.filter((t) => programs.data?.activeProgram === 'MULTILEVEL' ? t.type === 'multilevel' : t.type !== 'multilevel');
+  const allTests = tests;
   const allMocks: UnifiedItem[] = [
     ...allTests.map((t) => ({ kind: "test" as const, data: t })),
     ...mocks.map((m) => ({ kind: "mock" as const, data: m })),
@@ -144,6 +153,13 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
           Auto-sync
         </span>
       </div>
+
+      {program && <h2 className="mt-4 text-lg font-bold">{program === 'IELTS' ? 'IELTS exams' : 'Multilevel exams'}</h2>}
+      {program === 'MULTILEVEL' && <div className="mt-3 space-y-3">
+        <div><p className="mb-2 text-xs text-white/50">Practice content level</p><div className="flex flex-wrap gap-2" aria-label="Practice level">{(['All', ...PRACTICE_LEVELS] as const).map((level) => <button key={level} type="button" aria-pressed={practiceLevel === level} className={`rounded-lg px-3 py-2 text-xs ${practiceLevel === level ? 'btn-brand' : 'btn-ghost'}`} onClick={() => { setPracticeLevel(level); if (level !== 'All' && category === 'full_mock') setCategory('all'); }}>{level}</button>)}</div></div>
+        <div className="flex flex-wrap gap-2" aria-label="Exam category">{(['all', 'full_mock', 'listening', 'reading', 'writing', 'speaking'] as const).map((value) => <button key={value} type="button" aria-pressed={category === value} className={`rounded-lg px-3 py-2 text-xs capitalize ${category === value ? 'btn-brand' : 'btn-ghost'}`} onClick={() => { setCategory(value); if (value === 'full_mock') setPracticeLevel('All'); }}>{value === 'full_mock' ? 'Full Mock' : value === 'all' ? 'All skills' : value}</button>)}</div>
+        <p className="text-xs text-white/50">A1–C1 describe practice content. Full Mock estimated results remain Below B1 / B1 / B2 / C1.</p>
+      </div>}
 
       {!loading && (testsLoaded || mocksLoaded) && (
         <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
@@ -192,10 +208,10 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
         </div>
       )}
 
-      {!loading && !testsError && !mocksError && allMocks.length === 0 && (
+      {!!program && !loading && !testsError && !mocksError && allMocks.length === 0 && (
         <div className="card mt-4 rounded-2xl p-6 text-center">
           <p className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-white/5 text-xl">🎯</p>
-          <p className="mt-3 text-sm font-semibold text-white">No exams assigned yet</p>
+          <p className="mt-3 text-sm font-semibold text-white">{program === 'MULTILEVEL' && (practiceLevel !== 'All' || category !== 'all') ? 'No exams match these filters' : 'No exams available yet'}</p>
           <p className="mx-auto mt-1 max-w-70 text-xs text-white/40">
             New tests and mock exams appear here automatically once an admin creates them. The list refreshes every 30s and when you return to this window.
           </p>
@@ -222,9 +238,9 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
                         >
                           {t.type}
                         </span>
-                        {t.level && (
+                        {(program === 'MULTILEVEL' ? t.practiceLevel : t.level) && (
                           <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-white/60 ring-1 ring-white/10">
-                            {t.level}
+                            {program === 'MULTILEVEL' ? `Practice ${t.practiceLevel}` : t.level}
                           </span>
                         )}
                         {t.isDemo && (
@@ -282,9 +298,9 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1 ${TYPE_STYLE[m.type] ?? "bg-white/10 text-white/70 ring-white/20"}`}>
                           {m.type === "multilevel" ? "multilevel" : "ielts"}
                         </span>
-                        {m.level && (
+                        {(program === 'MULTILEVEL' ? m.practiceLevel : m.level) && (
                           <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-white/60 ring-1 ring-white/10">
-                            {m.level}
+                            {program === 'MULTILEVEL' ? `Practice ${m.practiceLevel}` : m.level}
                           </span>
                         )}
                         {m.isDemo && (
