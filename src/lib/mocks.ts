@@ -209,7 +209,7 @@ export async function uploadMockSpeaking(
   attemptId: string,
   questionId: string,
   blob: Blob,
-  filename = "speaking.webm",
+  filename = blob.type.startsWith('audio/mp4') ? 'speaking.m4a' : 'speaking.webm',
 ): Promise<{ saved: boolean; audioUrl: string }> {
   const form = new FormData();
   form.append("audio", blob, filename);

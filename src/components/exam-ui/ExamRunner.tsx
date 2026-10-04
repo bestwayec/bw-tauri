@@ -7,6 +7,7 @@ import BottomNav from "./BottomNav";
 import ListeningEngine from "./ListeningEngine";
 import { MultilevelListening, type MediaPhase } from '@/components/exam/multilevel-media';
 import { post } from '@/lib/api';
+import { flushBeforeSubmission } from '@/lib/exam-submission';
 import { fetchAuthenticatedMedia } from '@/lib/media';
 import PassagePane, { type PassageMarks } from "./PassagePane";
 import QuestionGroup from "./QuestionGroup";
@@ -98,6 +99,8 @@ export function notifyExamAuthIssue(e: unknown): boolean {
  * offline-tolerant autosave, and a light-by-default theme.
  */
 export default function ExamRunner(p: ExamRunnerProps) {
+  const versioned = p.parts.some((part) => part.questions.some((q) => q.guidance));
+  const writableIds = new Set(p.parts.flatMap((part) => part.questions.map((q) => q.id)));
   const [partIdx, setPartIdx] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>(() => {
     // Merge the persisted offline queue: only ids that were still unsaved
@@ -107,7 +110,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
       const dirtySet = new Set(q.dirty);
       const merged = { ...p.initialAnswers };
       for (const [qid, v] of Object.entries(q.answers)) {
-        if (dirtySet.has(qid) && typeof v === "string") merged[qid] = v;
+        if (dirtySet.has(qid) && typeof v === "string" && (!versioned || writableIds.has(qid))) merged[qid] = v;
       }
       return merged;
     } catch {
@@ -136,7 +139,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
     new Set(
       (() => {
         try {
-          return loadQueue(p.attemptId).dirty;
+          return loadQueue(p.attemptId).dirty.filter((id) => !versioned || writableIds.has(id));
         } catch {
           return [];
         }
@@ -149,11 +152,11 @@ export default function ExamRunner(p: ExamRunnerProps) {
   }, [answers]);
   const persistTimer = useRef<number | null>(null);
 
-  // Durable queue: every keystroke lands in localStorage (debounced) so a
-  // crash/reload mid-exam loses nothing. Cleared when fully flushed.
+  // Multilevel writes synchronously so a section remount or immediate reload
+  // cannot cancel the last keystroke's persistence timer.
   function persistQueue() {
     if (persistTimer.current) window.clearTimeout(persistTimer.current);
-    persistTimer.current = window.setTimeout(() => {
+    const write = () => {
       try {
         if (dirty.current.size === 0) localStorage.removeItem(queueKey(p.attemptId));
         else {
@@ -164,7 +167,9 @@ export default function ExamRunner(p: ExamRunnerProps) {
       } catch {
         /* private mode — memory only */
       }
-    }, 500);
+    };
+    if (versioned) write();
+    else persistTimer.current = window.setTimeout(write, 500);
   }
 
   useEffect(
@@ -307,11 +312,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
       setSubmitting(true);
       setError(null);
       try {
-        try {
-          await flush();
-        } catch (e) {
-          setError(friendlyError(e)); // save blocked (e.g. time-up) — submit anyway
-        }
+        await flushBeforeSubmission(flush, { versioned, auto }, (e) => setError(friendlyError(e)));
         submittedRef.current = true;
         await p.submit();
       } catch (e) {
@@ -322,23 +323,26 @@ export default function ExamRunner(p: ExamRunnerProps) {
         else setError("Session expired — sign in again to finish submitting. Your answers are queued.");
       }
     },
-    [flush, p],
+    [flush, p, versioned],
   );
 
   useEffect(() => {
     if (p.deadlineIso == null) return;
+    let nextRetry = 0;
     setRemaining(remainingMs(p.deadlineIso, offsetMs));
     const id = window.setInterval(() => {
       const r = remainingMs(p.deadlineIso, offsetMs);
       setRemaining(r);
       if (r != null && r <= 0) {
-        window.clearInterval(id);
+        if (!versioned) window.clearInterval(id);
+        if (Date.now() < nextRetry) return;
+        nextRetry = Date.now() + 10000;
         setTimeUp(true);
         void doSubmit(true);
       }
     }, 1000);
     return () => window.clearInterval(id);
-  }, [p.deadlineIso, offsetMs, doSubmit]);
+  }, [p.deadlineIso, offsetMs, doSubmit, versioned]);
 
   // ---- navigation ----
   function gotoPart(i: number, qGlobal?: number) {

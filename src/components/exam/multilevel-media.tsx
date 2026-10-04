@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { recordingKey, recoverRecording, retainRecording, releaseRecording, markActiveRecording } from '@/lib/durable-recordings';
 
 export interface MediaPhase { startedAt: string; prepEndsAt: string; expiresAt: string; plays: number; serverTime: string; playLimit: number }
@@ -73,73 +73,97 @@ export function MultilevelRecorder({ attemptId, questionId, timed, initialHasAud
   const onUploadedRef = useRef(onUploaded); onUploadedRef.current = onUploaded;
   const retainedRef = useRef<Blob | null>(null);
   const uploading = useRef(false);
-  useEffect(() => { markActiveRecording(key, ['preparing','recording','uploading'].includes(status)); return () => markActiveRecording(key, false); }, [key, status]);
+  const busy = useRef(false);
+  const aliveRef = useRef(true);
+  const stage = useCallback((next: string) => {
+    busy.current = ['checking','starting','preparing','recording','finalizing','uploading'].includes(next);
+    markActiveRecording(key, busy.current);
+    setStatus(next);
+  }, [key]);
+  const closeMicrophone = useCallback(() => {
+    stream.current?.getTracks().forEach((t) => t.stop());
+    stream.current = null;
+    const ctx = context.current; context.current = null;
+    if (ctx && ctx.state !== 'closed') void ctx.close().catch(() => undefined);
+  }, []);
   async function send(blob: Blob) {
     if (uploading.current) return;
-    uploading.current = true; setStatus('uploading'); setError(null);
-    try { await uploadRef.current(blob); await releaseRecording(key); retainedRef.current = null; setPending(null); setRecorded(true); setStatus('saved'); onUploadedRef.current?.(); window.dispatchEvent(new CustomEvent("multilevel:recording-uploaded", { detail: { attemptId, questionId } })); }
-    catch (e) { setStatus('retry'); setError(e instanceof Error ? e.message : 'Upload failed. Your recording is retained; retry upload.'); }
+    uploading.current = true; stage('uploading'); setError(null);
+    try { await uploadRef.current(blob); await releaseRecording(key); retainedRef.current = null; setPending(null); setRecorded(true); stage('saved'); onUploadedRef.current?.(); window.dispatchEvent(new CustomEvent("multilevel:recording-uploaded", { detail: { attemptId, questionId } })); }
+    catch (e) { stage('retry'); setError(e instanceof Error ? e.message : 'Upload failed. Your recording is retained; retry upload.'); }
     finally { uploading.current = false; }
   }
   const sendRef = useRef(send); sendRef.current = send;
   useEffect(() => {
     let alive = true;
+    aliveRef.current = true;
     void recoverRecording(key).then((blob) => { if (alive && blob) { retainedRef.current = blob; setPending(blob); setStatus('retry'); } }).catch(() => { if (alive) setError('Local recording recovery is unavailable.'); });
     const retry = () => { if (retainedRef.current) void sendRef.current(retainedRef.current); };
     window.addEventListener('online', retry);
-    return () => { alive = false; window.removeEventListener('online', retry); if (recorder.current?.state === 'recording') recorder.current.stop(); stream.current?.getTracks().forEach((t) => t.stop()); void context.current?.close(); };
-  }, [key]);
+    return () => { alive = false; aliveRef.current = false; window.removeEventListener('online', retry); if (recorder.current?.state === 'recording') { stage('finalizing'); recorder.current.stop(); } else markActiveRecording(key, false); closeMicrophone(); };
+  }, [key, stage, closeMicrophone]);
   useEffect(() => {
     if (!phase) return;
     const id = window.setInterval(() => {
       const remaining = seconds(status === 'preparing' ? phase.prepEndsAt : phase.expiresAt, offset.current); setLeft(remaining);
       if (seconds(phase.prepEndsAt, offset.current) <= 0 && status === 'preparing') beginRecording();
-      if (seconds(phase.expiresAt, offset.current) <= 0 && recorder.current?.state === 'recording') recorder.current.stop();
+      if (seconds(phase.expiresAt, offset.current) <= 0 && recorder.current?.state === 'recording') { stage('finalizing'); recorder.current.stop(); }
     }, 200);
     return () => clearInterval(id);
     // beginRecording uses refs; phase/status identify the current stage.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, status]);
   async function preflight() {
-    setError(null);
+    if (busy.current) return;
+    stage('checking'); setError(null);
     try {
-      stream.current?.getTracks().forEach((t) => t.stop());
-      await context.current?.close();
+      closeMicrophone();
+      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') throw new Error('Microphone recording is unavailable on this device.');
       stream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!aliveRef.current) { closeMicrophone(); markActiveRecording(key, false); return; }
       if (!MediaRecorder.isTypeSupported('audio/webm') && !MediaRecorder.isTypeSupported('audio/mp4')) throw new Error('Recording format is unsupported');
-      setStatus('ready');
+      stage('ready');
       const ctx = new AudioContext(); context.current = ctx;
       const analyser = ctx.createAnalyser(); ctx.createMediaStreamSource(stream.current).connect(analyser);
       const buffer = new Uint8Array(analyser.fftSize);
       const meter = () => { if (context.current !== ctx || ctx.state === 'closed') return; analyser.getByteTimeDomainData(buffer); setLevel(Math.max(...buffer.map((v) => Math.abs(v-128))) / 128); requestAnimationFrame(meter); };
       meter();
-    } catch (e) { setError(e instanceof Error ? e.message : 'Microphone permission denied'); }
+    } catch (e) {
+      closeMicrophone(); stage('idle');
+      const name = e instanceof Error ? e.name : '';
+      setError(name === 'NotAllowedError' ? 'Microphone permission denied. Allow microphone access and retry.' : name === 'NotFoundError' ? 'No microphone was found. Connect a microphone and retry.' : e instanceof Error ? e.message : 'Microphone unavailable');
+    }
   }
   function beginRecording() {
     if (!stream.current || recorder.current?.state === 'recording') return;
+    try {
     const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
     const mr = new MediaRecorder(stream.current, { mimeType }); recorder.current = mr;
     const chunks: Blob[] = [];
     mr.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-    mr.onerror = () => setError('Recording failed. Check your microphone.');
+    mr.onerror = () => { stage('finalizing'); setError('Recording failed. Check your microphone.'); if (mr.state === 'recording') mr.stop(); };
     mr.onstop = () => {
-      stream.current?.getTracks().forEach((t) => t.stop()); void context.current?.close();
-      const blob = new Blob(chunks, { type: mr.mimeType }); retainedRef.current = blob; setPending(blob);
-      void retainRecording(key, blob).then(() => sendRef.current(blob)).catch(() => { setStatus('retry'); setError('Could not persist the take locally. Keep this page open and retry upload.'); });
+      stage('finalizing'); closeMicrophone();
+      const blob = new Blob(chunks, { type: mr.mimeType });
+      if (!blob.size) { stage('idle'); setError('The microphone produced an empty recording. Check the device and contact your supervisor for a timed retry.'); return; }
+      retainedRef.current = blob; setPending(blob);
+      void retainRecording(key, blob).then(() => sendRef.current(blob)).catch(() => { stage('retry'); setError('Could not persist the take locally. Keep this page open and retry upload.'); });
     };
-    mr.start(1000); setStatus('recording');
+    mr.start(1000); stage('recording');
+    } catch (e) { closeMicrophone(); stage('idle'); setError(e instanceof Error ? e.message : 'Recording could not start'); }
   }
   async function start() {
-    setError(null);
+    if (busy.current) return;
+    stage('starting'); setError(null);
     try { const next = await startPhase(); offset.current = Date.parse(next.serverTime)-Date.now(); setPhase(next);
       if (timed && seconds(next.expiresAt, offset.current) <= 0) throw new Error('This speaking response has expired.');
-      if (timed) setStatus('preparing'); else beginRecording();
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not start speaking task'); }
+      if (timed) stage('preparing'); else beginRecording();
+    } catch (e) { closeMicrophone(); stage('idle'); setError(e instanceof Error ? e.message : 'Could not start speaking task'); }
   }
   return <div className="my-3 space-y-2 rounded-lg border border-current/20 p-3">
     <p role="status">{recorded ? 'Recording uploaded' : status} {phase && `${left}s remaining`}</p>
     {!pending && !(timed && recorded) && <>
-      <button type="button" disabled={['preparing','recording','uploading'].includes(status)} onClick={() => void preflight()}>Test microphone</button>
+      <button type="button" disabled={['checking','starting','preparing','recording','finalizing','uploading'].includes(status)} onClick={() => void preflight()}>Test microphone</button>
       {status === 'ready' && <><meter aria-label="Microphone input level" min="0" max="1" value={level} /><p>Speak and check that the meter responds.</p><button type="button" onClick={() => void start()}>Start response</button></>}
       {status === 'recording' && !timed && <button type="button" onClick={() => recorder.current?.stop()}>Stop recording</button>}
     </>}
