@@ -42,9 +42,7 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let icon = app
         .default_window_icon()
         .cloned()
-        .or_else(|| {
-            tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png")).ok()
-        });
+        .or_else(|| tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png")).ok());
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("Bestway Exam — running in background")
@@ -56,9 +54,7 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 // Never let a locked exam be killed from the tray.
                 let locked = app
                     .try_state::<super::LockState>()
-                    .map(|s| {
-                        s.0.load(std::sync::atomic::Ordering::SeqCst)
-                    })
+                    .map(|s| s.0.load(std::sync::atomic::Ordering::SeqCst))
                     .unwrap_or(false);
                 if locked {
                     show_main(app);

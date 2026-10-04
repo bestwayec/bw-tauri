@@ -100,9 +100,7 @@ fn remove_file_store(dir: &Path) {
 
 /// Load order: keyring -> file fallback (which then re-seeds keyring).
 pub fn load_from_disk(app_dir: &Path) -> (SessionData, bool) {
-    match keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
-        .and_then(|e| e.get_password())
-    {
+    match keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT).and_then(|e| e.get_password()) {
         Ok(raw) => match serde_json::from_str::<SessionData>(&raw) {
             Ok(data) => return (data, false),
             Err(e) => eprintln!("[session] keyring payload unreadable, trying file fallback: {e}"),
@@ -117,9 +115,7 @@ pub fn load_from_disk(app_dir: &Path) -> (SessionData, bool) {
 
 pub fn save_to_disk(app_dir: &Path, data: &SessionData) {
     let raw = serde_json::to_string(data).unwrap_or_default();
-    match keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
-        .and_then(|e| e.set_password(&raw))
-    {
+    match keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT).and_then(|e| e.set_password(&raw)) {
         Ok(()) => {
             // Keyring won: drop any stale file copy so only one store holds tokens.
             remove_file_store(app_dir);
@@ -184,7 +180,10 @@ impl SessionStore {
     }
 
     fn dir(&self) -> PathBuf {
-        self.app_dir.lock().map(|g| g.clone()).unwrap_or_else(|_| std::env::temp_dir())
+        self.app_dir
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_else(|_| std::env::temp_dir())
     }
 
     pub fn snapshot(&self) -> SessionData {
@@ -208,16 +207,20 @@ impl SessionStore {
     /// Refresh the pair. `expected_access` is the caller's current access
     /// token: if memory already holds something else, another instance won
     /// the race — adopt it without spending the refresh token.
-    pub async fn refresh(&self, base_url: &str, expected_access: Option<String>) -> Result<String, String> {
+    pub async fn refresh(
+        &self,
+        base_url: &str,
+        expected_access: Option<String>,
+    ) -> Result<String, String> {
         let _guard = self.refresh_lock.lock().await;
 
         let current = self.snapshot();
         if should_reuse_stored(current.access_token.as_deref(), expected_access.as_deref()) {
-            return current
-                .access_token
-                .ok_or_else(|| "NO_SESSION".to_string());
+            return current.access_token.ok_or_else(|| "NO_SESSION".to_string());
         }
-        let refresh_token = current.refresh_token.ok_or_else(|| "NO_REFRESH_TOKEN".to_string())?;
+        let refresh_token = current
+            .refresh_token
+            .ok_or_else(|| "NO_REFRESH_TOKEN".to_string())?;
 
         let url = format!("{}/auth/refresh", base_url.trim_end_matches('/'));
         let client = reqwest::Client::builder()
@@ -239,7 +242,8 @@ impl SessionStore {
 
         let status = res.status();
         let text = res.text().await.unwrap_or_default();
-        let payload: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+        let payload: serde_json::Value =
+            serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
         // Backend envelope: { success, data } or { success:false, error:{code,message} }.
         let data = payload.get("data");
         let err_obj = payload.get("error");
@@ -318,7 +322,10 @@ impl SessionStore {
 }
 
 #[tauri::command]
-pub async fn auth_logout(store: tauri::State<'_, SessionStore>, base_url: String) -> Result<(), String> {
+pub async fn auth_logout(
+    store: tauri::State<'_, SessionStore>,
+    base_url: String,
+) -> Result<(), String> {
     store.logout(&base_url).await;
     Ok(())
 }
@@ -362,7 +369,10 @@ mod tests {
         };
         write_file_store(&dir, &data).unwrap();
         assert_eq!(read_file_store(&dir), Some(data));
-        assert!(!session_file(&dir).with_extension("tmp").exists() && !dir.join("session.json.tmp").exists());
+        assert!(
+            !session_file(&dir).with_extension("tmp").exists()
+                && !dir.join("session.json.tmp").exists()
+        );
         remove_file_store(&dir);
         assert_eq!(read_file_store(&dir), None);
         let _ = std::fs::remove_dir_all(&dir);

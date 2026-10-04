@@ -8,6 +8,11 @@ export interface MockResultSummary {
   sectionBands: Record<string, number> | null;
   overallBand: number | null;
   cefrLevel: string | null;
+  specificationVersion?: string;
+  scoreMethod?: string;
+  scoreVersion?: string;
+  overallScore?: number | null;
+  standardScores?: Record<string, { estimatedStandardScore: number }> | null;
 }
 
 type Props = {
@@ -69,7 +74,8 @@ function ScoreRing({ score, max }: { score: number; max: number | null }) {
 export default function Result({ testTitle, autoScore, maxScore, attemptId, mock, onBack, onHistory }: Props) {
   const hasScore = autoScore !== null && autoScore !== undefined;
   if (mock) {
-    const band = mock.sectionBands?.[mock.skill] ?? mock.overallBand;
+    const multilevel = !!mock.specificationVersion;
+    const band = multilevel ? mock.overallScore ?? mock.standardScores?.[mock.skill]?.estimatedStandardScore : mock.sectionBands?.[mock.skill] ?? mock.overallBand;
     return (
       <section>
         <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-brand/70">
@@ -83,9 +89,9 @@ export default function Result({ testTitle, autoScore, maxScore, attemptId, mock
           <div className="card rounded-2xl p-6 text-center">
             {band != null ? (
               <>
-                <p className="text-5xl font-black text-white tabular-nums">{band.toFixed(1)}</p>
+                <p className="text-5xl font-black text-white tabular-nums">{band.toFixed(multilevel ? 2 : 1)}</p>
                 <p className="mt-2 text-sm font-semibold text-white">
-                  {MOCK_SKILL_LABEL[mock.skill]} band
+                  {multilevel ? 'Estimated Multilevel Result /75' : `${MOCK_SKILL_LABEL[mock.skill]} band`}
                 </p>
                 {mock.cefrLevel && (
                   <p className="mt-1 text-xs text-white/40">CEFR level: {mock.cefrLevel}</p>
@@ -96,10 +102,11 @@ export default function Result({ testTitle, autoScore, maxScore, attemptId, mock
                 <p className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-brand/10 text-2xl ring-1 ring-brand/30">📨</p>
                 <p className="mt-3 text-sm font-semibold text-white">Submitted for grading</p>
                 <p className="mt-1 text-xs text-white/40">
-                  {MOCK_SKILL_LABEL[mock.skill]} answers are with your teacher now. Check History for the final band.
+                  {multilevel ? 'Writing and Speaking await teacher review. Check History for your estimated scores.' : `${MOCK_SKILL_LABEL[mock.skill]} answers are with your teacher now. Check History for the final band.`}
                 </p>
               </>
             )}
+            {multilevel && <div className="mt-3 text-sm"><p>Estimated · unofficial</p>{Object.entries(mock.standardScores ?? {}).map(([skill, score]) => <p key={skill}>{skill}: {score.estimatedStandardScore}/75</p>)}<p className="text-xs opacity-60">{mock.specificationVersion} · {mock.scoreMethod} · {mock.scoreVersion}</p></div>}
           </div>
 
           <div className="card rounded-2xl p-6">

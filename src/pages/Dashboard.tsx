@@ -10,6 +10,8 @@ import {
   type TestListItem,
 } from "@/lib/tests";
 import { listMockExams } from "@/lib/mocks";
+import { ExamTracks, usePrograms } from '@/components/ExamTracks';
+import MultilevelHistory from '@/components/MultilevelHistory';
 
 type Props = {
   studentName: string | null;
@@ -43,6 +45,7 @@ const OVERVIEW_QUERY_OPTS = {
 } as const;
 
 export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
+  const programs = usePrograms();
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [resumingId, setResumingId] = useState<string | null>(null);
 
@@ -62,8 +65,9 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
 
   // Include live mock count in assigned so new mocks appear without manual refresh.
   // 0-question rows are junk (never startable) — hide them like Exams does.
-  const tVisible = (testsQuery.data ?? []).filter((x) => x.questionCount > 0);
-  const publishedMocks = (mocksQuery.data ?? []).filter((x) => (x.isPublished || x.isDemo) && x.questionCount > 0);
+  const matchesTrack = (type: string) => programs.data?.activeProgram === 'MULTILEVEL' ? type === 'multilevel' : type !== 'multilevel';
+  const tVisible = (testsQuery.data ?? []).filter((x) => x.questionCount > 0 && matchesTrack(x.type));
+  const publishedMocks = (mocksQuery.data ?? []).filter((x) => (x.isPublished || x.isDemo) && x.questionCount > 0 && matchesTrack(x.type));
   // Merge for display purposes: tests are primary, mocks are additive for stats.
   // Mock-origin rows carry _isMock so resume never sends them to /tests/start.
   const tests: TestListItem[] = [
@@ -113,6 +117,7 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
     : null;
   const recent = (attempts ?? []).slice(0, 6);
 
+  if (programs.data?.activeProgram === 'MULTILEVEL') return <section><h1 className="text-2xl font-bold">{greeting(studentName)}</h1><ExamTracks /><div className="my-4 grid grid-cols-2 gap-3">{(['listening','reading','writing','speaking'] as const).map((skill)=><button key={skill} className="card rounded-xl p-4 text-left capitalize" onClick={()=>onNavigate('exams')}>{skill}<span className="block text-sm normal-case opacity-60">{publishedMocks.filter((e)=>e.skills.includes(skill)).length} available exams</span></button>)}</div><MultilevelHistory refreshKey={0} /></section>;
   return (
     <section>
       <div className="flex flex-wrap items-center justify-between gap-3">

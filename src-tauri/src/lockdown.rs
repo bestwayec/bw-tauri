@@ -59,12 +59,12 @@ mod windows_hook {
         atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering},
         Mutex,
     };
-    use windows::Win32::Foundation::{LRESULT, LPARAM, WPARAM};
+    use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
-        TranslateMessage, UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, MSG, HC_ACTION,
-        LLKHF_ALTDOWN, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
+        TranslateMessage, UnhookWindowsHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, LLKHF_ALTDOWN,
+        MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
     };
 
     static HOOK: AtomicIsize = AtomicIsize::new(0);
@@ -81,8 +81,7 @@ mod windows_hook {
     unsafe extern "system" fn ll_hook(ncode: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         if ncode == HC_ACTION as i32 && LOCKED.load(Ordering::SeqCst) {
             let msg = wparam.0 as u32;
-            if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN || msg == WM_KEYUP || msg == WM_SYSKEYUP
-            {
+            if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN || msg == WM_KEYUP || msg == WM_SYSKEYUP {
                 let info = *(lparam.0 as *const KBDLLHOOKSTRUCT);
                 let vk = info.vkCode;
                 let alt_down = (info.flags.0 & LLKHF_ALTDOWN.0) != 0;
@@ -251,7 +250,9 @@ fn apply_linux_lockdown(locked: bool) {
             let (conn, screen) = match x11rb::connect(None) {
                 Ok(v) => v,
                 Err(e) => {
-                    eprintln!("[lockdown] Linux: X11 connect failed: {e} (fallback: fullscreen+top)");
+                    eprintln!(
+                        "[lockdown] Linux: X11 connect failed: {e} (fallback: fullscreen+top)"
+                    );
                     GRAB_THREAD_RUNNING.store(false, Ordering::SeqCst);
                     return;
                 }

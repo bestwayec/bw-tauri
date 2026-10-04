@@ -5,6 +5,10 @@ import BlobImage from "@/components/exam/BlobImage";
 import GappedContent, { gapNumbersIn, hasGappedDocument } from "@/components/exam/GappedContent";
 import BottomNav from "./BottomNav";
 import ListeningEngine from "./ListeningEngine";
+import { MultilevelListening, type MediaPhase } from '@/components/exam/multilevel-media';
+import { post } from '@/lib/api';
+import { flushBeforeSubmission } from '@/lib/exam-submission';
+import { fetchAuthenticatedMedia } from '@/lib/media';
 import PassagePane, { type PassageMarks } from "./PassagePane";
 import QuestionGroup from "./QuestionGroup";
 import TopBar, { type SaveState } from "./TopBar";
@@ -95,6 +99,8 @@ export function notifyExamAuthIssue(e: unknown): boolean {
  * offline-tolerant autosave, and a light-by-default theme.
  */
 export default function ExamRunner(p: ExamRunnerProps) {
+  const versioned = p.parts.some((part) => part.questions.some((q) => q.guidance));
+  const writableIds = new Set(p.parts.flatMap((part) => part.questions.map((q) => q.id)));
   const [partIdx, setPartIdx] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>(() => {
     // Merge the persisted offline queue: only ids that were still unsaved
@@ -104,14 +110,18 @@ export default function ExamRunner(p: ExamRunnerProps) {
       const dirtySet = new Set(q.dirty);
       const merged = { ...p.initialAnswers };
       for (const [qid, v] of Object.entries(q.answers)) {
-        if (dirtySet.has(qid) && typeof v === "string") merged[qid] = v;
+        if (dirtySet.has(qid) && typeof v === "string" && (!versioned || writableIds.has(qid))) merged[qid] = v;
       }
       return merged;
     } catch {
       return p.initialAnswers;
     }
   });
-  const [audioDone] = useState<Record<string, boolean>>(() => p.initialAudioDone ?? {});
+  const [audioDone, setAudioDone] = useState<Record<string, boolean>>(() => p.initialAudioDone ?? {});
+  useEffect(() => {
+    const saved = (event: Event) => { const detail=(event as CustomEvent<{attemptId:string;questionId:string}>).detail; if(detail?.attemptId===p.attemptId) setAudioDone((previous)=>({...previous,[detail.questionId]:true})); };
+    window.addEventListener('multilevel:recording-uploaded',saved); return()=>window.removeEventListener('multilevel:recording-uploaded',saved);
+  },[p.attemptId]);
   const [flags, setFlags] = useState<Record<string, boolean>>(() => ({}));
   const [currentQ, setCurrentQ] = useState(0);
   const [fontSize, setFontSize] = useState(17);
@@ -129,7 +139,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
     new Set(
       (() => {
         try {
-          return loadQueue(p.attemptId).dirty;
+          return loadQueue(p.attemptId).dirty.filter((id) => !versioned || writableIds.has(id));
         } catch {
           return [];
         }
@@ -142,11 +152,11 @@ export default function ExamRunner(p: ExamRunnerProps) {
   }, [answers]);
   const persistTimer = useRef<number | null>(null);
 
-  // Durable queue: every keystroke lands in localStorage (debounced) so a
-  // crash/reload mid-exam loses nothing. Cleared when fully flushed.
+  // Multilevel writes synchronously so a section remount or immediate reload
+  // cannot cancel the last keystroke's persistence timer.
   function persistQueue() {
     if (persistTimer.current) window.clearTimeout(persistTimer.current);
-    persistTimer.current = window.setTimeout(() => {
+    const write = () => {
       try {
         if (dirty.current.size === 0) localStorage.removeItem(queueKey(p.attemptId));
         else {
@@ -157,7 +167,9 @@ export default function ExamRunner(p: ExamRunnerProps) {
       } catch {
         /* private mode — memory only */
       }
-    }, 500);
+    };
+    if (versioned) write();
+    else persistTimer.current = window.setTimeout(write, 500);
   }
 
   useEffect(
@@ -208,15 +220,19 @@ export default function ExamRunner(p: ExamRunnerProps) {
   const split = !!part?.passageText;
 
   // ---- autosave (debounced per answer, bulk flush, offline queue) ----
-  const flush = useCallback(async () => {
+  const saveInFlight = useRef<Promise<void> | null>(null);
+  const flush = useCallback(async function flushQueue(): Promise<void> {
+    if (saveInFlight.current) { await saveInFlight.current; return flushQueue(); }
     const ids = [...dirty.current];
     if (ids.length === 0) return;
-    dirty.current.clear();
     setSaveState("saving");
     const payload = ids.map((id) => ({ questionId: id, response: answersRef.current[id] ?? "" }));
+    const operation = (async () => {
     try {
       if (payload.length === 1) await p.saveOne(payload[0].questionId, payload[0].response);
       else await p.saveMany(payload);
+      for (const item of payload) if (answersRef.current[item.questionId] === item.response) dirty.current.delete(item.questionId);
+      persistQueue();
       if (dirty.current.size === 0) {
         try {
           localStorage.removeItem(queueKey(p.attemptId));
@@ -232,15 +248,24 @@ export default function ExamRunner(p: ExamRunnerProps) {
       notifyExamAuthIssue(e);
       throw e;
     }
+    })();
+    saveInFlight.current = operation;
+    try { await operation; } finally { saveInFlight.current = null; }
   }, [p]);
 
   function setAnswer(qid: string, value: string, immediate = false) {
+    answersRef.current = { ...answersRef.current, [qid]: value };
+    dirty.current.add(qid);
+    persistQueue();
     setAnswers((a) => (a[qid] === value ? a : { ...a, [qid]: value }));
+    if (allQuestions.some((q) => q.guidance)) { setSaveState('saving'); scheduleFlush(); return; }
     if (immediate) {
       setSaveState("saving");
       void p
         .saveOne(qid, value)
         .then(() => {
+          if (answersRef.current[qid] === value) dirty.current.delete(qid);
+          persistQueue();
           if (dirty.current.size === 0) setSaveState("saved");
         })
         .catch((e: unknown) => {
@@ -287,11 +312,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
       setSubmitting(true);
       setError(null);
       try {
-        try {
-          await flush();
-        } catch (e) {
-          setError(friendlyError(e)); // save blocked (e.g. time-up) — submit anyway
-        }
+        await flushBeforeSubmission(flush, { versioned, auto }, (e) => setError(friendlyError(e)));
         submittedRef.current = true;
         await p.submit();
       } catch (e) {
@@ -302,23 +323,26 @@ export default function ExamRunner(p: ExamRunnerProps) {
         else setError("Session expired — sign in again to finish submitting. Your answers are queued.");
       }
     },
-    [flush, p],
+    [flush, p, versioned],
   );
 
   useEffect(() => {
     if (p.deadlineIso == null) return;
+    let nextRetry = 0;
     setRemaining(remainingMs(p.deadlineIso, offsetMs));
     const id = window.setInterval(() => {
       const r = remainingMs(p.deadlineIso, offsetMs);
       setRemaining(r);
       if (r != null && r <= 0) {
-        window.clearInterval(id);
+        if (!versioned) window.clearInterval(id);
+        if (Date.now() < nextRetry) return;
+        nextRetry = Date.now() + 10000;
         setTimeUp(true);
         void doSubmit(true);
       }
     }, 1000);
     return () => window.clearInterval(id);
-  }, [p.deadlineIso, offsetMs, doSubmit]);
+  }, [p.deadlineIso, offsetMs, doSubmit, versioned]);
 
   // ---- navigation ----
   function gotoPart(i: number, qGlobal?: number) {
@@ -565,7 +589,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
 }
 
 /** Per-part material + questions (split right pane or single column). */
-function PartQuestions(props: {
+export function PartQuestions(props: {
   part: UIPart;
   gapped: boolean;
   cardQuestions: UIPart["questions"];
@@ -583,7 +607,12 @@ function PartQuestions(props: {
   return (
     <div>
       {part.audioUrl && (
-        <ListeningEngine
+        part.multilevelAudio ? <MultilevelListening
+          key={`${part.multilevelAudio.attemptId}:${part.multilevelAudio.groupId}`}
+          prepare={() => post<MediaPhase>(`/mock/attempts/${part.multilevelAudio!.attemptId}/listening/${part.multilevelAudio!.groupId}/prepare`, {})}
+          play={() => post<MediaPhase>(`/mock/attempts/${part.multilevelAudio!.attemptId}/listening/${part.multilevelAudio!.groupId}/play`, {})}
+          load={() => fetchAuthenticatedMedia(part.audioUrl!)}
+        /> : <ListeningEngine
           src={part.audioUrl}
           title={part.title ?? part.label}
           strict={part.strictAudio}

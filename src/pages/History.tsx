@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import AttemptReview from "@/components/exam/AttemptReview";
 import { myAttempts, type AttemptSummary } from "@/lib/tests";
+import { usePrograms } from '@/components/ExamTracks';
+import MultilevelHistory from '@/components/MultilevelHistory';
 
 type Props = {
   /** Refresh signal — bump after each submitted exam so history stays fresh. */
@@ -36,6 +38,7 @@ function formatDate(iso: string | null): string {
 
 /** Past attempts with scores — pulled from GET /tests/attempts/mine. */
 export default function History({ refreshKey = 0, onStats }: Props) {
+  const programs = usePrograms();
   const [attempts, setAttempts] = useState<AttemptSummary[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +70,7 @@ export default function History({ refreshKey = 0, onStats }: Props) {
     void load();
   }, [load]);
 
+  if (programs.data?.activeProgram === 'MULTILEVEL') return <MultilevelHistory refreshKey={refreshKey} />;
   return (
     <section>
       <div className="flex items-start justify-between gap-3">

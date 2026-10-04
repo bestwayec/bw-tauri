@@ -122,7 +122,7 @@ export default function QuestionGroup(p: QuestionGroupProps) {
                 {widget === "essay" && (
                   <EssayWidget
                     {...base}
-                    minWords={essayMin(q.prompt, p.part.instructions)}
+                    minWords={q.guidance?.wordMin ?? essayMin(q.prompt, p.part.instructions)}
                     onChange={(v, im) => p.onAnswer(q.id, v, im)}
                   />
                 )}

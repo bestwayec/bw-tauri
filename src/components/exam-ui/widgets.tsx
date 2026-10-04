@@ -1,6 +1,9 @@
 import { useId } from "react";
 import BlobImage from "@/components/exam/BlobImage";
 import SpeakingPane from "@/components/exam/SpeakingPane";
+import { MultilevelRecorder, type MediaPhase } from '@/components/exam/multilevel-media';
+import { post } from '@/lib/api';
+import { uploadMockSpeaking } from '@/lib/mocks';
 import { countWords } from "@/lib/exam-types";
 import type { RunnerQuestion } from "@/lib/tests";
 import type { UIQuestion } from "./model";
@@ -167,7 +170,7 @@ export function EssayWidget({
         style={{ fontSize }}
       />
       <p className={`exam-count${low ? " exam-count-low" : ""}`}>
-        {words} words{minWords != null ? ` / ${minWords}+ needed` : ""}
+        {words} words{q.guidance?.wordMax ? ` / guidance ${minWords}–${q.guidance.wordMax}` : minWords != null ? ` / ${minWords}+ needed` : ''}
       </p>
     </div>
   );
@@ -190,13 +193,17 @@ export function SpeakingWidget({ q, value, onChange, fontSize, onBlob, uploadNot
   };
   return (
     <div>
-      <SpeakingPane
+      {q.guidance && q.recordingContext ? <MultilevelRecorder
+        attemptId={q.recordingContext.attemptId} questionId={q.id} timed={q.recordingContext.timed} initialHasAudio={q.recordingContext.hasAudio}
+        startPhase={() => post<MediaPhase>(`/mock/attempts/${q.recordingContext!.attemptId}/speaking/${q.id}/start`, {})}
+        upload={(blob) => uploadMockSpeaking(q.recordingContext!.attemptId, q.id, blob)}
+      /> : <SpeakingPane
         q={wq}
         num={q.number}
         fontSize={fontSize}
         onBlob={onBlob ? (blob) => onBlob(q.id, blob) : undefined}
         uploadNote={uploadNote}
-      />
+      />}
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}

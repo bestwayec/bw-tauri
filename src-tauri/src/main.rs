@@ -25,7 +25,14 @@ fn set_locked(
 
     if let Some(window) = app.get_webview_window("main") {
         lockdown::set_kiosk(&window, locked)?;
-        logger::log_line("INFO", if locked { "exam lock engaged" } else { "exam lock released" });
+        logger::log_line(
+            "INFO",
+            if locked {
+                "exam lock engaged"
+            } else {
+                "exam lock released"
+            },
+        );
     } else {
         return Err("main window not found".to_string());
     }

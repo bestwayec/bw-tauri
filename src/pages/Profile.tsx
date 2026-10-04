@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ExamTracks } from '@/components/ExamTracks';
 import { getConfirmBeforeSubmit, setConfirmBeforeSubmit } from "@/lib/exam-prefs";
 
 type Props = {
@@ -60,6 +61,7 @@ export default function Profile({ name, phone, onLogout, stats }: Props) {
   }
   return (
     <section className="mx-auto w-full max-w-[640px]">
+      <ExamTracks />
       {/* Header */}
       <div className="text-center sm:text-left">
         <h1 className="text-xl font-bold tracking-tight text-white">Profile</h1>
