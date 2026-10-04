@@ -53,6 +53,8 @@ export interface UIQuestion {
   options: string[] | null;
   points: number;
   wordLimit: number | null;
+  guidance?: MockShapedQuestion['guidance'];
+  recordingContext?: { attemptId: string; timed: boolean; hasAudio: boolean };
 }
 
 export interface UIPart {
@@ -72,6 +74,7 @@ export interface UIPart {
   imageUrl: string | null;
   /** Timed listening: play once, no pause/seek. */
   strictAudio: boolean;
+  multilevelAudio?: { attemptId: string; groupId: string };
   questions: UIQuestion[];
 }
 
@@ -198,6 +201,7 @@ export function mockSectionToParts(
       audioUrl: mockGroupAudioUrl(g, attemptId, timed && section.skill === "listening"),
       imageUrl: resolveMockMediaUrl(g.imageUrl),
       strictAudio: timed && section.skill === "listening" && !!g.audioUrl,
+      ...(g.questions[0]?.guidance && timed && section.skill === 'listening' ? { multilevelAudio: { attemptId, groupId: g.id } } : {}),
       questions,
     };
   });
@@ -211,6 +215,7 @@ function toUIQuestion(q: MockShapedQuestion): Omit<UIQuestion, "number"> {
     options: q.options,
     points: q.points,
     wordLimit: q.wordLimit,
+    guidance: q.guidance,
   };
 }
 

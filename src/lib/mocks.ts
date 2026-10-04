@@ -31,6 +31,7 @@ export type MockAttemptMode = "practice" | "timed";
 export type MockAttemptStatus = "in_progress" | "grading" | "completed";
 
 export interface MockExamListItem {
+  profile?: "practice" | "full_mock";
   id: string;
   type: MockExamType;
   title: string;
@@ -71,6 +72,7 @@ export interface MockShapedQuestion {
   options: string[] | null;
   points: number;
   wordLimit: number | null;
+  guidance?: { taskKey: string; wordMin?: number; wordMax?: number; prepSeconds?: number; responseSeconds?: number };
 }
 
 export interface MockShapedGroup {
@@ -106,6 +108,8 @@ export interface MockShapedSection {
 export interface MockShapedExam {
   id: string;
   type: MockExamType;
+  profile?: string;
+  specificationVersion?: string;
   title: string;
   description: string | null;
   level: string | null;
@@ -140,6 +144,11 @@ export interface MockSubmitResult {
   sectionBands: Record<string, number> | null;
   overallBand: number | null;
   cefrLevel: string | null;
+  specificationVersion?: string;
+  scoreMethod?: 'ESTIMATED' | 'OFFICIAL_CALIBRATED' | null;
+  scoreVersion?: string | null;
+  overallScore?: number | null;
+  standardScores?: Record<string, { estimatedStandardScore: number; isOfficial?: boolean }> | null;
 }
 
 /** Published + demo mocks visible to the signed-in student. Validated against the backend shape. */
@@ -150,11 +159,11 @@ export async function listMockExams(): Promise<MockExamListItem[]> {
 
 export async function startMockExam(
   examId: string,
-  opts?: { mode?: MockAttemptMode },
+  opts?: { mode?: MockAttemptMode; flow?: 'single_skill' | 'full_test' },
 ): Promise<MockStartResult> {
   const raw = await post<unknown>(`/mock/exams/${encodeURIComponent(examId)}/start`, {
     mode: opts?.mode ?? "practice",
-    flow: "single_skill",
+    flow: opts?.flow ?? 'single_skill',
   });
   return parseOrThrow("POST /mock/exams/:id/start", MockStartResultSchema, raw);
 }

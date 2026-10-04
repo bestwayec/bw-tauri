@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import ExamRunner from "@/components/exam-ui/ExamRunner";
+import { hasActiveRecording, hasPendingRecordings } from '@/lib/durable-recordings';
+import { post } from '@/lib/api';
 import { mockSectionToParts } from "@/components/exam-ui/model";
 import {
   bulkMockAnswers,
@@ -19,6 +21,7 @@ type Props = {
   onExit: () => void;
   onBackToSections: () => void;
   onFinish: (result: MockSubmitResult) => void;
+  onAdvance?: (next: MockStartResult) => void;
 };
 
 function friendlyError(e: unknown): string {
@@ -33,11 +36,11 @@ function friendlyError(e: unknown): string {
 }
 
 /** Mock (IELTS) section flow on the unified runner. */
-export default function MockExam({ start, section, studentName, onExit, onBackToSections, onFinish }: Props) {
+export default function MockExam({ start, section, studentName, onExit, onBackToSections, onFinish, onAdvance }: Props) {
   const attemptId = start.attemptId;
   const skill = section.skill;
   const timed = start.mode === "timed";
-  const parts = useMemo(() => mockSectionToParts(section, attemptId, timed), [section, attemptId, timed]);
+  const parts = useMemo(() => mockSectionToParts(section, attemptId, timed).map((part) => ({ ...part, questions: part.questions.map((q) => ({ ...q, ...(q.guidance ? { recordingContext: { attemptId, timed, hasAudio: start.savedAnswers[q.id] === '[audio]' } } : {}) })) })), [section, attemptId, timed, start.savedAnswers]);
 
   const [uploadNotes, setUploadNotes] = useState<Record<string, string>>({});
   const [audioDoneMap, setAudioDoneMap] = useState<Record<string, boolean>>(() => {
@@ -89,7 +92,14 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
       submitLabel={`Submit ${MOCK_SKILL_LABEL[skill]}`}
       saveOne={(qid, value) => saveMockAnswer(attemptId, qid, value).then(() => undefined)}
       saveMany={(items) => bulkMockAnswers(attemptId, items).then(() => undefined)}
-      submit={() => submitMockAttempt(attemptId, [skill]).then(onFinish)}
+      submit={async () => {
+        if (start.exam.specificationVersion && (hasActiveRecording(attemptId) || await hasPendingRecordings(attemptId))) throw new Error('Finish recording and upload saved takes before submitting.');
+        if (start.exam.specificationVersion && start.flowMode === 'full_test' && skill !== 'speaking') {
+          const next = await post<{ currentSkill: MockShapedSection['skill']; serverTime: string; sectionDeadlines: MockStartResult['sectionDeadlines']; overallDeadlineAt: string | null }>(`/mock/attempts/${attemptId}/advance`, {});
+          onAdvance?.({ ...start, ...next }); return;
+        }
+        onFinish(await submitMockAttempt(attemptId, start.exam.specificationVersion ? undefined : [skill]));
+      }}
       onSpeakBlob={(qid, blob) => void handleBlob(qid, blob)}
       speakNote={(qid) => uploadNotes[qid] ?? null}
       onExit={onExit}

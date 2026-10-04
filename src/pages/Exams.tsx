@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ExamTracks, usePrograms } from '@/components/ExamTracks';
 import { useQuery } from "@tanstack/react-query";
 import { API_BASE_URL } from "@/lib/api";
 import { listTests, startTest, type StartResult, type TestListItem } from "@/lib/tests";
@@ -60,6 +61,7 @@ const QUERY_OPTS = {
 } as const;
 
 export default function Exams({ studentName, onStart, onStartMock }: Props) {
+  const programs = usePrograms();
   const [startingId, setStartingId] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
 
@@ -84,9 +86,9 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
   // Students can never start a 0-question exam (backend throws TEST_EMPTY),
   // so hide them outright — an empty row is always junk (seed leftover or
   // unfinished admin draft), never a real assigned exam.
-  const tests = (testsQuery.data ?? []).filter((t) => t.questionCount > 0);
+  const tests = (testsQuery.data ?? []).filter((t) => t.questionCount > 0 && (programs.data?.activeProgram === 'MULTILEVEL' ? t.type === 'multilevel' : t.type !== 'multilevel'));
   // Only show published mocks to students; keep demos visible.
-  const mocks = (mocksQuery.data ?? []).filter((m) => (m.isPublished || m.isDemo) && m.questionCount > 0);
+  const mocks = (mocksQuery.data ?? []).filter((m) => (m.isPublished || m.isDemo) && m.questionCount > 0 && (programs.data?.activeProgram === 'MULTILEVEL' ? m.type === 'multilevel' : m.type !== 'multilevel'));
   const testsLoaded = testsQuery.status === "success";
   const mocksLoaded = mocksQuery.status === "success";
 
@@ -112,7 +114,7 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
     setStartingId(`mock:${mock.id}`);
     setStartError(null);
     try {
-      const start = await startMockExam(mock.id, { mode });
+      const start = await startMockExam(mock.id, { mode, flow: mock.type === 'multilevel' && mock.profile === 'full_mock' ? 'full_test' : 'single_skill' });
       onStartMock(mock, start);
     } catch (e) {
       setStartError(`${mock.title}: ${friendlyError(e)}`);
@@ -121,7 +123,7 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
     }
   }
 
-  const allTests = tests;
+  const allTests = tests.filter((t) => programs.data?.activeProgram === 'MULTILEVEL' ? t.type === 'multilevel' : t.type !== 'multilevel');
   const allMocks: UnifiedItem[] = [
     ...allTests.map((t) => ({ kind: "test" as const, data: t })),
     ...mocks.map((m) => ({ kind: "mock" as const, data: m })),
@@ -134,6 +136,7 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
 
   return (
     <section>
+      <ExamTracks />
       <div className="flex items-start justify-between gap-3">
         <Greeting name={studentName} />
         <span className="hidden items-center gap-1.5 text-[11px] text-white/35 sm:inline-flex" aria-live="polite">

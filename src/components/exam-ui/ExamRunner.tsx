@@ -5,6 +5,9 @@ import BlobImage from "@/components/exam/BlobImage";
 import GappedContent, { gapNumbersIn, hasGappedDocument } from "@/components/exam/GappedContent";
 import BottomNav from "./BottomNav";
 import ListeningEngine from "./ListeningEngine";
+import { MultilevelListening, type MediaPhase } from '@/components/exam/multilevel-media';
+import { post } from '@/lib/api';
+import { fetchAuthenticatedMedia } from '@/lib/media';
 import PassagePane, { type PassageMarks } from "./PassagePane";
 import QuestionGroup from "./QuestionGroup";
 import TopBar, { type SaveState } from "./TopBar";
@@ -111,7 +114,11 @@ export default function ExamRunner(p: ExamRunnerProps) {
       return p.initialAnswers;
     }
   });
-  const [audioDone] = useState<Record<string, boolean>>(() => p.initialAudioDone ?? {});
+  const [audioDone, setAudioDone] = useState<Record<string, boolean>>(() => p.initialAudioDone ?? {});
+  useEffect(() => {
+    const saved = (event: Event) => { const detail=(event as CustomEvent<{attemptId:string;questionId:string}>).detail; if(detail?.attemptId===p.attemptId) setAudioDone((previous)=>({...previous,[detail.questionId]:true})); };
+    window.addEventListener('multilevel:recording-uploaded',saved); return()=>window.removeEventListener('multilevel:recording-uploaded',saved);
+  },[p.attemptId]);
   const [flags, setFlags] = useState<Record<string, boolean>>(() => ({}));
   const [currentQ, setCurrentQ] = useState(0);
   const [fontSize, setFontSize] = useState(17);
@@ -208,15 +215,19 @@ export default function ExamRunner(p: ExamRunnerProps) {
   const split = !!part?.passageText;
 
   // ---- autosave (debounced per answer, bulk flush, offline queue) ----
-  const flush = useCallback(async () => {
+  const saveInFlight = useRef<Promise<void> | null>(null);
+  const flush = useCallback(async function flushQueue(): Promise<void> {
+    if (saveInFlight.current) { await saveInFlight.current; return flushQueue(); }
     const ids = [...dirty.current];
     if (ids.length === 0) return;
-    dirty.current.clear();
     setSaveState("saving");
     const payload = ids.map((id) => ({ questionId: id, response: answersRef.current[id] ?? "" }));
+    const operation = (async () => {
     try {
       if (payload.length === 1) await p.saveOne(payload[0].questionId, payload[0].response);
       else await p.saveMany(payload);
+      for (const item of payload) if (answersRef.current[item.questionId] === item.response) dirty.current.delete(item.questionId);
+      persistQueue();
       if (dirty.current.size === 0) {
         try {
           localStorage.removeItem(queueKey(p.attemptId));
@@ -232,15 +243,24 @@ export default function ExamRunner(p: ExamRunnerProps) {
       notifyExamAuthIssue(e);
       throw e;
     }
+    })();
+    saveInFlight.current = operation;
+    try { await operation; } finally { saveInFlight.current = null; }
   }, [p]);
 
   function setAnswer(qid: string, value: string, immediate = false) {
+    answersRef.current = { ...answersRef.current, [qid]: value };
+    dirty.current.add(qid);
+    persistQueue();
     setAnswers((a) => (a[qid] === value ? a : { ...a, [qid]: value }));
+    if (allQuestions.some((q) => q.guidance)) { setSaveState('saving'); scheduleFlush(); return; }
     if (immediate) {
       setSaveState("saving");
       void p
         .saveOne(qid, value)
         .then(() => {
+          if (answersRef.current[qid] === value) dirty.current.delete(qid);
+          persistQueue();
           if (dirty.current.size === 0) setSaveState("saved");
         })
         .catch((e: unknown) => {
@@ -583,7 +603,11 @@ function PartQuestions(props: {
   return (
     <div>
       {part.audioUrl && (
-        <ListeningEngine
+        part.multilevelAudio ? <MultilevelListening
+          prepare={() => post<MediaPhase>(`/mock/attempts/${part.multilevelAudio!.attemptId}/listening/${part.multilevelAudio!.groupId}/prepare`, {})}
+          play={() => post<MediaPhase>(`/mock/attempts/${part.multilevelAudio!.attemptId}/listening/${part.multilevelAudio!.groupId}/play`, {})}
+          load={() => fetchAuthenticatedMedia(part.audioUrl!)}
+        /> : <ListeningEngine
           src={part.audioUrl}
           title={part.title ?? part.label}
           strict={part.strictAudio}

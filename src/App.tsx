@@ -224,10 +224,10 @@ export default function App() {
   const handleStartMock = (mock: MockExamListItem, start: MockStartResult) => {
     setActiveMock(mock);
     setActiveMockStart(start);
-    setActiveMockSection(null);
+    setActiveMockSection(start.flowMode === 'full_test' ? start.exam.sections.find((s) => s.skill === start.currentSkill) ?? null : null);
     setLastMockResult(null);
     setLastScore(null);
-    setRoute("mockSections");
+    setRoute(start.flowMode === 'full_test' ? 'mockRunner' : 'mockSections');
   };
 
   const handleFinishMock = (result: MockSubmitResult) => {
@@ -389,12 +389,14 @@ export default function App() {
                   )}
                   {activeRoute === "mockRunner" && activeMockStart && activeMockSection && (
                     <MockExam
+                      key={`${activeMockStart.attemptId}:${activeMockSection.skill}`}
                       start={activeMockStart}
                       section={activeMockSection}
                       studentName={student?.name ?? null}
                       onExit={handleExitExam}
                       onBackToSections={() => navigate("mockSections")}
                       onFinish={handleFinishMock}
+                      onAdvance={(next) => { setActiveMockStart(next); setActiveMockSection(next.exam.sections.find((s) => s.skill === next.currentSkill) ?? null); }}
                     />
                   )}
                   {activeRoute === "locked" && <Locked onBack={handleBackToExams} />}

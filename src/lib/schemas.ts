@@ -45,6 +45,7 @@ export const MockAccessSchema = z.enum(["granted", "pending", "locked"]);
 export const MockExamListItemSchema = z.object({
   id: z.string(),
   type: MockExamTypeSchema,
+  profile: z.enum(["practice", "full_mock"]).optional(),
   title: z.string(),
   description: nullableString,
   level: nullableString,
@@ -86,6 +87,7 @@ export const MockShapedQuestionSchema = z.object({
   options: z.array(z.string()).nullable(),
   points: z.number(),
   wordLimit: nullableNumber,
+  guidance: z.object({ taskKey: z.string(), wordMin: z.number().optional(), wordMax: z.number().optional(), prepSeconds: z.number().optional(), responseSeconds: z.number().optional() }).optional(),
 });
 
 export const MockShapedGroupSchema = z.object({
@@ -131,6 +133,7 @@ export const MockStartResultSchema = z.object({
   exam: z.object({
     id: z.string(),
     type: MockExamTypeSchema,
+    specificationVersion: z.string().optional(),
     title: z.string(),
     description: nullableString,
     level: nullableString,
@@ -151,6 +154,11 @@ export const MockSubmitResultSchema = z.object({
   sectionBands: z.record(z.string(), z.number()).nullable(),
   overallBand: nullableNumber,
   cefrLevel: nullableString,
+  specificationVersion: z.string().optional(),
+  scoreMethod: z.enum(['ESTIMATED','OFFICIAL_CALIBRATED']).nullable().optional(),
+  scoreVersion: z.string().nullable().optional(),
+  overallScore: z.number().nullable().optional(),
+  standardScores: z.record(z.string(), z.object({ estimatedStandardScore: z.number(), isOfficial: z.boolean().optional() })).nullable().optional(),
 });
 
 // ---------------------------------------------------------------------------
