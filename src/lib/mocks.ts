@@ -72,7 +72,7 @@ export interface MockShapedQuestion {
   options: string[] | null;
   points: number;
   wordLimit: number | null;
-  guidance?: { taskKey: string; wordMin?: number; wordMax?: number; prepSeconds?: number; responseSeconds?: number };
+  guidance?: { taskKey: string; wordMin?: number; wordMax?: number; prepSeconds?: number; responseSeconds?: number; speakingProfileVersion?: string | null; profileLabel?: string; rawMax?: number };
 }
 
 export interface MockShapedGroup {
@@ -110,6 +110,8 @@ export interface MockShapedExam {
   type: MockExamType;
   profile?: string;
   specificationVersion?: string;
+  speakingProfileVersion?: string | null;
+  speakingProfile?: { version: string; isOfficialTiming: boolean; parts: Array<{ key: string; prepSeconds: number[]; responseSeconds: number[] }> };
   title: string;
   description: string | null;
   level: string | null;

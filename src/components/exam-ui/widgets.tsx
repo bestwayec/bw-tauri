@@ -4,6 +4,7 @@ import SpeakingPane from "@/components/exam/SpeakingPane";
 import { MultilevelRecorder, type MediaPhase } from '@/components/exam/multilevel-media';
 import { post } from '@/lib/api';
 import { uploadMockSpeaking } from '@/lib/mocks';
+import { recordingKey } from '@/lib/durable-recordings';
 import { countWords } from "@/lib/exam-types";
 import type { RunnerQuestion } from "@/lib/tests";
 import type { UIQuestion } from "./model";
@@ -193,6 +194,7 @@ export function SpeakingWidget({ q, value, onChange, fontSize, onBlob, uploadNot
   };
   return (
     <div>
+      {q.guidance && <div className="mb-2 text-sm"><p>Part {q.guidance.taskKey} · holistic score /{q.guidance.rawMax ?? q.points} across this part’s responses.</p><p>Preparation: {q.guidance.prepSeconds ?? '—'} seconds · response: {q.guidance.responseSeconds ?? '—'} seconds</p>{(q.guidance.speakingProfileVersion ?? q.recordingContext?.profileVersion) && <p className="text-xs opacity-60">{q.guidance.profileLabel ?? q.guidance.speakingProfileVersion ?? q.recordingContext?.profileVersion} · BestWay product timing, not an exact official timing rule.</p>}</div>}
       {q.guidance && q.recordingContext ? <MultilevelRecorder
         attemptId={q.recordingContext.attemptId} questionId={q.id} timed={q.recordingContext.timed} initialHasAudio={q.recordingContext.hasAudio}
         startPhase={() => post<MediaPhase>(`/mock/attempts/${q.recordingContext!.attemptId}/speaking/${q.id}/start`, {})}
@@ -203,6 +205,7 @@ export function SpeakingWidget({ q, value, onChange, fontSize, onBlob, uploadNot
         fontSize={fontSize}
         onBlob={onBlob ? (blob) => onBlob(q.id, blob) : undefined}
         uploadNote={uploadNote}
+        recordingKey={q.recordingContext ? recordingKey(q.recordingContext.attemptId, q.id) : undefined}
       />}
       <textarea
         value={value}

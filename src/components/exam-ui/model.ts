@@ -54,7 +54,7 @@ export interface UIQuestion {
   points: number;
   wordLimit: number | null;
   guidance?: MockShapedQuestion['guidance'];
-  recordingContext?: { attemptId: string; timed: boolean; hasAudio: boolean };
+  recordingContext?: { attemptId: string; timed: boolean; hasAudio: boolean; profileVersion?: string | null };
 }
 
 export interface UIPart {
@@ -193,7 +193,7 @@ export function mockSectionToParts(
       .map((q) => ({ ...toUIQuestion(q), number: ++n }));
     return {
       key: g.id,
-      label: partLabel(section.skill, gi),
+      label: section.skill === 'speaking' && g.questions[0]?.guidance?.taskKey ? `Part ${g.questions[0].guidance.taskKey}` : partLabel(section.skill, gi),
       title: g.title,
       instructions: g.instructions,
       passageText: g.passageText,

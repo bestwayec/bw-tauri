@@ -451,15 +451,11 @@ export default function App() {
                   testTitle={activeMock?.title ?? activeTest?.title ?? null}
                   autoScore={lastScore?.autoScore ?? null}
                   maxScore={resultMax}
-                  attemptId={lastMockResult ? null : (activeStart?.attemptId ?? null)}
+                  attemptId={lastMockResult ? (activeMockStart?.attemptId ?? null) : (activeStart?.attemptId ?? null)}
                   mock={
                     lastMockResult
                       ? {
-                          skill: lastMockResult.skill,
-                          status: lastMockResult.status,
-                          sectionBands: lastMockResult.sectionBands,
-                          overallBand: lastMockResult.overallBand,
-                          cefrLevel: lastMockResult.cefrLevel,
+                          ...lastMockResult,
                         }
                       : null
                   }

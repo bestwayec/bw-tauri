@@ -74,7 +74,7 @@ export default function QuestionGroup(p: QuestionGroupProps) {
             <li key={q.id} id={`q-${q.number}`} className="exam-q scroll-mt-2">
               <div className="exam-q-head">
                 <span className="exam-q-meta">
-                  Q{q.number} · {q.points} pt{q.points === 1 ? "" : "s"}
+                  Q{q.number} · {q.kind === 'speaking' && q.guidance ? `Part ${q.guidance.taskKey} response` : `${q.points} pt${q.points === 1 ? '' : 's'}`}
                 </span>
                 <button
                   type="button"
