@@ -120,6 +120,7 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
   }
 
   async function handleStartMock(mock: MockExamListItem, mode: MockAttemptMode) {
+    if (mock.ready === false) return;
     setStartingId(`mock:${mock.id}`);
     setStartError(null);
     try {
@@ -333,7 +334,10 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
                   {empty && (
                     <p className="mt-2 text-[11px] text-amber-300/80">This mock has no questions yet — it will be available after an admin adds content.</p>
                   )}
-                  {!empty && (m.access === "granted" || m.isDemo) && (
+                  {!empty && m.ready === false && (
+                    <p className="mt-2 text-[11px] text-amber-300/80">This Multilevel exam is not ready yet. Please ask an administrator to repair or complete its blueprint.</p>
+                  )}
+                  {!empty && m.ready !== false && (m.access === "granted" || m.isDemo) && (
                     <div className="mt-3 flex gap-2">
                       {(["practice", "timed"] as const).map((mode) => (
                         <button

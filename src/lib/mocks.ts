@@ -41,6 +41,8 @@ export interface MockExamListItem {
   practiceLevel?: PracticeLevel | null;
   isDemo: boolean;
   isPublished: boolean;
+  /** Backend-authoritative start readiness. */
+  ready?: boolean;
   skills: MockSkill[];
   questionCount: number;
   durationMinutes: number | null;
@@ -75,7 +77,7 @@ export interface MockShapedQuestion {
   points: number;
   wordLimit: number | null;
   answerRule?: 'ONE_WORD' | 'ONE_WORD_AND_OR_NUMBER' | null;
-  guidance?: { taskKey: string; wordMin?: number; wordMax?: number; prepSeconds?: number; responseSeconds?: number; speakingProfileVersion?: string | null; profileLabel?: string; rawMax?: number };
+  guidance?: { taskKey: string; displayLabel?: string; wordMin?: number; wordMax?: number; prepSeconds?: number; responseSeconds?: number; speakingProfileVersion?: string | null; profileLabel?: string; rawMax?: number };
 }
 
 export interface MockShapedGroup {
