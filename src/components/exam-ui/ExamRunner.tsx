@@ -13,6 +13,7 @@ import PassagePane, { type PassageMarks } from "./PassagePane";
 import QuestionGroup from "./QuestionGroup";
 import TopBar, { type SaveState } from "./TopBar";
 import { isAnswered, nextUnanswered, remainingMs, serverOffsetMs, type UIPart } from "./model";
+import { answerRuleHint, exceedsAnswerConstraint, type AnswerRule } from '@/lib/objective-answers';
 
 export interface ExamRunnerProps {
   attemptId: string;
@@ -603,7 +604,7 @@ export function PartQuestions(props: {
 }) {
   const { part } = props;
   const onAnswer = props.onAnswer;
-  const limitById = new Map(part.questions.map((q) => [q.id, q.wordLimit]));
+  const questionsById = new Map(part.questions.map((q) => [q.id, q]));
   return (
     <div>
       {part.audioUrl && (
@@ -634,7 +635,8 @@ export function PartQuestions(props: {
                     qid={question.id}
                     number={number}
                     value={props.answers[question.id] ?? ""}
-                    wordLimit={limitById.get(question.id) ?? null}
+                    wordLimit={questionsById.get(question.id)?.wordLimit ?? null}
+                    answerRule={questionsById.get(question.id)?.answerRule}
                     fontSize={props.fontSize}
                     onChange={(v) => onAnswer(question.id, v)}
                   />
@@ -669,10 +671,11 @@ function GapInput(props: {
   number: number;
   value: string;
   wordLimit: number | null;
+  answerRule?: AnswerRule | null;
   fontSize: number;
   onChange: (v: string) => void;
 }) {
-  const over = props.wordLimit != null && props.value.trim().split(/\s+/).filter(Boolean).length > props.wordLimit;
+  const over = exceedsAnswerConstraint(props.value, props);
   return (
     <input
       value={props.value}
@@ -681,7 +684,7 @@ function GapInput(props: {
       autoComplete="off"
       spellCheck={false}
       aria-invalid={over || undefined}
-      title={props.wordLimit != null ? `No more than ${props.wordLimit} words` : undefined}
+      title={answerRuleHint(props) ?? undefined}
       className={`exam-gapinput${over ? " exam-input-over" : ""}`}
       style={{ fontSize: 14 }}
     />

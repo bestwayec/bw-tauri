@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getAssessment, assessmentStatus, ASSESSMENT_POLL_INTERVAL, shouldPollAssessment, type Assessment, type AssessmentResult } from '@/lib/assessment';
 import { resolveMockMediaUrl } from '@/lib/mocks';
 import { useBlobMedia } from '@/lib/media';
+import { useSessionStore } from '@/lib/session-store';
 
 function List({ title, items }: { title: string; items: string[] }) {
   if (!items.length) return null;
@@ -73,9 +74,10 @@ export function AssessmentCard({ assessment }: { assessment: Assessment }) {
 }
 
 export default function AssessmentFeedback({ attemptId }: { attemptId: string }) {
+  const userId = useSessionStore((state) => state.profile?.id);
   const windowStart = useRef(Date.now());
   const successfulRequests = useRef(0);
-  const query = useQuery({ queryKey: ['assessment', attemptId], queryFn: async () => {
+  const query = useQuery({ queryKey: ['assessment', userId ?? null, attemptId], queryFn: async () => {
     const data = await getAssessment(attemptId); successfulRequests.current += 1; return data;
   }, retry: false,
     refetchOnWindowFocus: false, refetchOnReconnect: false,

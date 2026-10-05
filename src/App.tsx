@@ -1,11 +1,13 @@
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
+import { useQueryClient } from '@tanstack/react-query';
 // Route-split: heavy screens (three.js splash, exam runners) load on demand
 // so the initial bundle stays lean on lab hardware.
 const Login = lazy(() => import("@/pages/Login"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Exams = lazy(() => import("@/pages/Exams"));
 const History = lazy(() => import("@/pages/History"));
+const ExamTrack = lazy(() => import("@/pages/ExamTrack"));
 const Profile = lazy(() => import("@/pages/Profile"));
 const Settings = lazy(() => import("@/pages/Settings"));
 const TestRunner = lazy(() => import("@/pages/TestRunner"));
@@ -15,7 +17,7 @@ const Locked = lazy(() => import("@/pages/Locked"));
 const Result = lazy(() => import("@/pages/Result"));
 const BootSplash = lazy(() => import("@/components/BootSplash"));
 const Particles = lazy(() => import("@/components/Particles"));
-import Sidebar from "@/components/Sidebar";
+import Sidebar, { MobileNavigation } from "@/components/Sidebar";
 import UpdateNotifier from "@/components/UpdateNotifier";
 import ExitConfirmModal from "@/components/ExitConfirmModal";
 import ReauthModal from "@/components/ReauthModal";
@@ -24,6 +26,7 @@ import ClickSpark from "@/components/ClickSpark";
 import CrashRecovery from "@/components/CrashRecovery";
 import { logout } from "@/lib/api";
 import { useSessionStore } from "@/lib/session-store";
+import { usePrograms } from '@/lib/programs';
 import type { StartResult, TestListItem } from "@/lib/tests";
 import type {
   MockExamListItem,
@@ -37,6 +40,7 @@ export type Route =
   | "dashboard"
   | "exams"
   | "history"
+  | "examTrack"
   | "profile"
   | "settings"
   | "runner"
@@ -55,6 +59,7 @@ const TITLES: Record<Exclude<Route, "login">, string> = {
   dashboard: "Dashboard",
   exams: "Exams",
   history: "History",
+  examTrack: "Exam Track",
   profile: "Profile",
   settings: "Settings",
   runner: "Exam runner",
@@ -89,6 +94,8 @@ function OnlineDot() {
 }
 
 export default function App() {
+  const queryClient = useQueryClient();
+  const programs = usePrograms();
   const [route, setRoute] = useState<Route>("login");
   const [student, setStudent] = useState<Student | null>(null);
   // Session-restore flag: written by the restore effect, intentionally NOT
@@ -111,6 +118,19 @@ export default function App() {
     completed: number;
     avgScore: number | null;
   } | null>(null);
+  const cachedStudent = useRef<string | null>(null);
+  useEffect(() => { setStats(null); }, [programs.data?.activeProgram]);
+  useEffect(() => {
+    const id = student?.id ?? null;
+    if (cachedStudent.current === id) return;
+    if (id === null) queryClient.clear();
+    else queryClient.removeQueries({ predicate: (query) => query.queryKey[1] !== id });
+    if (cachedStudent.current !== null) {
+      setActiveTest(null); setActiveStart(null); setActiveMock(null); setActiveMockStart(null);
+      setActiveMockSection(null); setLastMockResult(null); setLastScore(null); setStats(null);
+    }
+    cachedStudent.current = id;
+  }, [student?.id, queryClient]);
   // Fixed 2.5s brand intro (presentational only — timer-driven, never tied
   // to `restoring` or network speed). The real UI renders underneath from the
   // first frame; the splash exits at 2.2s and unmounts at exactly 2.5s.
@@ -362,6 +382,7 @@ export default function App() {
             </div>
           </div>
         )}
+        {showChrome && <MobileNavigation route={activeRoute} onNavigate={navigate} />}
 
         {examActive ? (
           <div className="flex min-h-0 flex-1 flex-col">
@@ -431,6 +452,7 @@ export default function App() {
               {activeRoute === "history" && (
                 <History refreshKey={historyKey} onStats={setStats} />
               )}
+              {activeRoute === "examTrack" && <ExamTrack onBrowse={() => navigate('exams')} />}
               {activeRoute === "profile" && (
                 <Profile
                   name={student?.name ?? null}
@@ -449,6 +471,7 @@ export default function App() {
               {activeRoute === "result" && (
                 <Result
                   testTitle={activeMock?.title ?? activeTest?.title ?? null}
+                  testType={activeTest?.type ?? null}
                   autoScore={lastScore?.autoScore ?? null}
                   maxScore={resultMax}
                   attemptId={lastMockResult ? (activeMockStart?.attemptId ?? null) : (activeStart?.attemptId ?? null)}
@@ -456,6 +479,7 @@ export default function App() {
                     lastMockResult
                       ? {
                           ...lastMockResult,
+                          examType: activeMockStart?.exam.type ?? activeMock?.type,
                         }
                       : null
                   }

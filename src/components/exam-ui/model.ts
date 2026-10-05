@@ -53,6 +53,7 @@ export interface UIQuestion {
   options: string[] | null;
   points: number;
   wordLimit: number | null;
+  answerRule?: MockShapedQuestion['answerRule'];
   guidance?: MockShapedQuestion['guidance'];
   recordingContext?: { attemptId: string; timed: boolean; hasAudio: boolean; profileVersion?: string | null };
 }
@@ -70,6 +71,8 @@ export interface UIPart {
   instructions: string | null;
   passageText: string | null;
   contentHtml: string | null;
+  contentLayout?: string | null;
+  optionsReusable?: boolean | null;
   audioUrl: string | null;
   imageUrl: string | null;
   /** Timed listening: play once, no pause/seek. */
@@ -96,7 +99,7 @@ export function widgetFor(kind: UIKind, hasOptions: boolean): WidgetId {
     case "matching_headings":
       return hasOptions ? "matching" : "short";
     case "map_label":
-      return "map";
+      return hasOptions ? 'map' : 'short';
     case "completion":
       return "inline";
     case "essay":
@@ -193,11 +196,13 @@ export function mockSectionToParts(
       .map((q) => ({ ...toUIQuestion(q), number: ++n }));
     return {
       key: g.id,
-      label: section.skill === 'speaking' && g.questions[0]?.guidance?.taskKey ? `Part ${g.questions[0].guidance.taskKey}` : partLabel(section.skill, gi),
+      label: section.skill === 'speaking' && g.questions[0]?.guidance?.taskKey ? `Part ${g.questions[0].guidance.taskKey}` : g.contentLayout === 'multi_extract' ? `Extract ${gi + 1}` : partLabel(section.skill, gi),
       title: g.title,
       instructions: g.instructions,
       passageText: g.passageText,
       contentHtml: g.contentHtml,
+      contentLayout: g.contentLayout,
+      optionsReusable: g.optionsReusable,
       audioUrl: mockGroupAudioUrl(g, attemptId, timed && section.skill === "listening"),
       imageUrl: resolveMockMediaUrl(g.imageUrl),
       strictAudio: timed && section.skill === "listening" && !!g.audioUrl,
@@ -215,6 +220,7 @@ function toUIQuestion(q: MockShapedQuestion): Omit<UIQuestion, "number"> {
     options: q.options,
     points: q.points,
     wordLimit: q.wordLimit,
+    answerRule: q.answerRule,
     guidance: q.guidance,
   };
 }

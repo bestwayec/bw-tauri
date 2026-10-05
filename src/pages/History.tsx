@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from '@tanstack/react-query';
 import AttemptReview from "@/components/exam/AttemptReview";
 import { myAttempts, type AttemptSummary } from "@/lib/tests";
 import { usePrograms } from '@/components/ExamTracks';
-import MultilevelHistory from '@/components/MultilevelHistory';
 import MockAssessmentHistory from '@/components/assessment/MockAssessmentHistory';
+import { belongsToProgram, programQueryKey } from '@/lib/programs';
+import { useSessionStore } from '@/lib/session-store';
 
 type Props = {
   /** Refresh signal — bump after each submitted exam so history stays fresh. */
@@ -19,8 +21,8 @@ function statusBadge(status: AttemptSummary["status"]) {
 }
 
 function scoreText(a: AttemptSummary): string {
-  if (a.totalScore != null) return String(a.totalScore);
-  if (a.autoScore != null) return `${a.autoScore} (auto)`;
+  if (a.totalScore != null) return `${a.totalScore} pts`;
+  if (a.autoScore != null) return `${a.autoScore} pts (auto)`;
   if (a.status === "grading") return "grading…";
   return "—";
 }
@@ -40,44 +42,33 @@ function formatDate(iso: string | null): string {
 /** Past attempts with scores — pulled from GET /tests/attempts/mine. */
 export default function History({ refreshKey = 0, onStats }: Props) {
   const programs = usePrograms();
-  const [attempts, setAttempts] = useState<AttemptSummary[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const program = programs.data?.activeProgram;
+  const userId = useSessionStore((state) => state.profile?.id);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const items = await myAttempts();
-      setAttempts(items);
-      const scored = items.filter((a) => a.totalScore != null);
-      onStats?.({
-        attempts: items.length,
-        completed: items.filter((a) => a.status === "completed").length,
-        avgScore: scored.length
-          ? scored.reduce((s, a) => s + (a.totalScore ?? 0), 0) / scored.length
-          : null,
-      });
-    } catch (e) {
-      setError(friendlyError(e));
-    } finally {
-      setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- load is a stable fetch closure; effect keyed on refreshKey only to avoid refetch loops
-  }, [refreshKey]);
-
+  const history = useQuery({
+    queryKey: [...programQueryKey('my-attempts', userId, program), refreshKey],
+    queryFn: () => myAttempts(50, program ?? undefined), enabled: !!program,
+  });
+  const attempts = useMemo(() => history.data?.filter((attempt) => !!program && belongsToProgram(attempt.testType, program)) ?? [], [history.data, program]);
+  const loading = programs.isPending || history.isPending;
+  const error = history.error ? friendlyError(history.error) : null;
+  const load = () => history.refetch();
   useEffect(() => {
-    void load();
-  }, [load]);
+    setExpandedId(null);
+  }, [program]);
+  useEffect(() => {
+    const scored = attempts.filter((a) => a.totalScore != null);
+    onStats?.({ attempts: attempts.length, completed: attempts.filter((a) => a.status === 'completed').length,
+      avgScore: scored.length ? scored.reduce((sum, a) => sum + (a.totalScore ?? 0), 0) / scored.length : null });
+  }, [attempts, onStats]);
 
-  if (programs.data?.activeProgram === 'MULTILEVEL') return <MultilevelHistory refreshKey={refreshKey} />;
+  if (!program) return <section><h1 className="text-xl font-bold">History</h1><p role={programs.isError ? 'alert' : 'status'} className="mt-3">{programs.isError ? 'Could not load your exam track.' : 'Loading your exam track…'}</p></section>;
   return (
     <section>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold tracking-tight">History</h1>
-          <p className="mt-1 text-sm text-white/50">Your past attempts and scores.</p>
+          <h1 className="text-xl font-bold tracking-tight">{program === 'IELTS' ? 'IELTS' : 'Multilevel'} history</h1>
+          <p className="mt-1 text-sm text-white/50">Your past attempts in this exam track. Other track results remain saved.</p>
         </div>
         {!loading && (
           <button
@@ -89,7 +80,8 @@ export default function History({ refreshKey = 0, onStats }: Props) {
         )}
       </div>
 
-      <div className="mt-4"><MockAssessmentHistory program="IELTS" refreshKey={refreshKey} /></div>
+      <div className="mt-4"><MockAssessmentHistory key={program} program={program} refreshKey={refreshKey} /></div>
+      <h2 className="mt-5 font-bold">Practice test attempts</h2><p className="mt-1 text-xs text-white/50">Practice points are separate from full mock {program === 'IELTS' ? 'bands' : '/75 estimates'}.</p>
 
       {loading && (
         <div className="mt-4 space-y-3" aria-label="Loading history">
@@ -167,7 +159,7 @@ export default function History({ refreshKey = 0, onStats }: Props) {
               )}
               {open && (
                 <div className="mt-3 border-t border-white/10 pt-3">
-                  <AttemptReview attemptId={a.id} />
+                  <AttemptReview attemptId={a.id} showIeltsEstimate={program === 'IELTS'} />
                 </div>
               )}
             </li>

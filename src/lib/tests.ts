@@ -14,6 +14,7 @@
  */
 import { API_BASE_URL, get, post } from "./api";
 import { TestListSchema, parseOrThrow } from "./schemas";
+import type { ExamProgram, PracticeLevel } from './programs';
 
 export type TestSection = "listening" | "reading" | "writing" | "speaking";
 export type QuestionType =
@@ -27,6 +28,7 @@ export interface TestListItem {
   type: string;
   title: string;
   level: string | null;
+  practiceLevel?: PracticeLevel | null;
   isDemo: boolean;
   isActive: boolean;
   durationMinutes: number | null;
@@ -72,8 +74,8 @@ export interface StartResult {
 }
 
 /** Active tests visible to the signed-in student. Validated against the backend shape. */
-export async function listTests(limit = 50): Promise<TestListItem[]> {
-  const raw = await get<unknown>("/tests", { limit });
+export async function listTests(limit = 50, program?: ExamProgram): Promise<TestListItem[]> {
+  const raw = await get<unknown>("/tests", { limit, program });
   return parseOrThrow("GET /tests", TestListSchema, raw);
 }
 
@@ -134,9 +136,10 @@ export interface AttemptSummary {
 }
 
 /** Own result history for the signed-in student (newest first). */
-export async function myAttempts(limit = 50): Promise<AttemptSummary[]> {
+export async function myAttempts(limit = 50, program?: ExamProgram): Promise<AttemptSummary[]> {
   const data = await get<AttemptSummary[] | { data: AttemptSummary[] }>("/tests/attempts/mine", {
     limit,
+    program,
   });
   // request() unwraps `{success,data}` but Paginated may nest once more.
   if (Array.isArray(data)) return data;

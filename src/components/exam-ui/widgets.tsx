@@ -6,6 +6,7 @@ import { post } from '@/lib/api';
 import { uploadMockSpeaking } from '@/lib/mocks';
 import { recordingKey } from '@/lib/durable-recordings';
 import { countWords } from "@/lib/exam-types";
+import { answerRuleHint, exceedsAnswerConstraint, parseMultiSelectAnswer, serializeMultiSelectAnswer } from '@/lib/objective-answers';
 import type { RunnerQuestion } from "@/lib/tests";
 import type { UIQuestion } from "./model";
 
@@ -44,11 +45,11 @@ export function RadioWidget({ q, value, onChange, fontSize }: WidgetProps) {
 
 /** Multi-select checkboxes (backend scores the exact set). */
 export function CheckWidget({ q, value, onChange, fontSize }: WidgetProps) {
-  const selected = value ? value.split(",").map((v) => v.trim()).filter(Boolean) : [];
+  const selected = parseMultiSelectAnswer(value, q.options ?? []);
   function toggle(opt: string) {
     const next = selected.includes(opt) ? selected.filter((v) => v !== opt) : [...selected, opt];
     next.sort((a, b) => (q.options ?? []).indexOf(a) - (q.options ?? []).indexOf(b));
-    onChange(next.join(","), true);
+    onChange(serializeMultiSelectAnswer(next), true);
   }
   return (
     <div className="exam-opts" style={{ fontSize }}>
@@ -123,14 +124,15 @@ export function MatchingWidget({
 /** Short completion input with live word-limit hint. */
 export function ShortWidget({ q, value, onChange, fontSize }: WidgetProps) {
   const words = countWords(value);
-  const over = q.wordLimit != null && words > q.wordLimit;
+  const over = exceedsAnswerConstraint(value, q);
+  const hint = answerRuleHint(q);
   return (
     <div>
-      {q.wordLimit != null && (
+      {hint && (
         <p className={`exam-limit${over ? " exam-limit-over" : ""}`}>
-          No more than {q.wordLimit} word{q.wordLimit === 1 ? "" : "s"}
-          {words > 0 ? ` — ${words}/${q.wordLimit}` : ""}
-          {over ? " — too many" : ""}
+          {hint}
+          {words > 0 && !q.answerRule ? ` — ${words}/${q.wordLimit}` : ""}
+          {over ? " — check the answer rule" : ""}
         </p>
       )}
       <input

@@ -12,6 +12,8 @@ import {
 import { listMockExams } from "@/lib/mocks";
 import { ExamTracks, usePrograms } from '@/components/ExamTracks';
 import MultilevelHistory from '@/components/MultilevelHistory';
+import { belongsToProgram, programQueryKey } from '@/lib/programs';
+import { useSessionStore } from '@/lib/session-store';
 
 type Props = {
   studentName: string | null;
@@ -46,14 +48,16 @@ const OVERVIEW_QUERY_OPTS = {
 
 export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
   const programs = usePrograms();
+  const program = programs.data?.activeProgram;
+  const userId = useSessionStore((state) => state.profile?.id);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [resumingId, setResumingId] = useState<string | null>(null);
 
   const [testsQuery, attemptsQuery, mocksQuery] = useQueries({
     queries: [
-      { queryKey: ["tests"], queryFn: () => listTests(), ...OVERVIEW_QUERY_OPTS },
-      { queryKey: ["my-attempts"], queryFn: () => myAttempts(), ...OVERVIEW_QUERY_OPTS },
-      { queryKey: ["mock-exams"], queryFn: listMockExams, ...OVERVIEW_QUERY_OPTS },
+      { queryKey: programQueryKey('tests', userId, program), queryFn: () => listTests(50, program ?? undefined), enabled: !!program, ...OVERVIEW_QUERY_OPTS },
+      { queryKey: programQueryKey('my-attempts', userId, program), queryFn: () => myAttempts(50, program ?? undefined), enabled: !!program, ...OVERVIEW_QUERY_OPTS },
+      { queryKey: programQueryKey('mock-exams', userId, program), queryFn: () => listMockExams(program ?? undefined), enabled: !!program, ...OVERVIEW_QUERY_OPTS },
     ],
   });
 
@@ -65,7 +69,7 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
 
   // Include live mock count in assigned so new mocks appear without manual refresh.
   // 0-question rows are junk (never startable) — hide them like Exams does.
-  const matchesTrack = (type: string) => programs.data?.activeProgram === 'MULTILEVEL' ? type === 'multilevel' : type !== 'multilevel';
+  const matchesTrack = (type: string) => !!program && belongsToProgram(type, program);
   const tVisible = (testsQuery.data ?? []).filter((x) => x.questionCount > 0 && matchesTrack(x.type));
   const publishedMocks = (mocksQuery.data ?? []).filter((x) => (x.isPublished || x.isDemo) && x.questionCount > 0 && matchesTrack(x.type));
   // Merge for display purposes: tests are primary, mocks are additive for stats.
@@ -88,7 +92,7 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
         }) as unknown as TestListItem,
     ),
   ];
-  const attempts: AttemptSummary[] | null = attemptsQuery.data ?? null;
+  const attempts: AttemptSummary[] | null = attemptsQuery.data?.filter((attempt) => !!program && belongsToProgram(attempt.testType, program)) ?? null;
 
   async function handleResume(a: AttemptSummary) {
     const test = tests.find((t) => t.id === a.testId);
@@ -117,14 +121,16 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
     : null;
   const recent = (attempts ?? []).slice(0, 6);
 
-  if (programs.data?.activeProgram === 'MULTILEVEL') return <section><h1 className="text-2xl font-bold">{greeting(studentName)}</h1><ExamTracks /><div className="my-4 grid grid-cols-2 gap-3">{(['listening','reading','writing','speaking'] as const).map((skill)=><button key={skill} className="card rounded-xl p-4 text-left capitalize" onClick={()=>onNavigate('exams')}>{skill}<span className="block text-sm normal-case opacity-60">{publishedMocks.filter((e)=>e.skills.includes(skill)).length} available exams</span></button>)}</div><MultilevelHistory refreshKey={0} /></section>;
+  if (!program) return <section><h1 className="text-2xl font-bold">{greeting(studentName)}</h1><ExamTracks /><p className="text-sm text-white/50">Select your exam track to load your dashboard.</p></section>;
+  if (program === 'MULTILEVEL') return <section><h1 className="text-2xl font-bold">Multilevel · {greeting(studentName)}</h1><ExamTracks /><p className="text-sm text-white/50">Practice levels A1–C1 · Full Mock estimated results: Below B1, B1, B2 or C1.</p><div className="my-4 grid grid-cols-2 gap-3">{(['listening','reading','writing','speaking'] as const).map((skill)=><button key={skill} className="card rounded-xl p-4 text-left capitalize" onClick={()=>onNavigate('exams')}>{skill}<span className="block text-sm normal-case opacity-60">{publishedMocks.filter((e)=>e.skills.includes(skill)).length} available exams</span></button>)}</div>{error && <p role="alert" className="text-sm text-amber-200">{error}</p>}<MultilevelHistory refreshKey={0} /></section>;
   return (
     <section>
+      <ExamTracks />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-4">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-brand/70">
-              Overview
+              IELTS overview
             </p>
             <h1 className="mt-1 text-2xl font-black tracking-tight text-white">
               {greeting(studentName)}
@@ -264,7 +270,7 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
                         <p className="text-[11px] text-white/40">{formatDate(a.finishedAt ?? a.startedAt)}</p>
                       </div>
                       <span className="shrink-0 font-mono text-xs text-white/60">
-                        {a.totalScore ?? a.autoScore ?? "—"}
+                        {a.totalScore ?? a.autoScore ?? "—"}{a.totalScore != null || a.autoScore != null ? ' pts' : ''}
                       </span>
                     </li>
                   ))}

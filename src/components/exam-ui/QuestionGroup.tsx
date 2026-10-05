@@ -40,13 +40,13 @@ export default function QuestionGroup(p: QuestionGroupProps) {
   const last = list[list.length - 1].number;
   const showMap = list.some((q) => q.kind === "map_label") && p.part.imageUrl;
 
-  // Options already taken by sibling matching/map questions (greyed out).
+  // Absent configuration preserves legacy IELTS one-use interaction.
   const takenBy = new Map<string, string[]>();
   for (const q of list) {
-    if (q.kind === "matching" || q.kind === "matching_headings" || q.kind === "map_label") {
+    if (p.part.optionsReusable !== true && (q.kind === "matching" || q.kind === "matching_headings" || q.kind === "map_label")) {
       takenBy.set(
         q.id,
-        list
+        p.part.questions
           .filter((o) => o.id !== q.id && (o.kind === q.kind || (o.kind === "map_label" && q.kind === "map_label")))
           .map((o) => p.answers[o.id] ?? "")
           .filter(Boolean),
@@ -61,6 +61,7 @@ export default function QuestionGroup(p: QuestionGroupProps) {
           Questions {first}{first !== last ? `–${last}` : ""}
         </h3>
         {p.part.instructions && <p className="exam-group-instr">{p.part.instructions}</p>}
+        {list.some((q) => q.kind === 'matching' || q.kind === 'matching_headings') && <p className="exam-group-instr">{p.part.optionsReusable === true ? 'Options may be used more than once.' : 'Use each option at most once.'}</p>}
       </header>
 
       {showMap && <MapDiagram imageUrl={p.part.imageUrl} />}
