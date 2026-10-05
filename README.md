@@ -2,7 +2,7 @@
 
 Secure desktop app for education-center students to take exams. Admin locks everyone into the app — no cheating, no other apps.
 
-> Standalone repo (`bestwayec/bw-tauri`). The backend API is an external dependency — this app talks directly to `VITE_API_URL` (default `http://localhost:3001/v1`). Backend source and the API contract live in the monorepo: `https://github.com/bestwayec/bestway/blob/main/backend/api-contract.md`.
+> Standalone repo (`bestwayec/bw-tauri`). The backend API is an external dependency — this app talks directly to `VITE_API_URL` (default `https://api.bestwayec.uz/v1`). Backend source and the API contract live in the monorepo: `https://github.com/bestwayec/bestway/blob/main/backend/api-contract.md`.
 
 ## Frozen contract (must never change)
 
@@ -70,8 +70,24 @@ VITE_WEB_URL=http://localhost:3005
 
 | Var | Default | Purpose |
 | --- | ------- | ------- |
-| `VITE_API_URL` | `http://localhost:3001/v1` | Backend base URL (`/v1` included) |
+| `VITE_API_URL` | `https://api.bestwayec.uz/v1` | Backend base URL (`/v1` included) |
 | `VITE_WEB_URL` | `http://localhost:3005` | System-browser login page origin (`/oauth/desktop`) |
+
+Native refresh and logout accept only the configured backend's scheme, host,
+port and API path. Release builds require HTTPS; development builds also permit
+loopback HTTP servers. Credential requests never follow redirects.
+
+For staging or a custom backend, export the same API variable to **both Vite and
+Cargo** before invoking Tauri. A Vite `.env` file alone does not configure Rust.
+`BESTWAY_API_URL` takes precedence over `VITE_API_URL` when present. For example,
+in PowerShell:
+
+```powershell
+$env:VITE_API_URL = "https://staging-api.bestwayec.uz/v1"
+npm run tauri build -- --no-bundle
+```
+
+Release CI already exports `VITE_API_URL` to both build processes.
 
 ## Browser login
 
