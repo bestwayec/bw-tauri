@@ -196,7 +196,9 @@ export function mockSectionToParts(
       .map((q) => ({ ...toUIQuestion(q), number: ++n }));
     return {
       key: g.id,
-      label: section.skill === 'speaking' && g.questions[0]?.guidance?.taskKey ? `Part ${g.questions[0].guidance.taskKey}` : g.contentLayout === 'multi_extract' ? `Extract ${gi + 1}` : partLabel(section.skill, gi),
+      label: (section.skill === 'speaking' || section.skill === 'writing') && g.questions[0]?.guidance
+        ? g.questions[0].guidance.displayLabel ?? `Part ${g.questions[0].guidance.taskKey}`
+        : g.contentLayout === 'multi_extract' ? `Extract ${gi + 1}` : partLabel(section.skill, gi),
       title: g.title,
       instructions: g.instructions,
       passageText: g.passageText,

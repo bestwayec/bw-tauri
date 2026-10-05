@@ -52,6 +52,7 @@ export const MockExamListItemSchema = z.object({
   practiceLevel: z.enum(['A1', 'A2', 'B1', 'B2', 'C1']).nullable().optional(),
   isDemo: z.boolean(),
   isPublished: z.boolean(),
+  ready: z.boolean().optional().default(true),
   skills: z.array(MockSkillSchema),
   questionCount: z.number(),
   durationMinutes: nullableNumber,
@@ -89,7 +90,7 @@ export const MockShapedQuestionSchema = z.object({
   points: z.number(),
   wordLimit: nullableNumber,
   answerRule: z.enum(['ONE_WORD', 'ONE_WORD_AND_OR_NUMBER']).nullable().optional(),
-  guidance: z.object({ taskKey: z.string(), wordMin: z.number().optional(), wordMax: z.number().optional(), prepSeconds: z.number().optional(), responseSeconds: z.number().optional(), speakingProfileVersion: z.string().nullable().optional(), profileLabel: z.string().optional(), rawMax: z.number().optional() }).optional(),
+  guidance: z.object({ taskKey: z.string(), displayLabel: z.string().optional(), wordMin: z.number().optional(), wordMax: z.number().optional(), prepSeconds: z.number().optional(), responseSeconds: z.number().optional(), speakingProfileVersion: z.string().nullable().optional(), profileLabel: z.string().optional(), rawMax: z.number().optional() }).optional(),
 });
 
 export const MockShapedGroupSchema = z.object({
