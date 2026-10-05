@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 const KEYRING_SERVICE: &str = "uz.bestway.exam";
 const KEYRING_ACCOUNT: &str = "session";
 const SESSION_FILE: &str = "session.json";
+const DEFAULT_API_BASE_URL: &str = "https://api.bestwayec.uz/v1";
 
 /// Everything the client needs to resume without asking for a password.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -59,6 +60,73 @@ pub fn should_reuse_stored(stored_access: Option<&str>, expected_access: Option<
         (Some(_), None) => true,
         _ => false,
     }
+}
+
+// Match the frontend configuration priority. Release CI exports VITE_API_URL to
+// both Vite and Cargo; custom staging builds must do the same. Debug builds also
+// accept loopback because local Vite .env files are not exported to Cargo.
+fn configured_api_base_url() -> &'static str {
+    option_env!("BESTWAY_API_URL")
+        .or(option_env!("VITE_API_URL"))
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(DEFAULT_API_BASE_URL)
+}
+
+fn loopback_url(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    }
+}
+
+fn auth_endpoint_for(
+    base_url: &str,
+    action: &str,
+    configured_base: &str,
+    allow_dev_loopback: bool,
+) -> Result<url::Url, String> {
+    let unsafe_url = || {
+        "UNSAFE_URL: authentication destination does not match the configured backend".to_string()
+    };
+    let parse_base = |value: &str| -> Result<url::Url, String> {
+        if value.chars().any(char::is_control) {
+            return Err(unsafe_url());
+        }
+        let parsed = url::Url::parse(value.trim()).map_err(|_| unsafe_url())?;
+        if !parsed.username().is_empty()
+            || parsed.password().is_some()
+            || parsed.query().is_some()
+            || parsed.fragment().is_some()
+            || !(parsed.scheme() == "https"
+                || (allow_dev_loopback && parsed.scheme() == "http" && loopback_url(&parsed)))
+        {
+            return Err(unsafe_url());
+        }
+        Ok(parsed)
+    };
+    let mut requested = parse_base(base_url)?;
+    let configured = parse_base(configured_base)?;
+    let same_backend = requested.origin() == configured.origin()
+        && requested.path().trim_end_matches('/') == configured.path().trim_end_matches('/');
+    if !same_backend && !(allow_dev_loopback && loopback_url(&requested)) {
+        return Err(unsafe_url());
+    }
+    requested.set_path(&format!(
+        "{}/auth/{action}",
+        requested.path().trim_end_matches('/')
+    ));
+    Ok(requested)
+}
+
+fn auth_endpoint(base_url: &str, action: &str) -> Result<url::Url, String> {
+    auth_endpoint_for(
+        base_url,
+        action,
+        configured_api_base_url(),
+        cfg!(debug_assertions),
+    )
 }
 
 // Backend verdicts that definitively end a session live in JS
@@ -100,7 +168,11 @@ fn remove_file_store(dir: &Path) {
 
 /// Load order: keyring -> file fallback (which then re-seeds keyring).
 pub fn load_from_disk(app_dir: &Path) -> (SessionData, bool) {
-    match keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT).and_then(|e| e.get_password()) {
+    load_from_disk_for(app_dir, KEYRING_SERVICE, KEYRING_ACCOUNT)
+}
+
+fn load_from_disk_for(app_dir: &Path, service: &str, account: &str) -> (SessionData, bool) {
+    match keyring::Entry::new(service, account).and_then(|e| e.get_password()) {
         Ok(raw) => match serde_json::from_str::<SessionData>(&raw) {
             Ok(data) => return (data, false),
             Err(e) => eprintln!("[session] keyring payload unreadable, trying file fallback: {e}"),
@@ -113,9 +185,9 @@ pub fn load_from_disk(app_dir: &Path) -> (SessionData, bool) {
     }
 }
 
-pub fn save_to_disk(app_dir: &Path, data: &SessionData) {
+fn save_to_disk_for(app_dir: &Path, data: &SessionData, service: &str, account: &str) {
     let raw = serde_json::to_string(data).unwrap_or_default();
-    match keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT).and_then(|e| e.set_password(&raw)) {
+    match keyring::Entry::new(service, account).and_then(|e| e.set_password(&raw)) {
         Ok(()) => {
             // Keyring won: drop any stale file copy so only one store holds tokens.
             remove_file_store(app_dir);
@@ -129,8 +201,8 @@ pub fn save_to_disk(app_dir: &Path, data: &SessionData) {
     }
 }
 
-pub fn clear_disk(app_dir: &Path) {
-    if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT) {
+fn clear_disk_for(app_dir: &Path, service: &str, account: &str) {
+    if let Ok(entry) = keyring::Entry::new(service, account) {
         let _ = entry.delete_credential();
     }
     remove_file_store(app_dir);
@@ -146,6 +218,8 @@ pub struct SessionStore {
     refresh_lock: tauri::async_runtime::Mutex<()>,
     /// Resolved in `setup` (needs the app handle); temp dir until then.
     app_dir: StdMutex<PathBuf>,
+    keyring_service: String,
+    keyring_account: String,
 }
 
 impl Default for SessionStore {
@@ -162,6 +236,8 @@ impl SessionStore {
             mem: StdMutex::new(data),
             refresh_lock: tauri::async_runtime::Mutex::new(()),
             app_dir: StdMutex::new(fallback),
+            keyring_service: KEYRING_SERVICE.to_string(),
+            keyring_account: KEYRING_ACCOUNT.to_string(),
         }
     }
 
@@ -171,7 +247,7 @@ impl SessionStore {
         if let Ok(mut slot) = self.app_dir.lock() {
             *slot = dir.clone();
         }
-        let (data, _) = load_from_disk(&dir);
+        let (data, _) = load_from_disk_for(&dir, &self.keyring_service, &self.keyring_account);
         if !data.is_empty() {
             if let Ok(mut g) = self.mem.lock() {
                 *g = data;
@@ -194,14 +270,19 @@ impl SessionStore {
         if let Ok(mut g) = self.mem.lock() {
             *g = data.clone();
         }
-        save_to_disk(&self.dir(), &data);
+        save_to_disk_for(
+            &self.dir(),
+            &data,
+            &self.keyring_service,
+            &self.keyring_account,
+        );
     }
 
     pub fn clear(&self) {
         if let Ok(mut g) = self.mem.lock() {
             *g = SessionData::default();
         }
-        clear_disk(&self.dir());
+        clear_disk_for(&self.dir(), &self.keyring_service, &self.keyring_account);
     }
 
     /// Refresh the pair. `expected_access` is the caller's current access
@@ -212,6 +293,8 @@ impl SessionStore {
         base_url: &str,
         expected_access: Option<String>,
     ) -> Result<String, String> {
+        // Validate before reading or adopting any token, including direct calls.
+        let url = auth_endpoint(base_url, "refresh")?;
         let _guard = self.refresh_lock.lock().await;
 
         let current = self.snapshot();
@@ -222,9 +305,9 @@ impl SessionStore {
             .refresh_token
             .ok_or_else(|| "NO_REFRESH_TOKEN".to_string())?;
 
-        let url = format!("{}/auth/refresh", base_url.trim_end_matches('/'));
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| format!("HTTP_CLIENT: {e}"))?;
         let res = client
@@ -303,21 +386,25 @@ pub fn session_clear(store: tauri::State<'_, SessionStore>) -> Result<(), String
 impl SessionStore {
     /// Best-effort server logout: revoke the stored refresh token, then wipe
     /// everything locally no matter what the server says.
-    pub async fn logout(&self, base_url: &str) {
-        if let Some(rt) = self.snapshot().refresh_token {
-            let url = format!("{}/auth/logout", base_url.trim_end_matches('/'));
+    pub async fn logout(&self, base_url: &str) -> Result<(), String> {
+        // Wait for a rotation to persist before revoking/clearing the latest pair.
+        let _guard = self.refresh_lock.lock().await;
+        let destination = auth_endpoint(base_url, "logout");
+        if let (Ok(url), Some(rt)) = (&destination, self.snapshot().refresh_token) {
             if let Ok(client) = reqwest::Client::builder()
                 .timeout(Duration::from_secs(10))
+                .redirect(reqwest::redirect::Policy::none())
                 .build()
             {
                 let _ = client
-                    .post(url)
+                    .post(url.clone())
                     .json(&serde_json::json!({ "refreshToken": rt }))
                     .send()
                     .await;
             }
         }
         self.clear();
+        destination.map(|_| ())
     }
 }
 
@@ -326,8 +413,7 @@ pub async fn auth_logout(
     store: tauri::State<'_, SessionStore>,
     base_url: String,
 ) -> Result<(), String> {
-    store.logout(&base_url).await;
-    Ok(())
+    store.logout(&base_url).await
 }
 
 #[tauri::command]
@@ -336,17 +422,234 @@ pub async fn auth_refresh(
     base_url: String,
     expected_access: Option<String>,
 ) -> Result<String, String> {
-    // Basic SSRF guard: only http(s) backend URLs.
-    let lower = base_url.trim().to_lowercase();
-    if !(lower.starts_with("https://") || lower.starts_with("http://")) {
-        return Err("UNSAFE_URL: refusing to refresh against a non-http(s) URL".to_string());
-    }
+    auth_endpoint(&base_url, "refresh")?;
     store.refresh(&base_url, expected_access).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct SessionFixture {
+        dir: PathBuf,
+        service: String,
+        account: String,
+    }
+
+    impl SessionFixture {
+        fn new() -> Self {
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let id = format!("{}-{nonce}", std::process::id());
+            let dir = std::env::temp_dir().join(format!("bw-tauri-session-fixture-{id}"));
+            std::fs::create_dir(&dir).unwrap();
+            Self {
+                dir,
+                service: format!("uz.bestway.exam.test.{id}"),
+                account: "synthetic-session".to_string(),
+            }
+        }
+
+        fn store(&self, data: SessionData) -> SessionStore {
+            // Never construct SessionStore::new in tests: it reads the student's
+            // real credential. Every persistence/cleanup operation stays scoped
+            // to this synthetic service, account and freshly created directory.
+            SessionStore {
+                mem: StdMutex::new(data),
+                refresh_lock: tauri::async_runtime::Mutex::new(()),
+                app_dir: StdMutex::new(self.dir.clone()),
+                keyring_service: self.service.clone(),
+                keyring_account: self.account.clone(),
+            }
+        }
+    }
+
+    impl Drop for SessionFixture {
+        fn drop(&mut self) {
+            clear_disk_for(&self.dir, &self.service, &self.account);
+            let _ = std::fs::remove_file(self.dir.join("session.json.tmp"));
+            // Nonrecursive removal cannot delete unrelated fixture contents.
+            let _ = std::fs::remove_dir(&self.dir);
+        }
+    }
+
+    fn synthetic_session() -> SessionData {
+        SessionData {
+            access_token: Some("synthetic-access".into()),
+            refresh_token: Some("synthetic-refresh".into()),
+            device_id: Some("synthetic-device".into()),
+            profile_json: Some("{}".into()),
+        }
+    }
+
+    #[test]
+    fn configured_backend_has_persistent_credentials() {
+        assert!(
+            !matches!(
+                keyring::default::default_credential_builder().persistence(),
+                keyring::credential::CredentialPersistence::EntryOnly
+            ),
+            "desktop builds must not select the nonpersistent mock credential backend"
+        );
+    }
+
+    // Windows Credential Manager is available on native CI/local Windows.
+    // Headless Linux CI has no running/unlocked Secret Service; its backend
+    // selection is covered above without touching the user's real credentials.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn native_session_survives_new_credential_entry_and_load() {
+        let fixture = SessionFixture::new();
+        assert!(matches!(
+            keyring::Entry::new(&fixture.service, &fixture.account)
+                .unwrap()
+                .get_password(),
+            Err(keyring::Error::NoEntry)
+        ));
+        let data = synthetic_session();
+        write_file_store(&fixture.dir, &data).unwrap();
+        let store = fixture.store(SessionData::default());
+        store.store(data.clone());
+        assert!(
+            !session_file(&fixture.dir).exists(),
+            "native write must replace the fallback"
+        );
+        let fresh_entry = keyring::Entry::new(&fixture.service, &fixture.account).unwrap();
+        let saved: SessionData =
+            serde_json::from_str(&fresh_entry.get_password().unwrap()).unwrap();
+        assert_eq!(saved, data);
+        assert_eq!(
+            load_from_disk_for(&fixture.dir, &fixture.service, &fixture.account),
+            (data, false)
+        );
+    }
+
+    #[test]
+    fn auth_urls_match_configured_origin_port_and_api_path() {
+        let configured = "https://staging-api.example.test:8443/api/v2";
+        assert_eq!(
+            auth_endpoint_for(
+                "https://STAGING-API.example.test:8443/api/v2/",
+                "refresh",
+                configured,
+                false
+            )
+            .unwrap()
+            .as_str(),
+            "https://staging-api.example.test:8443/api/v2/auth/refresh"
+        );
+        assert_eq!(
+            auth_endpoint_for(
+                "https://api.bestwayec.uz:443/v1",
+                "logout",
+                DEFAULT_API_BASE_URL,
+                false
+            )
+            .unwrap()
+            .as_str(),
+            "https://api.bestwayec.uz/v1/auth/logout"
+        );
+        for wrong in [
+            "https://staging-api.example.test/api/v2",
+            "https://staging-api.example.test:8443/api/v1",
+            "https://other.example.test:8443/api/v2",
+        ] {
+            assert!(auth_endpoint_for(wrong, "refresh", configured, false).is_err());
+        }
+    }
+
+    #[test]
+    fn plaintext_loopback_auth_is_development_only() {
+        for local in [
+            "http://localhost:3001/v1",
+            "http://127.0.0.1:3001/v1",
+            "http://[::1]:3001/v1",
+        ] {
+            assert!(auth_endpoint_for(local, "refresh", DEFAULT_API_BASE_URL, true).is_ok());
+            assert!(auth_endpoint_for(local, "refresh", DEFAULT_API_BASE_URL, false).is_err());
+            assert!(auth_endpoint_for(local, "refresh", local, false).is_err());
+        }
+    }
+
+    #[test]
+    fn auth_urls_reject_untrusted_and_ambiguous_destinations() {
+        for rejected in [
+            "http://api.bestwayec.uz/v1",
+            "https://evil.example/v1",
+            "https://api.bestwayec.uz.evil.example/v1",
+            "https://api.bestwayec.uz@evil.example/v1",
+            "https://user@api.bestwayec.uz/v1",
+            "https://api.bestwayec.uz/v1?next=evil",
+            "https://api.bestwayec.uz/v1#fragment",
+            "https://api.bestwayec.uz/v1/../other",
+            "https://api.bestwayec.uz/v1\n",
+            "javascript:alert(1)",
+            "file:///v1",
+        ] {
+            assert!(
+                auth_endpoint_for(rejected, "refresh", DEFAULT_API_BASE_URL, true).is_err(),
+                "accepted {rejected}"
+            );
+            assert!(
+                auth_endpoint_for(rejected, "logout", DEFAULT_API_BASE_URL, true).is_err(),
+                "accepted {rejected}"
+            );
+        }
+    }
+
+    #[test]
+    fn refresh_rejects_untrusted_destination_before_reusing_stored_token() {
+        let fixture = SessionFixture::new();
+        let store = fixture.store(synthetic_session());
+        let error = tauri::async_runtime::block_on(
+            store.refresh("https://evil.example/v1", Some("old-token".into())),
+        )
+        .unwrap_err();
+        assert!(error.starts_with("UNSAFE_URL:"));
+        assert_eq!(store.snapshot(), synthetic_session());
+    }
+
+    #[test]
+    fn rejected_logout_clears_only_the_synthetic_local_session_without_sending() {
+        let fixture = SessionFixture::new();
+        let store = fixture.store(synthetic_session());
+        write_file_store(&fixture.dir, &synthetic_session()).unwrap();
+        let error =
+            tauri::async_runtime::block_on(store.logout("https://evil.example/v1")).unwrap_err();
+        assert!(error.starts_with("UNSAFE_URL:"));
+        assert!(store.snapshot().is_empty());
+        assert!(!session_file(&fixture.dir).exists());
+    }
+
+    #[test]
+    fn logout_waits_for_refresh_rotation_before_clearing() {
+        use std::future::Future;
+        use std::sync::Arc;
+        use std::task::{Context, Poll, Wake, Waker};
+
+        struct NoopWake;
+        impl Wake for NoopWake {
+            fn wake(self: Arc<Self>) {}
+        }
+
+        let fixture = SessionFixture::new();
+        let store = fixture.store(synthetic_session());
+        tauri::async_runtime::block_on(async {
+            let rotating = store.refresh_lock.lock().await;
+            let mut logout = Box::pin(store.logout("https://evil.example/v1"));
+            let waker = Waker::from(Arc::new(NoopWake));
+            let mut context = Context::from_waker(&waker);
+            assert!(logout.as_mut().poll(&mut context).is_pending());
+            assert_eq!(store.snapshot(), synthetic_session());
+            drop(rotating);
+            assert!(
+                matches!(logout.as_mut().poll(&mut context), Poll::Ready(Err(error)) if error.starts_with("UNSAFE_URL:"))
+            );
+            assert!(store.snapshot().is_empty());
+        });
+    }
 
     #[test]
     fn reuse_when_stored_differs() {
@@ -359,22 +662,21 @@ mod tests {
 
     #[test]
     fn file_store_roundtrips_atomically() {
-        let dir = std::env::temp_dir().join(format!("bw-tauri-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let fixture = SessionFixture::new();
+        let dir = &fixture.dir;
         let data = SessionData {
             access_token: Some("a".into()),
             refresh_token: Some("r".into()),
             device_id: Some("d".into()),
             profile_json: Some("{}".into()),
         };
-        write_file_store(&dir, &data).unwrap();
-        assert_eq!(read_file_store(&dir), Some(data));
+        write_file_store(dir, &data).unwrap();
+        assert_eq!(read_file_store(dir), Some(data));
         assert!(
             !session_file(&dir).with_extension("tmp").exists()
                 && !dir.join("session.json.tmp").exists()
         );
-        remove_file_store(&dir);
-        assert_eq!(read_file_store(&dir), None);
-        let _ = std::fs::remove_dir_all(&dir);
+        remove_file_store(dir);
+        assert_eq!(read_file_store(dir), None);
     }
 }

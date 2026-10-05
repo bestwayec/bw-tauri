@@ -24,9 +24,10 @@ url = "2"
 starship-battery = "0.11"
 # Auth token ownership (Phase 1): HTTP refresh + OS credential store.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-keyring = "3"
+keyring = { version = "3", default-features = false }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["windows-native"] }
 windows = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_System_LibraryLoader",
@@ -35,10 +36,13 @@ windows = { version = "0.61", features = [
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["apple-native"] }
 objc2-app-kit = "0.3"
 objc2-foundation = "0.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# Persistent Secret Service storage; vendored DBus keeps existing CI dependencies sufficient.
+keyring = { version = "3", default-features = false, features = ["sync-secret-service", "crypto-rust", "vendored"] }
 x11rb = { version = "0.13", features = ["allow-unsafe-code"] }
 
 [features]
