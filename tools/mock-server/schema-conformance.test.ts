@@ -5,11 +5,19 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { mockSectionToParts } from "@/components/exam-ui/model";
 import { gapNumbersIn } from "@/components/exam/GappedContent";
 import { MockExamListSchema, MockStartResultSchema, parseOrThrow } from "@/lib/schemas";
 import { mockGroupAudioUrl } from "@/lib/mocks";
+
+// The fixtures contain absolute loopback media URLs. Match the test backend
+// explicitly so the same-origin security policy is exercised rather than
+// silently dropping every media source while the adapter assertions pass.
+vi.mock("@/lib/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/config')>()),
+  API_BASE_URL: 'http://127.0.0.1:3111/v1',
+}));
 
 const PORT = 3111;
 const BASE = `http://127.0.0.1:${PORT}/v1`;
@@ -93,6 +101,9 @@ describe("desktop schemas accept mock-server payloads", () => {
         }
         // Practice mode never arms strict audio.
         expect(parts[i].strictAudio).toBe(false);
+        if (section.groups[i].hasAudio) {
+          expect(parts[i].audioUrl).toContain(`${BASE}/mock/groups/`);
+        }
       }
     }
     expect(total).toBe(start.exam.questionCount);

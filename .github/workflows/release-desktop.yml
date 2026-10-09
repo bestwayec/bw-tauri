@@ -71,11 +71,18 @@ jobs:
         run: npm ci
 
       - name: Validate release configuration
+        id: release-config
         env:
+          # Keep manual downloads available without an updater signing key.
+          # Set the repository variable to signed_updater for signed updates.
+          DESKTOP_RELEASE_MODE: ${{ vars.DESKTOP_RELEASE_MODE || 'manual_installer' }}
           VITE_API_URL: ${{ vars.VITE_API_URL }}
           VITE_WEB_URL: ${{ vars.VITE_WEB_URL }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: node tools/validate-release.mjs
+
+      - name: Release configuration tests
+        run: node tools/validate-release.test.mjs
 
       - name: Frontend tests
         run: npm test
@@ -96,6 +103,8 @@ jobs:
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         with:
           projectPath: .
+          args: ${{ steps.release-config.outputs.args }}
+          includeUpdaterJson: ${{ steps.release-config.outputs.includeUpdaterJson }}
           tagName: ${{ github.ref_name }}
           releaseName: "bestway-app ${{ github.ref_name }}"
           releaseBody: "Student lockdown exam client (Tauri v2). Pick your OS installer below."
