@@ -2,7 +2,7 @@
   "name": "bestway-app",
   "private": true,
   "license": "GPL-3.0-only",
-  "version": "0.5.1-rc.1",
+  "version": "0.5.1-rc.2",
   "type": "module",
   "scripts": {
     "dev": "vite",

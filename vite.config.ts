@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
@@ -12,7 +12,9 @@ import path from "node:path";
 // motion/react frame writes, body scroll-lock, and OGL canvas sizing — NOT for
 // Tailwind. The sole static <style> block (index.html boot splash) is additionally
 // pinned via a sha256 hash in tauri.conf.json CSP.
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), 'BESTWAY_');
+  return {
   plugins: [react(), tailwindcss()],
   clearScreen: false,
   server: {
@@ -21,7 +23,11 @@ export default defineConfig({
   },
   // Only expose explicitly intended env vars to the client bundle.
   // Adding a new BESTWAY_* secret on the build host would otherwise be baked into the JS.
-  envPrefix: ["BESTWAY_", "VITE_"],
+  envPrefix: ["VITE_"],
+  define: {
+    'import.meta.env.BESTWAY_API_URL': JSON.stringify(env.BESTWAY_API_URL) ?? 'undefined',
+    'import.meta.env.BESTWAY_WEB_URL': JSON.stringify(env.BESTWAY_WEB_URL) ?? 'undefined',
+  },
   build: {
     // Do not emit sourcemaps in production — leaks source and aids exploit chaining.
     sourcemap: false,
@@ -54,4 +60,5 @@ export default defineConfig({
       "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
+  };
 });

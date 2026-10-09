@@ -114,6 +114,7 @@ interface RequestOptions extends Omit<RequestInit, "body"> {
   query?: QueryParams;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic JSON body passthrough (stringified when non-string)
   body?: any;
+  timeoutMs?: number;
   token?: string | null;
   /** Internal: skip transparent refresh (used for the retry itself + auth endpoints). */
   _retried?: boolean;
@@ -150,14 +151,15 @@ function isAuthPath(path: string): boolean {
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { query, body, token, headers, _retried, signal: callerSignal, ...rest } = options as RequestOptions & { signal?: AbortSignal };
+  const { query, body, token, headers, _retried, timeoutMs: requestedTimeout, signal: callerSignal, ...rest } = options as RequestOptions & { signal?: AbortSignal };
   const url = `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}${buildQuery(query)}`;
 
   const accessToken = token !== undefined ? token : getAccessTokenCached();
-  const hasJsonBody = body !== undefined && typeof body !== "string";
+  const isMultipart = typeof FormData !== 'undefined' && body instanceof FormData;
+  const hasJsonBody = body !== undefined && typeof body !== "string" && !isMultipart;
 
   const isAuthEndpoint = isAuthPath(path);
-  const timeoutMs = isAuthEndpoint ? AUTH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+  const timeoutMs = requestedTimeout ?? (isAuthEndpoint ? AUTH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -177,7 +179,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...(headers ?? {}),
       },
-      body: body === undefined || typeof body === "string" ? body : JSON.stringify(body),
+      body: body === undefined || typeof body === "string" || isMultipart ? body : JSON.stringify(body),
     });
   } catch (e) {
     clearTimeout(timer);

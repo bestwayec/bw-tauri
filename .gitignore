@@ -9,3 +9,9 @@ src-tauri/gen/schemas/
 *.pem
 *.log
 .vercel/
+.idea/
+.vscode/
+coverage/
+*.tsbuildinfo
+.DS_Store
+Thumbs.db

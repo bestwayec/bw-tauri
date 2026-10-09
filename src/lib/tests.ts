@@ -1,3 +1,4 @@
+import { resolveBackendMediaUrl } from './media-url';
 /**
  * Student test-exam client for the Tauri app.
  *
@@ -12,7 +13,7 @@
  * and the list endpoint goes through TransformInterceptor
  * (Paginated -> `{ data: items[], meta }`), so callers get the array directly.
  */
-import { API_BASE_URL, get, post } from "./api";
+import { get, post } from "./api";
 import { TestListSchema, parseOrThrow } from "./schemas";
 import type { ExamProgram, PracticeLevel } from './programs';
 
@@ -190,33 +191,8 @@ export function getAttemptReview(attemptId: string): Promise<AttemptReview> {
  * Backend returns `/v1/tests/questions/:id/audio`; API_BASE_URL already
  * ends with `/v1`, so strip the prefix before joining.
  *
- * Security: only allow relative `/v1/` paths or https:// URLs whose host
- * matches the API host. Prevents a compromised backend payload from
+ * Security: only allow backend-relative paths or absolute URLs on the exact
+ * API origin. Prevents a compromised backend payload from
  * exfiltrating to an attacker host via crafted audioUrl.
  */
-export function resolveAudioUrl(path: string | null | undefined): string | null {
-  if (!path) return null;
-  const trimmed = path.trim();
-  if (!trimmed) return null;
-  // Block dangerous schemes.
-  if (/^(javascript|data|file|vbscript|blob):/i.test(trimmed)) return null;
-  if (/^https?:\/\//i.test(trimmed)) {
-    try {
-      const u = new URL(trimmed);
-      const apiHost = new URL(API_BASE_URL).hostname.toLowerCase();
-      // Allow same-host https and loopback only; no cross-host CDN without allowlist.
-      if (u.hostname.toLowerCase() === apiHost) return trimmed;
-      // Loopback is ok for dev.
-      if (u.hostname.toLowerCase() === "localhost" || u.hostname.toLowerCase() === "127.0.0.1") return trimmed;
-      return null;
-    } catch {
-      return null;
-    }
-  }
-  // Protocol-relative `//evil` is unsafe.
-  if (trimmed.startsWith("//")) return null;
-  // Only allow known backend prefix; otherwise treat as relative but ensure leading slash.
-  const suffix = trimmed.startsWith("/v1/") ? trimmed.slice(3) : trimmed;
-  if (suffix.includes("..") || suffix.includes("\\")) return null;
-  return `${API_BASE_URL}${suffix.startsWith("/") ? suffix : `/${suffix}`}`;
-}
+export const resolveAudioUrl = resolveBackendMediaUrl;

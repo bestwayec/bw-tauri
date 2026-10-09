@@ -70,17 +70,27 @@ jobs:
       - name: Install frontend deps
         run: npm ci
 
-      - name: Require backend URL
-        # A release without VITE_API_URL bakes in localhost: every installed
-        # client would talk to the student's own machine. Fail loudly instead.
-        # NOTE: explicit bash — windows-latest defaults to pwsh, which cannot
-        # parse the `[ -z ... ]` test (this exact step failed PR #10's release).
-        shell: bash
-        run: |
-          if [ -z "${{ vars.VITE_API_URL }}" ]; then
-            echo "::error::VITE_API_URL repo variable is missing. Set it to the production backend (https://…/v1) before releasing."
-            exit 1
-          fi
+      - name: Validate release configuration
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_WEB_URL: ${{ vars.VITE_WEB_URL }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: node tools/validate-release.mjs
+
+      - name: Frontend tests
+        run: npm test
+
+      - name: Build frontend for native tests
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_WEB_URL: ${{ vars.VITE_WEB_URL }}
+        run: npm run build
+
+      - name: Native tests
+        working-directory: src-tauri
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+        run: cargo test --locked
 
       - name: Build + Release
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
@@ -89,14 +99,13 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "bestway-app ${{ github.ref_name }}"
           releaseBody: "Student lockdown exam client (Tauri v2). Pick your OS installer below."
-          releaseDraft: false
-          prerelease: false
+          releaseDraft: ${{ contains(github.ref_name, '-') && contains(github.ref_name, 'rc.') }}
+          prerelease: ${{ contains(github.ref_name, '-rc.') || contains(github.ref_name, '-beta.') || contains(github.ref_name, '-alpha.') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Backend the RELEASE build talks to (baked in by Vite at build time).
           # Required: set the `VITE_API_URL` repo variable (e.g. https://api.bestway.uz/v1).
-          # If it is missing/empty the app falls back to http://localhost:3001/v1 and
-          # shows a fail-loud "points at localhost" banner instead of an empty exam list.
+          # Validated above: production releases must use an explicit HTTPS backend.
           VITE_API_URL: ${{ vars.VITE_API_URL }}
           VITE_WEB_URL: ${{ vars.VITE_WEB_URL }}
           # Updater signing: signs `latest.json` + bundles via minisign.

@@ -1,3 +1,4 @@
+import { resolveBackendMediaUrl } from './media-url';
 /**
  * Mock exam client for the Tauri app (section-by-section IELTS flow).
  *
@@ -16,7 +17,7 @@
  *
  * api.ts `request()` already unwraps `{ success, data }` -> `data`.
  */
-import { API_BASE_URL, get, getAccessTokenCached, post } from "./api";
+import { get, post } from "./api";
 import type { ExamProgram, PracticeLevel } from './programs';
 import {
   MockExamListSchema,
@@ -213,7 +214,7 @@ export async function submitMockAttempt(
 
 /**
  * Upload a recorded speaking answer (multipart, <=25MB server-side).
- * api.ts `post()` forces JSON, so this uses raw fetch with the Bearer token.
+ * Uses the shared API client for timeout handling and refresh on expired sessions.
  */
 export async function uploadMockSpeaking(
   attemptId: string,
@@ -223,59 +224,19 @@ export async function uploadMockSpeaking(
 ): Promise<{ saved: boolean; audioUrl: string }> {
   const form = new FormData();
   form.append("audio", blob, filename);
-  const url = `${API_BASE_URL}/mock/attempts/${encodeURIComponent(attemptId)}/speaking/${encodeURIComponent(questionId)}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      ...(getAccessTokenCached() ? { Authorization: `Bearer ${getAccessTokenCached()}` } : {}),
-    },
-    body: form,
-  });
-  if (!res.ok) {
-    let code = `HTTP_${res.status}`;
-    let message = `Upload failed: ${res.status}`;
-    try {
-      const payload = (await res.json()) as {
-        success?: boolean;
-        error?: { code?: string; message?: string };
-      };
-      if (payload?.error?.code) code = payload.error.code;
-      if (payload?.error?.message) message = payload.error.message;
-    } catch {
-      /* keep defaults */
-    }
-    throw { code, message, status: res.status };
-  }
-  const payload = (await res.json()) as { success: boolean; data: { saved: boolean; audioUrl: string } };
-  return payload.data;
+  return post<{ saved: boolean; audioUrl: string }>(
+    `/mock/attempts/${encodeURIComponent(attemptId)}/speaking/${encodeURIComponent(questionId)}`,
+    form,
+    { timeoutMs: 60_000 },
+  );
 }
 
 /**
  * Turn the backend's sanitized media path into a fetchable absolute URL.
- * Same safety policy as tests.ts `resolveAudioUrl`: same-host https or
- * loopback only, `/v1/` prefix stripped (API_BASE_URL already ends with /v1).
+ * Same safety policy as tests.ts `resolveAudioUrl`: exact backend origin,
+ * `/v1/` prefix stripped (API_BASE_URL already ends with /v1).
  */
-export function resolveMockMediaUrl(path: string | null | undefined): string | null {
-  if (!path) return null;
-  const trimmed = path.trim();
-  if (!trimmed) return null;
-  if (/^(javascript|data|file|vbscript|blob):/i.test(trimmed)) return null;
-  if (/^https?:\/\//i.test(trimmed)) {
-    try {
-      const u = new URL(trimmed);
-      const apiHost = new URL(API_BASE_URL).hostname.toLowerCase();
-      if (u.hostname.toLowerCase() === apiHost) return trimmed;
-      if (u.hostname.toLowerCase() === "localhost" || u.hostname.toLowerCase() === "127.0.0.1") return trimmed;
-      return null;
-    } catch {
-      return null;
-    }
-  }
-  if (trimmed.startsWith("//")) return null;
-  const suffix = trimmed.startsWith("/v1/") ? trimmed.slice(3) : trimmed;
-  if (suffix.includes("..") || suffix.includes("\\")) return null;
-  return `${API_BASE_URL}${suffix.startsWith("/") ? suffix : `/${suffix}`}`;
-}
+export const resolveMockMediaUrl = resolveBackendMediaUrl;
 
 /** Group audio URL with attemptId so the server counts timed replays. */
 export function mockGroupAudioUrl(

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getAccessToken, refresh } from "./api";
+import { resolveBackendMediaUrl } from './media-url';
 
 /**
  * Authenticated media loading for exam audio/images.
@@ -28,10 +29,13 @@ function toMediaError(status: number): MediaLoadError {
 
 /** Raw authenticated GET with one transparent refresh on 401. */
 export async function fetchAuthenticatedMedia(url: string, signal?: AbortSignal): Promise<Blob> {
+  const destination = resolveBackendMediaUrl(url);
+  if (!destination) throw { code: 'UNSAFE_MEDIA_URL', message: 'Media URL must use the backend origin', status: 400 };
   const attempt = async (token: string | null): Promise<Response> =>
-    fetch(url, {
+    fetch(destination, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       signal,
+      redirect: 'error',
     });
 
   let res = await attempt(await getAccessToken());
