@@ -15,12 +15,69 @@ on:
   push:
     tags:
       - "bestway-app-v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing bestway-app tag with successful CI
+        required: true
+        type: string
 
 permissions:
   contents: read # default-deny; jobs below request exactly what they need
 
 jobs:
+  prepare:
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      commit: ${{ steps.release.outputs.commit }}
+    steps:
+      - name: Resolve existing tag and verify CI
+        id: release
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          const tag = process.env.RELEASE_TAG;
+          const number = '(0|[1-9][0-9]*)';
+          const pattern = new RegExp(`^bestway-app-v${number}\\.${number}\\.${number}(-(rc|beta|alpha)\\.${number})?$`);
+          if (!pattern.test(tag) || /[\r\n]/.test(tag)) throw new Error('Expected an existing bestway-app-vX.Y.Z tag, optionally with -rc.N, -beta.N or -alpha.N');
+          const base = `${process.env.GITHUB_API_URL}/repos/${process.env.GITHUB_REPOSITORY}`;
+          async function api(path) {
+            const response = await fetch(`${base}${path}`, {
+              headers: {
+                Authorization: `Bearer ${process.env.GH_TOKEN}`,
+                Accept: 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28',
+              },
+            });
+            if (!response.ok) throw new Error(`GitHub ${path} returned HTTP ${response.status}`);
+            return response.json();
+          }
+          let object = (await api(`/git/ref/tags/${encodeURIComponent(tag)}`)).object;
+          for (let depth = 0; object.type === 'tag' && depth < 5; depth++) {
+            object = (await api(`/git/tags/${object.sha}`)).object;
+          }
+          if (object.type !== 'commit' || !/^[0-9a-f]{40}$/.test(object.sha)) {
+            throw new Error('The release tag must resolve to a commit');
+          }
+          const query = new URLSearchParams({ head_sha: object.sha, event: 'push', status: 'completed', per_page: '100' });
+          const { workflow_runs: runs } = await api(`/actions/workflows/ci.yml/runs?${query}`);
+          if (!runs.some(run => run.head_sha === object.sha && run.event === 'push' && run.status === 'completed' && run.conclusion === 'success')) {
+            throw new Error(`CI has not passed for tagged commit ${object.sha}`);
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, `tag=${tag}\ncommit=${object.sha}\n`);
+          console.log(`Verified ${tag} at ${object.sha} with successful CI`);
+          NODE
+
   build:
+    needs: prepare
     permissions:
       contents: write # tauri-action creates the Release and uploads bundles
     timeout-minutes: 60
@@ -36,6 +93,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ needs.prepare.outputs.commit }}
           persist-credentials: false # release upload uses GITHUB_TOKEN via env, not git credentials
 
       - name: Setup Node
@@ -73,13 +131,15 @@ jobs:
       - name: Validate release configuration
         id: release-config
         env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           # Keep manual downloads available without an updater signing key.
           # Set the repository variable to signed_updater for signed updates.
           DESKTOP_RELEASE_MODE: ${{ vars.DESKTOP_RELEASE_MODE || 'manual_installer' }}
           VITE_API_URL: ${{ vars.VITE_API_URL }}
           VITE_WEB_URL: ${{ vars.VITE_WEB_URL }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: node tools/validate-release.mjs
+        shell: bash
+        run: GITHUB_REF_NAME="$RELEASE_TAG" node tools/validate-release.mjs
 
       - name: Release configuration tests
         run: node tools/validate-release.test.mjs
@@ -105,11 +165,11 @@ jobs:
           projectPath: .
           args: ${{ steps.release-config.outputs.args }}
           includeUpdaterJson: ${{ steps.release-config.outputs.includeUpdaterJson }}
-          tagName: ${{ github.ref_name }}
-          releaseName: "bestway-app ${{ github.ref_name }}"
+          tagName: ${{ needs.prepare.outputs.tag }}
+          releaseName: "bestway-app ${{ needs.prepare.outputs.tag }}"
           releaseBody: "Student lockdown exam client (Tauri v2). Pick your OS installer below."
-          releaseDraft: ${{ contains(github.ref_name, '-') && contains(github.ref_name, 'rc.') }}
-          prerelease: ${{ contains(github.ref_name, '-rc.') || contains(github.ref_name, '-beta.') || contains(github.ref_name, '-alpha.') }}
+          releaseDraft: ${{ contains(needs.prepare.outputs.tag, '-rc.') }}
+          prerelease: ${{ contains(needs.prepare.outputs.tag, '-rc.') || contains(needs.prepare.outputs.tag, '-beta.') || contains(needs.prepare.outputs.tag, '-alpha.') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Backend the RELEASE build talks to (baked in by Vite at build time).
