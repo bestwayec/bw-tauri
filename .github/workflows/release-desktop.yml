@@ -6,7 +6,7 @@
 #      src-tauri/Cargo.toml (keep all three in sync).
 #   2. Commit, then tag:  git tag bestway-app-v0.3.0
 #   3. Push the tag:      git push origin bestway-app-v0.3.0
-# CI builds Windows (.exe/.msi via nsis), macOS (.dmg) and
+# CI builds Windows x64 (.exe via nsis), macOS Intel/Apple Silicon (.dmg) and
 # Linux (.AppImage/.deb) and attaches them to the GitHub Release
 # named `bestway-app vX.Y.Z`.
 name: Release Desktop (bestway-app)
@@ -21,6 +21,21 @@ on:
         description: Existing bestway-app tag with successful CI
         required: true
         type: string
+      platform:
+        description: Build missing installers, or one missing native platform
+        required: true
+        default: missing
+        type: choice
+        options:
+          - missing
+          - windows-x64
+          - linux-x64
+          - macos-intel
+          - macos-apple-silicon
+
+concurrency:
+  group: desktop-release-${{ inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
 
 permissions:
   contents: read # default-deny; jobs below request exactly what they need
@@ -34,22 +49,33 @@ jobs:
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       commit: ${{ steps.release.outputs.commit }}
+      release_id: ${{ steps.release.outputs.release_id }}
+      matrix: ${{ steps.release.outputs.matrix }}
+      has_builds: ${{ steps.release.outputs.has_builds }}
     steps:
+      - name: Checkout release orchestration
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Release planning tests
+        run: node --test tools/release-platforms.test.mjs
       - name: Resolve existing tag and verify CI
         id: release
         env:
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          RELEASE_PLATFORM: ${{ inputs.platform || 'missing' }}
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           node --input-type=module <<'NODE'
           import { appendFileSync } from 'node:fs';
+          import { releasePlan, RELEASE_PLATFORMS } from './tools/release-platforms.mjs';
           const tag = process.env.RELEASE_TAG;
           const number = '(0|[1-9][0-9]*)';
           const pattern = new RegExp(`^bestway-app-v${number}\\.${number}\\.${number}(-(rc|beta|alpha)\\.${number})?$`);
           if (!pattern.test(tag) || /[\r\n]/.test(tag)) throw new Error('Expected an existing bestway-app-vX.Y.Z tag, optionally with -rc.N, -beta.N or -alpha.N');
           const base = `${process.env.GITHUB_API_URL}/repos/${process.env.GITHUB_REPOSITORY}`;
-          async function api(path) {
+          async function api(path, optional = false) {
             const response = await fetch(`${base}${path}`, {
               headers: {
                 Authorization: `Bearer ${process.env.GH_TOKEN}`,
@@ -57,6 +83,7 @@ jobs:
                 'X-GitHub-Api-Version': '2022-11-28',
               },
             });
+            if (optional && response.status === 404) return null;
             if (!response.ok) throw new Error(`GitHub ${path} returned HTTP ${response.status}`);
             return response.json();
           }
@@ -72,22 +99,24 @@ jobs:
           if (!runs.some(run => run.head_sha === object.sha && run.event === 'push' && run.status === 'completed' && run.conclusion === 'success')) {
             throw new Error(`CI has not passed for tagged commit ${object.sha}`);
           }
-          appendFileSync(process.env.GITHUB_OUTPUT, `tag=${tag}\ncommit=${object.sha}\n`);
+          const release = await api(`/releases/tags/${encodeURIComponent(tag)}`, true);
+          const plan = releasePlan(tag, release?.assets || [], process.env.RELEASE_PLATFORM);
+          const matrix = { include: plan.hasBuilds ? plan.include : [RELEASE_PLATFORMS[0]] };
+          appendFileSync(process.env.GITHUB_OUTPUT, `tag=${tag}\ncommit=${object.sha}\nrelease_id=${release?.id || ''}\nmatrix=${JSON.stringify(matrix)}\nhas_builds=${plan.hasBuilds}\n`);
           console.log(`Verified ${tag} at ${object.sha} with successful CI`);
+          console.log(`Missing installers: ${plan.include.map(row => row.platform).join(', ') || 'none; existing release is complete'}`);
           NODE
 
   build:
     needs: prepare
+    if: needs.prepare.outputs.has_builds == 'true'
+    name: Build ${{ matrix.platform }}
     permissions:
       contents: write # tauri-action creates the Release and uploads bundles
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-          - os: macos-latest
-          - os: ubuntu-22.04
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -108,11 +137,14 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri -> target
+          key: ${{ matrix.target }}
 
       - name: Install Linux WebKit deps
         if: runner.os == 'Linux'
@@ -157,15 +189,17 @@ jobs:
         working-directory: src-tauri
         env:
           VITE_API_URL: ${{ vars.VITE_API_URL }}
-        run: cargo test --locked
+        run: cargo test --locked --target ${{ matrix.target }}
 
       - name: Build + Release
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         with:
           projectPath: .
-          args: ${{ steps.release-config.outputs.args }}
+          args: ${{ steps.release-config.outputs.args }} --target ${{ matrix.target }}
           includeUpdaterJson: ${{ steps.release-config.outputs.includeUpdaterJson }}
           tagName: ${{ needs.prepare.outputs.tag }}
+          # Existing release ID uploads additively without changing Latest/draft flags.
+          releaseId: ${{ needs.prepare.outputs.release_id }}
           releaseName: "bestway-app ${{ needs.prepare.outputs.tag }}"
           releaseBody: "Student lockdown exam client (Tauri v2). Pick your OS installer below."
           releaseDraft: ${{ contains(needs.prepare.outputs.tag, '-rc.') }}
