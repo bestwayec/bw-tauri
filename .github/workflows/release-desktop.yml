@@ -200,9 +200,11 @@ jobs:
           tagName: ${{ needs.prepare.outputs.tag }}
           # Existing release ID uploads additively without changing Latest/draft flags.
           releaseId: ${{ needs.prepare.outputs.release_id }}
+          releaseCommitish: ${{ needs.prepare.outputs.commit }}
           releaseName: "bestway-app ${{ needs.prepare.outputs.tag }}"
           releaseBody: "Student lockdown exam client (Tauri v2). Pick your OS installer below."
-          releaseDraft: ${{ contains(needs.prepare.outputs.tag, '-rc.') }}
+          # New releases stay private until every native platform has passed.
+          releaseDraft: true
           prerelease: ${{ contains(needs.prepare.outputs.tag, '-rc.') || contains(needs.prepare.outputs.tag, '-beta.') || contains(needs.prepare.outputs.tag, '-alpha.') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -218,3 +220,63 @@ jobs:
           # Public key lives in `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Verify macOS bundle microphone permission and native architecture
+        if: runner.os == 'macOS'
+        env:
+          NATIVE_TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import glob,json,os,plistlib,subprocess
+          from pathlib import Path
+          target=os.environ['NATIVE_TARGET']
+          apps=glob.glob(f'src-tauri/target/{target}/release/bundle/macos/*.app')
+          if len(apps)!=1:raise RuntimeError('Expected one native macOS app bundle')
+          app=Path(apps[0])
+          info=plistlib.loads((app/'Contents/Info.plist').read_bytes())
+          expected=json.loads(Path('package.json').read_text())['version']
+          if info.get('CFBundleShortVersionString')!=expected:raise RuntimeError('macOS bundle version mismatch')
+          if not info.get('NSMicrophoneUsageDescription','').strip():raise RuntimeError('macOS microphone usage description is missing')
+          architecture=subprocess.check_output(['lipo','-archs',str(app/'Contents/MacOS'/info['CFBundleExecutable'])],text=True).strip()
+          if architecture!=('arm64' if target.startswith('aarch64') else 'x86_64'):raise RuntimeError('macOS binary architecture mismatch')
+          signed=plistlib.loads(subprocess.run(['codesign','-d','--entitlements',':-',str(app)],check=True,capture_output=True).stdout)
+          if signed.get('com.apple.security.device.audio-input') is not True:raise RuntimeError('macOS microphone audio-input entitlement is missing')
+          subprocess.run(['codesign','--verify','--strict',str(app)],check=True)
+          print(f'Verified {expected} {architecture}: microphone usage description and audio-input entitlement; ad-hoc signature, no notarization claim')
+          PY
+
+  publish:
+    needs: [prepare, build]
+    if: ${{ always() && needs.prepare.result == 'success' && (needs.build.result == 'success' || (needs.build.result == 'skipped' && needs.prepare.outputs.has_builds == 'false')) }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release orchestration
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verify all installers before publishing a stable Latest release
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { releasePlan } from './tools/release-platforms.mjs';
+          const tag=process.env.RELEASE_TAG;
+          const base=`${process.env.GITHUB_API_URL}/repos/${process.env.GITHUB_REPOSITORY}`;
+          async function api(path,body) {
+            const response=await fetch(base+path,{method:body?'PATCH':'GET',headers:{Authorization:`Bearer ${process.env.GH_TOKEN}`,Accept:'application/vnd.github+json','Content-Type':'application/json','X-GitHub-Api-Version':'2022-11-28'},...(body?{body:JSON.stringify(body)}:{})});
+            if(!response.ok)throw new Error(`GitHub ${path} returned HTTP ${response.status}`);
+            return response.json();
+          }
+          const release=await api(`/releases/tags/${encodeURIComponent(tag)}`);
+          if(releasePlan(tag,release.assets).hasBuilds)throw new Error('One or more native platform installers are missing');
+          if(release.draft&&!/-(rc|beta|alpha)\./.test(tag)) {
+            if(release.target_commitish!==process.env.RELEASE_COMMIT)throw new Error('Release source commit mismatch');
+            await api(`/releases/${release.id}`,{draft:false,prerelease:false,make_latest:'true'});
+            console.log(`Published stable Latest ${tag} with all Windows/Linux/macOS Intel/Apple Silicon installers`);
+          } else console.log(`All platforms verified for ${tag}; existing release metadata preserved`);
+          NODE

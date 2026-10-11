@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
 import { releasePlan } from './release-platforms.mjs';
 
 const tag = 'bestway-app-v0.5.1-rc.2';
@@ -31,4 +32,21 @@ test('old versions never satisfy the new version matrix and malformed selection 
   assert.throws(() => releasePlan('bestway-app-v0.5.2', existing), /refusing to overwrite/);
   assert.throws(() => releasePlan('main', existing), /release tag/);
   assert.throws(() => releasePlan(tag, existing, 'fake-linux-exe'), /Unknown release platform/);
+});
+test('all current package and lock versions match the native app version', () => {
+  const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+  const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
+  const tauri = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+  const cargo = readFileSync('src-tauri/Cargo.toml', 'utf8').match(/^version = "([^"]+)"/m)?.[1];
+  const cargoLock = readFileSync('src-tauri/Cargo.lock', 'utf8').match(/name = "bestway-app"\r?\nversion = "([^"]+)"/)?.[1];
+  assert.deepEqual([lock.version, lock.packages[''].version, tauri.version, cargo, cargoLock], Array(5).fill(pkg.version));
+});
+test('macOS recording is explicitly described and permits audio input only', () => {
+  const info = readFileSync('src-tauri/Info.plist', 'utf8');
+  const config = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+  const entitlements = readFileSync(`src-tauri/${config.bundle.macOS.entitlements}`, 'utf8');
+  assert.match(info, /<key>NSMicrophoneUsageDescription<\/key>\s*<string>[^<]+<\/string>/);
+  assert.match(entitlements, /<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\s*\/>/);
+  assert.equal([...entitlements.matchAll(/<key>/g)].length, 1);
+  assert.equal(config.bundle.macOS.signingIdentity, '-');
 });
