@@ -6,6 +6,18 @@ export const RELEASE_PLATFORMS = [
   { platform: 'macos-apple-silicon', os: 'macos-15', target: 'aarch64-apple-darwin', suffixes: ['aarch64.dmg'], archive: 'aarch64' },
 ];
 
+/** The by-tag endpoint omits drafts; authenticated release lists include them. */
+export async function findReleaseByTag(api, tag) {
+  for (let page = 1; page <= 100; page++) {
+    const releases = await api(`/releases?per_page=100&page=${page}`);
+    if (!Array.isArray(releases)) throw new Error('Expected a GitHub release list');
+    const release = releases.find(row => row.tag_name === tag);
+    if (release) return release;
+    if (releases.length < 100) return null;
+  }
+  throw new Error('Release lookup exceeded its pagination limit');
+}
+
 export function releasePlan(tag, assets = [], selected = 'missing') {
   const version = tag.match(/^bestway-app-v((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:rc|beta|alpha)\.(?:0|[1-9][0-9]*))?)$/)?.[1];
   if (!version) throw new Error('Expected a versioned bestway-app release tag');

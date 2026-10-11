@@ -43,7 +43,8 @@ permissions:
 jobs:
   prepare:
     permissions:
-      contents: read
+      # Reading unpublished drafts requires push access; this job only reads.
+      contents: write
       actions: read
     runs-on: ubuntu-latest
     outputs:
@@ -69,7 +70,7 @@ jobs:
         run: |
           node --input-type=module <<'NODE'
           import { appendFileSync } from 'node:fs';
-          import { releasePlan, RELEASE_PLATFORMS } from './tools/release-platforms.mjs';
+          import { findReleaseByTag, releasePlan, RELEASE_PLATFORMS } from './tools/release-platforms.mjs';
           const tag = process.env.RELEASE_TAG;
           const number = '(0|[1-9][0-9]*)';
           const pattern = new RegExp(`^bestway-app-v${number}\\.${number}\\.${number}(-(rc|beta|alpha)\\.${number})?$`);
@@ -99,7 +100,7 @@ jobs:
           if (!runs.some(run => run.head_sha === object.sha && run.event === 'push' && run.status === 'completed' && run.conclusion === 'success')) {
             throw new Error(`CI has not passed for tagged commit ${object.sha}`);
           }
-          const release = await api(`/releases/tags/${encodeURIComponent(tag)}`, true);
+          const release = await findReleaseByTag(api, tag);
           const plan = releasePlan(tag, release?.assets || [], process.env.RELEASE_PLATFORM);
           const matrix = { include: plan.hasBuilds ? plan.include : [RELEASE_PLATFORMS[0]] };
           appendFileSync(process.env.GITHUB_OUTPUT, `tag=${tag}\ncommit=${object.sha}\nrelease_id=${release?.id || ''}\nmatrix=${JSON.stringify(matrix)}\nhas_builds=${plan.hasBuilds}\n`);
@@ -261,10 +262,11 @@ jobs:
         env:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
           GH_TOKEN: ${{ github.token }}
         run: |
           node --input-type=module <<'NODE'
-          import { releasePlan } from './tools/release-platforms.mjs';
+          import { findReleaseByTag, releasePlan } from './tools/release-platforms.mjs';
           const tag=process.env.RELEASE_TAG;
           const base=`${process.env.GITHUB_API_URL}/repos/${process.env.GITHUB_REPOSITORY}`;
           async function api(path,body) {
@@ -272,7 +274,8 @@ jobs:
             if(!response.ok)throw new Error(`GitHub ${path} returned HTTP ${response.status}`);
             return response.json();
           }
-          const release=await api(`/releases/tags/${encodeURIComponent(tag)}`);
+          const release=process.env.RELEASE_ID ? await api(`/releases/${process.env.RELEASE_ID}`) : await findReleaseByTag(api,tag);
+          if(!release||release.tag_name!==tag)throw new Error('The expected release draft was not found');
           if(releasePlan(tag,release.assets).hasBuilds)throw new Error('One or more native platform installers are missing');
           if(release.draft&&!/-(rc|beta|alpha)\./.test(tag)) {
             if(release.target_commitish!==process.env.RELEASE_COMMIT)throw new Error('Release source commit mismatch');
