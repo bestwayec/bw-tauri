@@ -21,6 +21,15 @@ fn set_locked(
     locked: bool,
     state: tauri::State<'_, LockState>,
 ) -> Result<(), String> {
+    if locked {
+        if let Some(window) = app.get_webview_window("main") {
+            if let Ok(monitors) = window.available_monitors() {
+                if monitors.len() > 1 {
+                    return Err("MULTI_MONITOR_BLOCKED: Faqat bitta monitordan foydalanishga ruxsat berilgan".to_string());
+                }
+            }
+        }
+    }
     state.0.store(locked, Ordering::SeqCst);
 
     if let Some(window) = app.get_webview_window("main") {
@@ -45,6 +54,17 @@ fn set_locked(
     Ok(())
 }
 
+/// Check count of attached monitors.
+#[tauri::command]
+fn check_monitors(app: tauri::AppHandle) -> Result<usize, String> {
+    if let Some(window) = app.get_webview_window("main") {
+        let monitors = window.available_monitors().map_err(|e| e.to_string())?;
+        Ok(monitors.len())
+    } else {
+        Err("main window not found".to_string())
+    }
+}
+
 #[tauri::command]
 fn clear_clipboard(app: tauri::AppHandle) -> Result<(), String> {
     let clipboard = app.clipboard();
@@ -58,7 +78,13 @@ fn clear_clipboard(app: tauri::AppHandle) -> Result<(), String> {
 
 /// Hide the main window to the tray (keeps running in background).
 #[tauri::command]
-fn minimize_to_tray(app: tauri::AppHandle) -> Result<(), String> {
+fn minimize_to_tray(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, LockState>,
+) -> Result<(), String> {
+    if state.0.load(Ordering::SeqCst) {
+        return Err("Cannot minimize while exam is locked".to_string());
+    }
     tray::hide_main(&app);
     Ok(())
 }
@@ -155,11 +181,28 @@ fn main() {
                     eprintln!("[tray] failed to hide window to tray: {e}");
                 }
             }
+            if matches!(event, tauri::WindowEvent::Focused(false) | tauri::WindowEvent::Resized(_)) {
+                let locked = window
+                    .app_handle()
+                    .try_state::<LockState>()
+                    .map(|s| s.0.load(Ordering::SeqCst))
+                    .unwrap_or(false);
+                if locked {
+                    if let Ok(true) = window.is_minimized() {
+                        let _ = window.unminimize();
+                    }
+                    let _ = window.set_fullscreen(true);
+                    let _ = window.set_always_on_top(true);
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             battery::get_battery,
             browser::open_system_browser,
             set_locked,
+            check_monitors,
             clear_clipboard,
             minimize_to_tray,
             show_main_window,

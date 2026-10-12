@@ -77,6 +77,7 @@ mod windows_hook {
     const VK_TAB: u32 = 0x09;
     const VK_F4: u32 = 0x73;
     const VK_ESCAPE: u32 = 0x1B;
+    const VK_CONTROL: i32 = 0x11;
 
     unsafe extern "system" fn ll_hook(ncode: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         if ncode == HC_ACTION as i32 && LOCKED.load(Ordering::SeqCst) {
@@ -85,11 +86,12 @@ mod windows_hook {
                 let info = *(lparam.0 as *const KBDLLHOOKSTRUCT);
                 let vk = info.vkCode;
                 let alt_down = (info.flags.0 & LLKHF_ALTDOWN.0) != 0;
+                let ctrl_down = (windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(VK_CONTROL) as u16 & 0x8000) != 0;
                 let swallow = vk == VK_LWIN
                     || vk == VK_RWIN
                     || (vk == VK_TAB && alt_down)
                     || (vk == VK_F4 && alt_down)
-                    || (vk == VK_ESCAPE && alt_down);
+                    || (vk == VK_ESCAPE && (alt_down || ctrl_down));
                 if swallow {
                     return LRESULT(1);
                 }
