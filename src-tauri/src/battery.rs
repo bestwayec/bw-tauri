@@ -75,6 +75,7 @@ fn unknown() -> BatteryInfo {
 /// Cross-platform battery readout via `starship-battery`.
 /// Never panics: every failure path falls back to `unknown()`.
 /// Runs on the blocking pool (see the `get_battery` command above).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn get_battery_sync() -> BatteryInfo {
     let manager = match starship_battery::Manager::new() {
         Ok(m) => m,
@@ -135,4 +136,11 @@ fn get_battery_sync() -> BatteryInfo {
         charging,
         state: state_str,
     }
+}
+
+/// Mobile targets do not support `starship-battery` natively; return `unknown()`
+/// so the frontend falls back to the WebView Battery Status API (`navigator.getBattery`).
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn get_battery_sync() -> BatteryInfo {
+    unknown()
 }

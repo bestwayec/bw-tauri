@@ -1,0 +1,26 @@
+{
+  "identifier": "mobile",
+  "description": "Least-privilege mobile capability: core window/event controls, content protection, deep-link/opener for browser login, and clipboard wipe on lock",
+  "windows": ["main"],
+  "platforms": ["android", "iOS"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:allow-set-content-protected",
+    "core:window:allow-set-focus",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "process:allow-restart",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://**" },
+        { "url": "http://localhost:**" },
+        { "url": "http://127.0.0.1:**" }
+      ]
+    },
+    "deep-link:default",
+    "clipboard-manager:allow-write-text",
+    "clipboard-manager:allow-clear"
+  ]
+}

@@ -7,11 +7,15 @@
 //! - Tray "Quit" while **locked** → vetoed (restores window instead) so an
 //!   exam cannot be bypassed from the tray. While unlocked → exits cleanly.
 
+#[cfg(desktop)]
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager,
 };
+
+#[cfg(mobile)]
+use tauri::{AppHandle, Manager};
 
 pub const TRAY_ID: &str = "main-tray";
 pub const MENU_SHOW_ID: &str = "tray-show";
@@ -21,7 +25,10 @@ pub const MENU_QUIT_ID: &str = "tray-quit";
 pub fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
-        let _ = window.unminimize();
+        #[cfg(desktop)]
+        {
+            let _ = window.unminimize();
+        }
         let _ = window.set_focus();
     }
 }
@@ -34,6 +41,7 @@ pub fn hide_main(app: &AppHandle) {
 }
 
 /// Build the tray icon + menu. Called once from `setup`.
+#[cfg(desktop)]
 pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, MENU_SHOW_ID, "Show Bestway Exam", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, MENU_QUIT_ID, "Quit", true, None::<&str>)?;
@@ -86,5 +94,11 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     }
 
     builder.build(app)?;
+    Ok(())
+}
+
+/// No-op on mobile targets where system tray icons do not exist.
+#[cfg(mobile)]
+pub fn build_tray(_app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }

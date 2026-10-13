@@ -1,8 +1,9 @@
 /// Kiosk / lockdown helpers.
 ///
 /// Shared entry point is [`set_kiosk`], which always toggles fullscreen +
-/// always-on-top + focus (safe fallback on every platform), then applies
-/// best-effort OS-specific hardening behind `#[cfg(target_os = ...)]`.
+/// always-on-top + focus on desktop (and screen security + keep-awake on
+/// mobile), then applies best-effort OS-specific hardening behind
+/// `#[cfg(target_os = ...)]`.
 ///
 /// Per-platform matrix (what IS / IS NOT blocked while locked):
 /// - Windows: blocks Win keys, Alt+Tab, Alt+F4, Ctrl+Shift+Esc via a
@@ -16,14 +17,24 @@
 /// - Linux: best-effort `XGrabKeyboard` on X11 only. Wayland compositors
 ///   generally ignore client-side grabs, so lockdown there is
 ///   compositor-dependent (needs Cage / Weston kiosk-shell policy).
+/// - Android: enforces `WindowManager.LayoutParams.FLAG_SECURE` (`0x00002000`)
+///   to prevent screenshots, screen recording, and task-switcher previews,
+///   plus `FLAG_KEEP_SCREEN_ON` (`0x00000080`) while locked.
 pub fn set_kiosk(window: &tauri::WebviewWindow, locked: bool) -> Result<(), String> {
-    window.set_fullscreen(locked).map_err(|e| e.to_string())?;
-    window
-        .set_always_on_top(locked)
-        .map_err(|e| e.to_string())?;
+    // Keep window content protection active so screenshots/recording remain blocked.
+    let _ = window.set_content_protected(true);
+
+    #[cfg(desktop)]
+    {
+        window.set_fullscreen(locked).map_err(|e| e.to_string())?;
+        window
+            .set_always_on_top(locked)
+            .map_err(|e| e.to_string())?;
+    }
 
     if locked {
         // Best-effort: keep focus while locked; ignore errors (window may be closing).
+        let _ = window.show();
         let _ = window.set_focus();
     }
 
@@ -36,7 +47,86 @@ pub fn set_kiosk(window: &tauri::WebviewWindow, locked: bool) -> Result<(), Stri
     #[cfg(target_os = "linux")]
     apply_linux_lockdown(locked);
 
+    #[cfg(target_os = "android")]
+    apply_android_lockdown(window, locked);
+
     Ok(())
+}
+
+/// Enforces window-level screenshot/recording protection on startup across
+/// desktop (`set_content_protected(true)`) and Android (`FLAG_SECURE`).
+pub fn enable_content_protection(window: &tauri::WebviewWindow) {
+    let _ = window.set_content_protected(true);
+
+    #[cfg(target_os = "android")]
+    apply_android_window_flags(window, true, false);
+}
+
+// ---------------------------------------------------------------------------
+// Android: WindowManager.LayoutParams.FLAG_SECURE + FLAG_KEEP_SCREEN_ON
+// ---------------------------------------------------------------------------
+#[cfg(target_os = "android")]
+const ANDROID_FLAG_SECURE: i32 = 0x00002000;
+#[cfg(target_os = "android")]
+const ANDROID_FLAG_KEEP_SCREEN_ON: i32 = 0x00000080;
+
+#[cfg(target_os = "android")]
+fn apply_android_lockdown(window: &tauri::WebviewWindow, locked: bool) {
+    // Always keep FLAG_SECURE active; toggle FLAG_KEEP_SCREEN_ON with exam lock state.
+    apply_android_window_flags(window, true, locked);
+}
+
+#[cfg(target_os = "android")]
+fn apply_android_window_flags(
+    window: &tauri::WebviewWindow,
+    secure: bool,
+    keep_screen_on: bool,
+) {
+    let _ = window.with_webview(move |webview| {
+        webview.jni_handle().exec(move |env, activity, _webview| {
+            let win_obj = match env
+                .call_method(activity, "getWindow", "()Landroid/view/Window;", &[])
+                .and_then(|v| v.l())
+            {
+                Ok(w) if !w.is_null() => w,
+                _ => {
+                    if env.exception_check().unwrap_or(false) {
+                        let _ = env.exception_clear();
+                    }
+                    return;
+                }
+            };
+
+            let mut add_mask: i32 = 0;
+            let mut clear_mask: i32 = 0;
+
+            if secure {
+                add_mask |= ANDROID_FLAG_SECURE;
+            } else {
+                clear_mask |= ANDROID_FLAG_SECURE;
+            }
+
+            if keep_screen_on {
+                add_mask |= ANDROID_FLAG_KEEP_SCREEN_ON;
+            } else {
+                clear_mask |= ANDROID_FLAG_KEEP_SCREEN_ON;
+            }
+
+            if add_mask != 0 {
+                let _ = env.call_method(&win_obj, "addFlags", "(I)V", &[add_mask.into()]);
+                if env.exception_check().unwrap_or(false) {
+                    let _ = env.exception_clear();
+                }
+            }
+
+            if clear_mask != 0 {
+                let _ = env.call_method(&win_obj, "clearFlags", "(I)V", &[clear_mask.into()]);
+                if env.exception_check().unwrap_or(false) {
+                    let _ = env.exception_clear();
+                }
+            }
+        });
+    });
 }
 
 // ---------------------------------------------------------------------------

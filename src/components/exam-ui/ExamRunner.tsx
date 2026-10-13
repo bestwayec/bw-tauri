@@ -14,6 +14,8 @@ import QuestionGroup from "./QuestionGroup";
 import TopBar, { type SaveState } from "./TopBar";
 import { isAnswered, nextUnanswered, remainingMs, serverOffsetMs, type UIPart } from "./model";
 import { answerRuleHint, exceedsAnswerConstraint, type AnswerRule } from '@/lib/objective-answers';
+import { reportCheat, type CheatScope } from '@/lib/cheat';
+import { mapCheatEventToKind, useLockdown, type LockdownCheatEvent } from '@/hooks/useLockdown';
 
 export interface ExamRunnerProps {
   attemptId: string;
@@ -40,6 +42,10 @@ export interface ExamRunnerProps {
   onExit: () => void;
   /** Optional back navigation (mock section picker). */
   onBack?: () => void;
+  /** Engage CBT lockdown while running. @default true */
+  lockdown?: boolean;
+  /** Optional callback fired on lockdown cheat/focus-loss events. */
+  onCheat?: (event: LockdownCheatEvent) => void;
 }
 
 function friendlyError(e: unknown): string {
@@ -100,6 +106,22 @@ export function notifyExamAuthIssue(e: unknown): boolean {
  * offline-tolerant autosave, and a light-by-default theme.
  */
 export default function ExamRunner(p: ExamRunnerProps) {
+  const cheatScope: CheatScope = p.skill === "test" ? "tests" : "mock";
+  const handleCheat = useCallback(
+    (event: LockdownCheatEvent) => {
+      p.onCheat?.(event);
+      const kind = mapCheatEventToKind(event);
+      if (kind && p.attemptId) {
+        void reportCheat(p.attemptId, kind, cheatScope).catch(() => undefined);
+      }
+    },
+    [p.attemptId, p.onCheat, cheatScope],
+  );
+  useLockdown({
+    locked: p.lockdown ?? true,
+    onCheat: handleCheat,
+  });
+
   const versioned = p.parts.some((part) => part.questions.some((q) => q.guidance));
   const writableIds = new Set(p.parts.flatMap((part) => part.questions.map((q) => q.id)));
   const [partIdx, setPartIdx] = useState(0);
