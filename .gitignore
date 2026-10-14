@@ -15,3 +15,5 @@ coverage/
 *.tsbuildinfo
 .DS_Store
 Thumbs.db
+*.exe
+*.apk
