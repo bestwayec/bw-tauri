@@ -14,8 +14,15 @@ import {
   type BrowserLoginState,
 } from "@/lib/oauth";
 
+export interface LoggedInUser {
+  id: string;
+  name: string | null;
+  phone: string | null;
+  role?: string;
+}
+
 type Props = {
-  onLogin: (student: { id: string; name: string | null; phone: string | null }) => void;
+  onLogin: (user: LoggedInUser) => void;
 };
 
 type Busy = "idle" | "browser" | "password" | "exchange";
@@ -77,9 +84,10 @@ export default function Login({ onLogin }: Props) {
       await clearBrowserLoginState();
       // Fail-closed role gate: missing role must NOT pass.
       const role = String((session.user as { role?: unknown } | undefined)?.role ?? "");
-      if (role !== "student") {
+      const ALLOWED_ROLES = ["student", "teacher", "admin", "super_admin"];
+      if (!ALLOWED_ROLES.includes(role)) {
         await clearSession();
-        setError("This app is for students only.");
+        setError(`Access denied: unauthorized role (${role || "none"}).`);
         setBusy("idle");
         return;
       }
@@ -98,7 +106,7 @@ export default function Login({ onLogin }: Props) {
         typeof (session.user as unknown as { phone?: unknown })?.phone === "string"
           ? ((session.user as unknown as { phone: string }).phone as string)
           : null;
-      onLoginRef.current({ id, name, phone });
+      onLoginRef.current({ id, name, phone, role });
     } catch (e) {
       setError(friendlyExchangeError(e));
       setBusy("idle");
@@ -213,9 +221,10 @@ export default function Login({ onLogin }: Props) {
       const session = await login(normalizedPhone, password);
       // Fail-closed: missing/unknown role must NOT default to student.
       const role = String(session.user?.role ?? "");
-      if (role !== "student") {
+      const ALLOWED_ROLES = ["student", "teacher", "admin", "super_admin"];
+      if (!ALLOWED_ROLES.includes(role)) {
         await clearSession();
-        setError("This app is for students only.");
+        setError(`Access denied: unauthorized role (${role || "none"}).`);
         setBusy("idle");
         return;
       }
@@ -225,7 +234,7 @@ export default function Login({ onLogin }: Props) {
         setBusy("idle");
         return;
       }
-      onLogin({ id: session.user.id, name: session.user.name ?? null, phone: session.user.phone ?? null });
+      onLogin({ id: session.user.id, name: session.user.name ?? null, phone: session.user.phone ?? null, role: session.user.role });
     } catch (err) {
       const apiErr = err as { code?: string; message?: string; status?: number } | null;
       const base =
@@ -268,8 +277,8 @@ export default function Login({ onLogin }: Props) {
           </div>
           <div className="min-w-0 flex-1 leading-tight">
             <p className="truncate text-[19px] font-bold tracking-tight text-white">Bestway Exam</p>
-            <p className="text-[10px] uppercase tracking-[0.16em] text-white/40">
-              Student lockdown client
+            <p className="text-[10px] uppercase tracking-[0.16em] text-emerald-400">
+              Desktop Workspace & Exam Client
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5 text-[11px] font-medium text-white/35">

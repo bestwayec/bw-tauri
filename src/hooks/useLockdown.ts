@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CheatKind } from "@/lib/cheat";
+import { useSessionStore } from "@/lib/session-store";
 
 export type LockdownCheatEvent =
   | "contextmenu"
@@ -139,7 +140,7 @@ function tryUnlockOrientation(): void {
   }
 }
 
-async function tryTauriInvoke(
+export async function tryTauriInvoke(
   cmd: string,
   args?: Record<string, unknown>,
 ): Promise<boolean> {
@@ -185,6 +186,9 @@ function tryClearClipboard(): void {
  *  - clears clipboard once on lock
  *
  * While `locked === false`: no-op — no listeners attached, no side effects.
+ *
+ * In Teacher / Admin desktop mode: automatically DISABLE lockdown (no fullscreen kiosk,
+ * no WH_KEYBOARD_LL, multi-monitors allowed).
  */
 export function useLockdown(options: UseLockdownOptions): UseLockdownResult {
   const {
@@ -195,9 +199,20 @@ export function useLockdown(options: UseLockdownOptions): UseLockdownResult {
     lockOrientation = false,
   } = options;
 
+  const role = useSessionStore((s) => s.profile?.role);
+  const isPrivileged = role === "teacher" || role === "admin" || role === "super_admin";
+  const effectiveLocked = isPrivileged ? false : locked;
+
   const [cheatCount, setCheatCount] = useState(0);
   const onCheatRef = useRef(onCheat);
   const lastBlurAtRef = useRef(0);
+
+  useEffect(() => {
+    if (isPrivileged) {
+      void tryTauriInvoke("set_locked", { locked: false });
+      tryExitFullscreen();
+    }
+  }, [isPrivileged]);
 
   useEffect(() => {
     onCheatRef.current = onCheat;
@@ -213,14 +228,14 @@ export function useLockdown(options: UseLockdownOptions): UseLockdownResult {
   }, []);
 
   const relock = useCallback(() => {
-    if (!locked) return;
+    if (!effectiveLocked) return;
     void tryTauriInvoke("set_locked", { locked: true });
     if (requestFullscreen) tryRequestFullscreen();
     if (lockOrientation) tryLockOrientation(lockOrientation);
-  }, [locked, requestFullscreen, lockOrientation]);
+  }, [effectiveLocked, requestFullscreen, lockOrientation]);
 
   useEffect(() => {
-    if (!locked) return; // <-- no-op when unlocked
+    if (!effectiveLocked) return; // <-- no-op when unlocked
 
     void tryTauriInvoke("set_locked", { locked: true });
     if (requestFullscreen) tryRequestFullscreen();

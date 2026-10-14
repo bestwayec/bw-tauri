@@ -153,4 +153,17 @@ describe("boot + migration", () => {
     expect(later.accessToken).toBe("cached");
     expect(later.status).toBe("ready");
   });
+  it("allows teacher and admin roles without wiping local session", async () => {
+    vi.mocked(rustSessionGet).mockResolvedValue({
+      access_token: "teacher-token",
+      refresh_token: "rt-t",
+      device_id: "dev-1",
+      profile_json: JSON.stringify({ id: "teacher-1", role: "teacher" }),
+    });
+    await useSessionStore.getState().initialize();
+    const s = useSessionStore.getState();
+    expect(s.accessToken).toBe("teacher-token");
+    expect(s.profile?.role).toBe("teacher");
+    expect(s.status).toBe("ready");
+  });
 });

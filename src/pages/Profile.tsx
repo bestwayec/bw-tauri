@@ -5,6 +5,7 @@ import { getConfirmBeforeSubmit, setConfirmBeforeSubmit } from "@/lib/exam-prefs
 type Props = {
   name: string | null;
   phone: string | null;
+  role?: string;
   onLogout: () => void;
   stats?: { attempts: number; completed: number; avgScore: number | null } | null;
 };
@@ -50,8 +51,15 @@ function LogoutIcon() {
 }
 
 /** Student profile: identity + stats + preferences + session — unified account page. */
-export default function Profile({ name, phone, onLogout, stats }: Props) {
-  const display = name ?? "Student";
+export default function Profile({ name, phone, role, onLogout, stats }: Props) {
+  const normRole = (role ?? "student").toLowerCase();
+  const roleLabel =
+    normRole === "teacher"
+      ? "Teacher"
+      : normRole === "admin" || normRole === "super_admin"
+      ? "Administrator"
+      : "Student";
+  const display = name ?? (normRole === "teacher" ? "Teacher" : normRole === "admin" ? "Admin" : "Student");
   const initial = display.trim().charAt(0).toUpperCase() || "?";
   const [confirmSubmit, setConfirmSubmit] = useState(() => getConfirmBeforeSubmit());
 
@@ -84,9 +92,9 @@ export default function Profile({ name, phone, onLogout, stats }: Props) {
               {phone && (
                 <p className="mt-1 font-mono text-[13px] text-white/60">{phone}</p>
               )}
-              <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-brand/10 px-2.5 py-1 text-[11px] font-semibold text-brand-subtle-fg ring-1 ring-brand/30">
-                <span className="h-1.5 w-1.5 rounded-full bg-brand" aria-hidden="true" />
-                Student
+              <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-400 ring-1 ring-emerald-500/30">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
+                {roleLabel}
               </span>
             </div>
           </div>

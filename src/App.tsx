@@ -15,6 +15,11 @@ const MockSectionPicker = lazy(() => import("@/pages/MockSectionPicker"));
 const MockExam = lazy(() => import("@/pages/MockExam"));
 const Locked = lazy(() => import("@/pages/Locked"));
 const Result = lazy(() => import("@/pages/Result"));
+const LiveProctoring = lazy(() => import("@/pages/LiveProctoring"));
+const GradingQueue = lazy(() => import("@/pages/GradingQueue"));
+const GroupsResults = lazy(() => import("@/pages/GroupsResults"));
+const CenterOverview = lazy(() => import("@/pages/CenterOverview"));
+const StudentResults = lazy(() => import("@/pages/StudentResults"));
 const BootSplash = lazy(() => import("@/components/BootSplash"));
 const Particles = lazy(() => import("@/components/Particles"));
 import Sidebar, { MobileNavigation } from "@/components/Sidebar";
@@ -26,6 +31,7 @@ import ClickSpark from "@/components/ClickSpark";
 import CrashRecovery from "@/components/CrashRecovery";
 import { logout } from "@/lib/api";
 import { useSessionStore } from "@/lib/session-store";
+import { tryTauriInvoke } from "@/hooks/useLockdown";
 import { usePrograms } from '@/lib/programs';
 import type { StartResult, TestListItem } from "@/lib/tests";
 import type {
@@ -47,12 +53,18 @@ export type Route =
   | "mockSections"
   | "mockRunner"
   | "locked"
-  | "result";
+  | "result"
+  | "proctoring"
+  | "grading"
+  | "groups"
+  | "centerOverview"
+  | "studentResults";
 
 export interface Student {
   id: string;
   name: string | null;
   phone: string | null;
+  role?: string;
 }
 
 const TITLES: Record<Exclude<Route, "login">, string> = {
@@ -67,6 +79,11 @@ const TITLES: Record<Exclude<Route, "login">, string> = {
   mockRunner: "Mock runner",
   locked: "Locked",
   result: "Result",
+  proctoring: "Live Proctoring",
+  grading: "Grading Queue",
+  groups: "Groups & Results",
+  centerOverview: "Center Overview",
+  studentResults: "Student Results",
 };
 
 function OnlineDot() {
@@ -189,12 +206,21 @@ export default function App() {
         setRestoring(false);
         return;
       }
+      const role = (profile.role || "student").toLowerCase();
       setStudent({
         id: profile.id,
         name: typeof profile.name === "string" ? profile.name : null,
         phone: typeof profile.phone === "string" ? profile.phone : null,
+        role: profile.role || "student",
       });
-      setRoute((r) => (r === "login" ? "dashboard" : r));
+      setRoute((r) => {
+        if (r === "login") {
+          if (role === "teacher") return "proctoring";
+          if (role === "admin" || role === "super_admin") return "centerOverview";
+          return "dashboard";
+        }
+        return r;
+      });
       setRestoring(false);
     };
     const unsub = useSessionStore.subscribe((s) => applySession(s.status, s.profile));
@@ -280,8 +306,24 @@ export default function App() {
 
   const handleLogin = (s: Student) => {
     setStudent(s);
-    setRoute("dashboard");
+    const role = (s.role || "student").toLowerCase();
+    if (role === "teacher") setRoute("proctoring");
+    else if (role === "admin" || role === "super_admin") setRoute("centerOverview");
+    else setRoute("dashboard");
   };
+
+  // In Teacher / Admin desktop mode:
+  // Automatically DISABLE lockdown (no fullscreen kiosk, no WH_KEYBOARD_LL, multi-monitors allowed).
+  const currentRole = (student?.role || "").toLowerCase();
+  const isPrivilegedRole = currentRole === "teacher" || currentRole === "admin" || currentRole === "super_admin";
+  useEffect(() => {
+    if (isPrivilegedRole) {
+      void tryTauriInvoke("set_locked", { locked: false });
+      if (typeof document !== "undefined" && document.fullscreenElement) {
+        void document.exitFullscreen?.().catch(() => undefined);
+      }
+    }
+  }, [isPrivilegedRole]);
 
   const handleLogout = async () => {
     if (!confirm("Log out of Bestway Exam on this device?")) return;
@@ -364,6 +406,7 @@ export default function App() {
       {showChrome && (
         <Sidebar
           route={activeRoute}
+          role={student?.role}
           collapsed={sidebarCollapsed}
           onToggle={() => setSidebarCollapsed((v) => !v)}
           onNavigate={navigate}
@@ -382,7 +425,7 @@ export default function App() {
             </div>
           </div>
         )}
-        {showChrome && <MobileNavigation route={activeRoute} onNavigate={navigate} />}
+        {showChrome && <MobileNavigation route={activeRoute} role={student?.role} onNavigate={navigate} />}
 
         {examActive ? (
           <div className="flex min-h-0 flex-1 flex-col">
@@ -453,10 +496,16 @@ export default function App() {
                 <History refreshKey={historyKey} onStats={setStats} />
               )}
               {activeRoute === "examTrack" && <ExamTrack onBrowse={() => navigate('exams')} />}
+              {activeRoute === "proctoring" && <LiveProctoring />}
+              {activeRoute === "grading" && <GradingQueue />}
+              {activeRoute === "groups" && <GroupsResults />}
+              {activeRoute === "centerOverview" && <CenterOverview onNavigate={navigate} />}
+              {activeRoute === "studentResults" && <StudentResults />}
               {activeRoute === "profile" && (
                 <Profile
                   name={student?.name ?? null}
                   phone={student?.phone ?? null}
+                  role={student?.role}
                   stats={stats}
                   onLogout={() => void handleLogout()}
                 />
@@ -465,6 +514,7 @@ export default function App() {
                 <Settings
                   studentName={student?.name ?? null}
                   studentPhone={student?.phone ?? null}
+                  role={student?.role}
                   onLogout={() => void handleLogout()}
                 />
               )}

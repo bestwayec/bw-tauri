@@ -433,7 +433,8 @@ export const useSessionStore = create<SessionState>()((set, get) => {
       if (!token) return;
       try {
         const user = await rawGetMe(token);
-        if (user.role && user.role !== "student") {
+        const allowedRoles = ["student", "teacher", "admin", "super_admin"];
+        if (user.role && !allowedRoles.includes(user.role)) {
           await get().wipeLocal();
           return;
         }

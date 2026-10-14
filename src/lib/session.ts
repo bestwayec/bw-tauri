@@ -111,9 +111,10 @@ export function setSession(input: SetSessionInput): StudentSession {
   inMemoryToken = input.accessToken;
   inMemoryRole = input.role;
   inMemoryStudentId = input.studentId ?? null;
-  if (input.role !== "student") {
+  const allowed = ["student", "teacher", "admin", "super_admin"];
+  if (input.role && !allowed.includes(input.role)) {
     // Store first so callers can inspect, then enforce the gate.
-    throw new Error(`Access denied: student-only (role=${input.role})`);
+    throw new Error(`Access denied: role=${input.role}`);
   }
   return {
     accessToken: input.accessToken,

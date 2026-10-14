@@ -6,6 +6,7 @@ import { getConfirmBeforeSubmit, setConfirmBeforeSubmit } from "@/lib/exam-prefs
 type Props = {
   studentName: string | null;
   studentPhone: string | null;
+  role?: string;
   onLogout: () => void;
 };
 
@@ -42,12 +43,20 @@ function Toggle({
  * Student settings — only controls that really work in this client.
  * No backend/API/technical details: this is an exam app, not a control panel.
  */
-export default function Settings({ studentName, studentPhone, onLogout }: Props) {
+export default function Settings({ studentName, studentPhone, role, onLogout }: Props) {
   const [confirmSubmit, setConfirmSubmit] = useState(() => getConfirmBeforeSubmit());
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testOk, setTestOk] = useState(false);
-  const initial = ((studentName ?? "?").trim().charAt(0).toUpperCase() || "?");
+  const normRole = (role ?? "student").toLowerCase();
+  const roleLabel =
+    normRole === "teacher"
+      ? "Teacher"
+      : normRole === "admin" || normRole === "super_admin"
+      ? "Administrator"
+      : "Student";
+  const display = studentName ?? (normRole === "teacher" ? "Teacher" : normRole === "admin" ? "Admin" : "Student");
+  const initial = (display.trim().charAt(0).toUpperCase() || "?");
 
   function handleConfirmToggle(next: boolean) {
     setConfirmSubmit(next);
@@ -112,11 +121,16 @@ export default function Settings({ studentName, studentPhone, onLogout }: Props)
             </span>
             <div className="min-w-0">
               <p className="truncate text-[13px] font-semibold text-white">
-                {studentName ?? "Student"}
+                {display}
               </p>
-              {studentPhone && (
-                <p className="mt-0.5 font-mono text-[11px] text-white/45">{studentPhone}</p>
-              )}
+              <div className="flex items-center gap-2">
+                {studentPhone && (
+                  <p className="font-mono text-[11px] text-white/45">{studentPhone}</p>
+                )}
+                <span className="rounded bg-emerald-500/15 px-1.5 py-0.2 text-[9px] font-bold text-emerald-400">
+                  {roleLabel}
+                </span>
+              </div>
             </div>
           </div>
           <button

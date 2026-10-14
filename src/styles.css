@@ -54,68 +54,68 @@ body,
 :root {
   color-scheme: dark;
 
-  --bg: #0b0d08;
-  --bg-subtle: #11140c;
-  --surface: #171a10;
-  --surface-hover: #202418;
+  --bg: #0B0F17;
+  --bg-subtle: #111927;
+  --surface: #162032;
+  --surface-hover: #1E2B45;
 
-  --fg: #fffdf0;
-  --fg-muted: #b8b9aa;
-  --fg-subtle: #7f8272;
+  --fg: #F8FAFC;
+  --fg-muted: #94A3B8;
+  --fg-subtle: #64748B;
 
-  --border: #303321;
-  --border-strong: #4b5030;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
 
-  --brand: #89f336;
-  --brand-hover: #9dff52;
-  --brand-fg: #101704;
-  --brand-subtle: #213416;
-  --brand-subtle-fg: #b9ff83;
+  --brand: #10B981;
+  --brand-hover: #059669;
+  --brand-fg: #FFFFFF;
+  --brand-subtle: rgba(16, 185, 129, 0.15);
+  --brand-subtle-fg: #6EE7B7;
 
-  --accent: #ffed29;
-  --accent-fg: #211d00;
-  --accent-subtle: #3a3510;
+  --accent: #89F336;
+  --accent-fg: #101704;
+  --accent-subtle: rgba(137, 243, 54, 0.15);
 
-  --orange: #ff991c;
-  --orange-fg: #251100;
-  --orange-subtle: #3c260d;
+  --orange: #F59E0B;
+  --orange-fg: #451A03;
+  --orange-subtle: rgba(245, 158, 11, 0.15);
 
-  --highlight: #ffed29;
+  --highlight: #89F336;
 
-  --success: #89f336;
-  --success-bg: #14532d;
-  --success-border: #166534;
+  --success: #10B981;
+  --success-bg: rgba(16, 185, 129, 0.15);
+  --success-border: rgba(16, 185, 129, 0.3);
 
-  --danger: #f87171;
-  --danger-bg: #601b1b;
-  --danger-border: #991b1b;
+  --danger: #EF4444;
+  --danger-bg: rgba(239, 68, 68, 0.15);
+  --danger-border: rgba(239, 68, 68, 0.3);
 
-  --warning: #ff991c;
-  --warning-bg: #5c2c07;
-  --warning-border: #92400e;
+  --warning: #F59E0B;
+  --warning-bg: rgba(245, 158, 11, 0.15);
+  --warning-border: rgba(245, 158, 11, 0.3);
 
-  --info: #38bdf8;
-  --info-bg: #0c4a6e;
-  --info-border: #075985;
+  --info: #0EA5E9;
+  --info-bg: rgba(14, 165, 233, 0.15);
+  --info-border: rgba(14, 165, 233, 0.3);
 }
 
 body {
   margin: 0;
   font-family: var(--font-sans);
   background:
-    radial-gradient(circle at 8% -10%, rgba(137, 243, 54, 0.08), transparent 28rem),
-    radial-gradient(circle at 92% 10%, rgba(255, 153, 28, 0.07), transparent 26rem),
+    radial-gradient(circle at 10% -10%, rgba(16, 185, 129, 0.12), transparent 32rem),
+    radial-gradient(circle at 90% 15%, rgba(137, 243, 54, 0.08), transparent 30rem),
     var(--bg);
   color: var(--fg);
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Frontend bilan bir xil grid + dotted backdrop */
+/* Frontend modern grid + dotted backdrop */
 .app-bg {
   background:
-    radial-gradient(circle at 8% -10%, rgba(137, 243, 54, 0.08), transparent 28rem),
-    radial-gradient(circle at 92% 10%, rgba(255, 153, 28, 0.07), transparent 26rem),
+    radial-gradient(circle at 10% -10%, rgba(16, 185, 129, 0.12), transparent 32rem),
+    radial-gradient(circle at 90% 15%, rgba(137, 243, 54, 0.08), transparent 30rem),
     var(--bg);
 }
 
@@ -127,29 +127,40 @@ body {
   background-image:
     linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
-  background-size: 44px 44px;
+  background-size: 40px 40px;
   mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 30%, transparent 75%);
 }
 
-/* Frontend Card: rounded 18px, border-border, bg-surface */
+/* Glassmorphism Card: rounded 18px, border-border, sleek dark glass */
 .card {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: rgba(22, 32, 50, 0.72);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--radius-card);
+  box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.4);
 }
 
-/* Frontend primary: bg-brand text-brand-fg hover:bg-brand-hover */
+.glass-panel {
+  background: rgba(17, 25, 40, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+}
+
+/* Modern emerald brand button */
 .btn-brand {
-  background: var(--brand);
-  color: var(--brand-fg);
+  background: linear-gradient(135deg, #10B981, #059669);
+  color: #FFFFFF;
   border-radius: var(--radius-control);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 28px -8px rgba(137, 243, 54, 0.45);
-  transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -6px rgba(16, 185, 129, 0.45);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
 
 .btn-brand:hover {
-  background: var(--brand-hover);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 34px -10px rgba(137, 243, 54, 0.55);
+  background: linear-gradient(135deg, #34D399, #10B981);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 28px -6px rgba(16, 185, 129, 0.55);
 }
 
 .btn-brand:active {

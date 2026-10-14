@@ -37,4 +37,39 @@ describe('student exam track navigation', () => {
     expect(html).toContain('title="Exam Track — IELTS / Multilevel"');
     expect(html).toContain('aria-current="page"');
   });
+
+  it('renders teacher navigation destinations and badge', () => {
+    const onNavigate = vi.fn();
+    const props = { route: 'proctoring' as const, role: 'teacher', onNavigate };
+    const html = renderToStaticMarkup(<Sidebar {...props} collapsed={false} onToggle={() => {}} />);
+    expect(html).toContain('Live Proctoring');
+    expect(html).toContain('Grading Queue');
+    expect(html).toContain('Groups &amp; Results');
+    expect(html).toContain('TEACHER WORKSPACE');
+    expect(html).toContain('aria-current="page"');
+
+    const desktopButtons = buttons(Sidebar({ ...props, collapsed: false, onToggle() {} }));
+    desktopButtons[0].props.onClick();
+    desktopButtons[1].props.onClick();
+    desktopButtons[2].props.onClick();
+    expect(onNavigate.mock.calls).toEqual([['proctoring'], ['grading'], ['groups']]);
+  });
+
+  it('renders admin navigation destinations and badge', () => {
+    const onNavigate = vi.fn();
+    const props = { route: 'centerOverview' as const, role: 'admin', onNavigate };
+    const html = renderToStaticMarkup(<Sidebar {...props} collapsed={false} onToggle={() => {}} />);
+    expect(html).toContain('Center Overview');
+    expect(html).toContain('Live Proctoring');
+    expect(html).toContain('Student Results');
+    expect(html).toContain('ADMIN CENTER');
+    expect(html).toContain('aria-current="page"');
+
+    const desktopButtons = buttons(Sidebar({ ...props, collapsed: false, onToggle() {} }));
+    desktopButtons[0].props.onClick();
+    desktopButtons[1].props.onClick();
+    desktopButtons[2].props.onClick();
+    expect(onNavigate.mock.calls).toEqual([['centerOverview'], ['proctoring'], ['studentResults']]);
+  });
 });
+
