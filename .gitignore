@@ -17,3 +17,6 @@ coverage/
 Thumbs.db
 *.exe
 *.apk
+.gradle/
+**/build/
+*.keystore

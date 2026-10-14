@@ -30,57 +30,50 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Java 17
+      - name: Setup OpenJDK 17
         uses: actions/setup-java@v4
         with:
           distribution: "temurin"
           java-version: "17"
 
-      - name: Verify Android SDK and Install NDK
+      - name: Setup Android SDK 34
         run: |
-          echo "ANDROID_HOME=${ANDROID_HOME}"
-          export PATH="${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:${PATH}"
           yes | sdkmanager --licenses || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;26.1.10909125"
-          echo "NDK_HOME=${ANDROID_HOME}/ndk/26.1.10909125" >> $GITHUB_ENV
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+          echo "${ANDROID_HOME}/build-tools/34.0.0" >> $GITHUB_PATH
+          echo "${ANDROID_HOME}/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "${ANDROID_HOME}/platform-tools" >> $GITHUB_PATH
 
-      - name: Setup Node.js 22
-        uses: actions/setup-node@v4
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
-          node-version: "22"
-          cache: "npm"
+          gradle-version: "8.6"
 
-      - name: Setup Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android,armv7-linux-androideabi
+      - name: Build Android Release APK
+        run: |
+          cd android && gradle :app:assembleRelease --no-daemon
 
-      - name: Install Dependencies
-        run: npm ci
-
-      - name: Initialize Tauri Android
-        run: npx tauri android init --ci
-
-      - name: Build Android Release APK (aarch64)
-        run: npx tauri android build --apk --target aarch64
+      - name: Align APK
+        run: |
+          zipalign -v -p 4 android/app/build/outputs/apk/release/app-release-unsigned.apk bestway-app-aligned.apk
 
       - name: Sign APK
-        id: sign
         run: |
           keytool -genkeypair -v -keystore release.keystore -alias bestway \
             -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass bestway2026 -keypass bestway2026 \
             -dname "CN=BestWay, OU=Exam, O=BestWay, L=Tashkent, C=UZ"
 
-          UNSIGNED_APK=$(find src-tauri/gen/android -name "*.apk" | head -n 1)
-          echo "Found APK: $UNSIGNED_APK"
-
-          ${ANDROID_HOME}/build-tools/34.0.0/zipalign -v -p 4 "$UNSIGNED_APK" bestway-app-aligned.apk
-          ${ANDROID_HOME}/build-tools/34.0.0/apksigner sign \
+          apksigner sign \
             --ks release.keystore --ks-pass pass:bestway2026 --key-pass pass:bestway2026 \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
             --out bestway-app.apk bestway-app-aligned.apk
 
-          ${ANDROID_HOME}/build-tools/34.0.0/apksigner verify --verbose bestway-app.apk
+      - name: Verify Signed APK
+        run: |
+          apksigner verify --verbose bestway-app.apk
           ls -lh bestway-app.apk
 
       - name: Upload Artifact

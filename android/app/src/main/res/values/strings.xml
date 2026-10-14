@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">BestWay</string>
+    <string name="offline_title">Internetga ulanish yo\'q</string>
+    <string name="offline_msg">Iltimos, internet aloqasini tekshiring va qayta urinib ko\'ring.</string>
+    <string name="retry">Qayta urinish</string>
+    <string name="exit_title">Chiqish</string>
+    <string name="exit_msg">Ilovadan chiqmoqchimisiz?</string>
+    <string name="yes">Ha</string>
+    <string name="no">Yo\'q</string>
+</resources>
