@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Target release tag (e.g. v0.5.3 or bestway-app-v0.5.3)
+        description: Target release tag (e.g. v0.5.4 or bestway-app-v0.5.4)
         required: true
-        default: v0.5.3
+        default: v0.5.4
         type: string
   push:
     tags:
@@ -88,10 +88,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
-          gh release upload "$TAG" bestway-app.apk --clobber || true
-          if [ "$TAG" != "v0.5.3" ]; then
-            gh release upload "v0.5.3" bestway-app.apk --clobber || true
+          gh release upload "$TAG" bestway-app.apk --clobber || gh release create "$TAG" bestway-app.apk --title "BestWay App $TAG" --notes "Release BestWay Android $TAG" || true
+          if [ "$TAG" != "v0.5.4" ]; then
+            gh release upload "v0.5.4" bestway-app.apk --clobber || gh release create "v0.5.4" bestway-app.apk --title "BestWay App v0.5.4" --notes "Release BestWay Android v0.5.4" || true
           fi
-          if [ "$TAG" != "bestway-app-v0.5.3" ]; then
-            gh release upload "bestway-app-v0.5.3" bestway-app.apk --clobber || true
+          if [ "$TAG" != "bestway-app-v0.5.4" ]; then
+            gh release upload "bestway-app-v0.5.4" bestway-app.apk --clobber || gh release create "bestway-app-v0.5.4" bestway-app.apk --title "BestWay App v0.5.4" --notes "Release BestWay Android v0.5.4" || true
           fi

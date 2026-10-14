@@ -9,12 +9,22 @@ android {
 
     defaultConfig {
         applicationId "uz.bestwayec.app"
-        minSdk 21
+        minSdk 24
         targetSdk 34
-        versionCode 503
-        versionName "0.5.3"
+        versionCode 504
+        versionName "0.5.4"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86_64', 'x86'
+        }
+    }
+
+    splits {
+        abi {
+            enable false
+        }
     }
 
     buildTypes {

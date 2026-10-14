@@ -38,7 +38,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val BASE_URL = "https://bestwayec.uz"
-        private const val USER_AGENT_SUFFIX = " BestWay-Android/0.5.3"
+        private const val USER_AGENT_SUFFIX = " BestWay-Android/0.5.4"
         private const val REQUEST_RECORD_AUDIO = 1001
     }
 
@@ -50,6 +50,37 @@ class MainActivity : AppCompatActivity() {
 
     private var hasError = false
     private var fileUploadCallback: ValueCallback<Array<Uri>>? = null
+    private var pendingPermissionRequest: PermissionRequest? = null
+
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        val currentPending = pendingPermissionRequest
+        if (currentPending != null) {
+            val grantedResources = mutableListOf<String>()
+            for (res in currentPending.resources) {
+                when (res) {
+                    PermissionRequest.RESOURCE_AUDIO_CAPTURE -> {
+                        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                            grantedResources.add(res)
+                        }
+                    }
+                    PermissionRequest.RESOURCE_VIDEO_CAPTURE -> {
+                        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                            grantedResources.add(res)
+                        }
+                    }
+                    else -> grantedResources.add(res)
+                }
+            }
+            if (grantedResources.isNotEmpty()) {
+                currentPending.grant(grantedResources.toTypedArray())
+            } else {
+                currentPending.deny()
+            }
+            pendingPermissionRequest = null
+        }
+    }
 
     private val fileChooserLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -98,6 +129,11 @@ class MainActivity : AppCompatActivity() {
 
     @android.annotation.SuppressLint("SetJavaScriptEnabled")
     private fun setupWebView() {
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(webView, true)
+        }
+
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -113,10 +149,47 @@ class MainActivity : AppCompatActivity() {
 
         webView.webChromeClient = object : WebChromeClient() {
             override fun onPermissionRequest(request: PermissionRequest?) {
-                request?.let {
-                    runOnUiThread {
-                        it.grant(it.resources)
+                if (request == null) return
+                runOnUiThread {
+                    val requestedResources = request.resources
+                    val neededPermissions = mutableListOf<String>()
+
+                    for (resource in requestedResources) {
+                        when (resource) {
+                            PermissionRequest.RESOURCE_AUDIO_CAPTURE -> {
+                                if (ContextCompat.checkSelfPermission(
+                                        this@MainActivity,
+                                        Manifest.permission.RECORD_AUDIO
+                                    ) != PackageManager.PERMISSION_GRANTED
+                                ) {
+                                    neededPermissions.add(Manifest.permission.RECORD_AUDIO)
+                                }
+                            }
+                            PermissionRequest.RESOURCE_VIDEO_CAPTURE -> {
+                                if (ContextCompat.checkSelfPermission(
+                                        this@MainActivity,
+                                        Manifest.permission.CAMERA
+                                    ) != PackageManager.PERMISSION_GRANTED
+                                ) {
+                                    neededPermissions.add(Manifest.permission.CAMERA)
+                                }
+                            }
+                        }
                     }
+
+                    if (neededPermissions.isEmpty()) {
+                        request.grant(requestedResources)
+                    } else {
+                        pendingPermissionRequest = request
+                        permissionLauncher.launch(neededPermissions.toTypedArray())
+                    }
+                }
+            }
+
+            override fun onPermissionRequestCanceled(request: PermissionRequest?) {
+                super.onPermissionRequestCanceled(request)
+                if (pendingPermissionRequest == request) {
+                    pendingPermissionRequest = null
                 }
             }
 
@@ -254,7 +327,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkExamMode(url: String?) {
-        val isExam = url != null && (url.contains("/mock/run") || url.contains("/runner"))
+        val isExam = url != null && (
+            url.contains("/mock/run") ||
+            url.contains("/runner") ||
+            url.contains("/exam") ||
+            url.contains("/student/exam") ||
+            url.contains("/multilevel")
+        )
         if (isExam) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
             swipeRefresh.isEnabled = false
@@ -310,13 +389,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestAudioPermission() {
+        val permissions = mutableListOf<String>()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            permissions.add(Manifest.permission.RECORD_AUDIO)
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.MODIFY_AUDIO_SETTINGS) != PackageManager.PERMISSION_GRANTED) {
+            permissions.add(Manifest.permission.MODIFY_AUDIO_SETTINGS)
+        }
+        if (permissions.isNotEmpty()) {
             ActivityCompat.requestPermissions(
                 this,
-                arrayOf(Manifest.permission.RECORD_AUDIO),
+                permissions.toTypedArray(),
                 REQUEST_RECORD_AUDIO
             )
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        CookieManager.getInstance().flush()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
