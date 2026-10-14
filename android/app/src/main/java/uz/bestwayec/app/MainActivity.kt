@@ -37,9 +37,17 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 class MainActivity : AppCompatActivity() {
 
     companion object {
-        private const val BASE_URL = "https://bestwayec.uz"
-        private const val USER_AGENT_SUFFIX = " BestWay-Android/0.5.4"
+        private const val BASE_URL = "https://bestwayec.uz/?platform=mobile_app"
+        private const val USER_AGENT_SUFFIX = " BestWay-Android/0.5.4 MobileApp"
         private const val REQUEST_RECORD_AUDIO = 1001
+    }
+
+    class AndroidBridge {
+        @android.webkit.JavascriptInterface
+        fun isMobileApp(): Boolean = true
+
+        @android.webkit.JavascriptInterface
+        fun getVersion(): String = "0.5.4"
     }
 
     private lateinit var swipeRefresh: SwipeRefreshLayout
@@ -132,7 +140,10 @@ class MainActivity : AppCompatActivity() {
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(webView, true)
+            setCookie("https://bestwayec.uz", "bw_mobile_app=1; path=/; max-age=31536000")
         }
+
+        webView.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
 
         webView.settings.apply {
             javaScriptEnabled = true
@@ -326,14 +337,19 @@ class MainActivity : AppCompatActivity() {
         return false
     }
 
-    private fun checkExamMode(url: String?) {
-        val isExam = url != null && (
-            url.contains("/mock/run") ||
+    private fun isCurrentExam(url: String? = webView.url): Boolean {
+        if (url == null) return false
+        return url.contains("/mock/run") ||
+            url.contains("/mock/attempt") ||
+            url.contains("/attempt/") ||
             url.contains("/runner") ||
             url.contains("/exam") ||
             url.contains("/student/exam") ||
             url.contains("/multilevel")
-        )
+    }
+
+    private fun checkExamMode(url: String?) {
+        val isExam = isCurrentExam(url)
         if (isExam) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
             swipeRefresh.isEnabled = false
@@ -358,13 +374,30 @@ class MainActivity : AppCompatActivity() {
     private fun setupBackNavigation() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (webView.canGoBack()) {
+                if (isCurrentExam()) {
+                    showExitExamDialog()
+                } else if (webView.canGoBack()) {
                     webView.goBack()
                 } else {
                     showExitDialog()
                 }
             }
         })
+    }
+
+    private fun showExitExamDialog() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.exit_exam_title)
+            .setMessage(R.string.exit_exam_msg)
+            .setPositiveButton(R.string.yes) { _, _ ->
+                if (webView.canGoBack()) {
+                    webView.goBack()
+                } else {
+                    finish()
+                }
+            }
+            .setNegativeButton(R.string.no, null)
+            .show()
     }
 
     private fun showExitDialog() {
