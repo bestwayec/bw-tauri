@@ -122,7 +122,158 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
   const recent = (attempts ?? []).slice(0, 6);
 
   if (!program) return <section><h1 className="text-2xl font-bold">{greeting(studentName)}</h1><ExamTracks /><p className="text-sm text-white/50">Select your exam track to load your dashboard.</p></section>;
-  if (program === 'MULTILEVEL') return <section><h1 className="text-2xl font-bold">Multilevel · {greeting(studentName)}</h1><ExamTracks /><p className="text-sm text-white/50">Practice levels A1–C1 · Full Mock estimated results: Below B1, B1, B2 or C1.</p><div className="my-4 grid grid-cols-2 gap-3">{(['listening','reading','writing','speaking'] as const).map((skill)=><button key={skill} className="card rounded-xl p-4 text-left capitalize" onClick={()=>onNavigate('exams')}>{skill}<span className="block text-sm normal-case opacity-60">{publishedMocks.filter((e)=>e.skills.includes(skill)).length} available exams</span></button>)}</div>{error && <p role="alert" className="text-sm text-amber-200">{error}</p>}<MultilevelHistory refreshKey={0} /></section>;
+  if (program === 'MULTILEVEL') {
+    const skillMetadata: Record<'listening' | 'reading' | 'writing' | 'speaking', { title: string; desc: string; icon: React.ReactNode; color: string; bg: string }> = {
+      listening: {
+        title: "Listening",
+        desc: "6 Parts · 35 Questions · Audio playback",
+        icon: (
+          <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+            <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
+          </svg>
+        ),
+        color: "text-emerald-400",
+        bg: "bg-emerald-500/10 border-emerald-500/20",
+      },
+      reading: {
+        title: "Reading",
+        desc: "5 Parts · 35 Questions · Dual-column passages",
+        icon: (
+          <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+          </svg>
+        ),
+        color: "text-blue-400",
+        bg: "bg-blue-500/10 border-blue-500/20",
+      },
+      writing: {
+        title: "Writing",
+        desc: "Task 1 & Task 2 · Word count analyzer",
+        icon: (
+          <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+          </svg>
+        ),
+        color: "text-purple-400",
+        bg: "bg-purple-500/10 border-purple-500/20",
+      },
+      speaking: {
+        title: "Speaking",
+        desc: "Parts 1-3 · Mic check & timed voice response",
+        icon: (
+          <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+            <line x1="12" x2="12" y1="19" y2="22" />
+          </svg>
+        ),
+        color: "text-amber-400",
+        bg: "bg-amber-500/10 border-amber-500/20",
+      },
+    };
+
+    return (
+      <section className="space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-brand/80">
+              Multi-Level CEFR Track
+            </p>
+            <h1 className="mt-1 text-2xl font-black tracking-tight text-white">
+              {greeting(studentName)}
+            </h1>
+            <p className="mt-1 text-sm text-white/50">
+              Practice levels A1–C1 · Full Mock estimated evaluation: Below B1, B1, B2 or C1.
+            </p>
+          </div>
+          <button
+            onClick={() => onNavigate("exams")}
+            className="btn-brand rounded-xl px-4 py-2 text-sm font-bold shadow-md hover:scale-[1.02] transition-transform"
+          >
+            Browse all exams →
+          </button>
+        </div>
+
+        <ExamTracks />
+
+        {/* Hero Full Mock Banner */}
+        <div className="relative overflow-hidden rounded-2xl border border-brand/40 bg-gradient-to-br from-brand/15 via-[#162032] to-[#0B0F17] p-6 shadow-lg">
+          <div className="pointer-events-none absolute -right-12 -top-12 h-56 w-56 rounded-full bg-brand/10 blur-3xl" />
+          <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1.5">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-400">
+                Official CBT Sequence
+              </span>
+              <h2 className="text-xl font-bold tracking-tight text-white sm:text-2xl">
+                Multi-Level CEFR CBT Full Mock Exam
+              </h2>
+              <p className="max-w-xl text-sm text-white/70">
+                1. Listening (45m) → 2. Reading (60m) → 3. Writing (60m) → 4. Speaking (15m).
+                Full lockdown environment with AI evaluation out of 75 points.
+              </p>
+            </div>
+            <button
+              onClick={() => onNavigate("exams")}
+              className="btn-brand shrink-0 rounded-xl px-6 py-3 font-bold text-black shadow-lg hover:scale-105 transition-transform"
+            >
+              Start Full Mock →
+            </button>
+          </div>
+        </div>
+
+        {/* 4 Skill Cards Grid */}
+        <div>
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-base font-bold text-white">Individual Practice Sections</h3>
+            <span className="text-xs text-white/40">Select a section to begin focused practice</span>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {(['listening', 'reading', 'writing', 'speaking'] as const).map((skill) => {
+              const meta = skillMetadata[skill];
+              const count = publishedMocks.filter((e) => e.skills.includes(skill)).length;
+              return (
+                <div
+                  key={skill}
+                  className="card group flex flex-col justify-between rounded-xl border border-white/10 p-4 transition-all hover:border-brand/40 hover:bg-[#1A263D]"
+                >
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <div className={`flex size-10 items-center justify-center rounded-xl border ${meta.bg} ${meta.color}`}>
+                        {meta.icon}
+                      </div>
+                      <span className="rounded-full bg-white/5 px-2.5 py-0.5 text-[11px] font-semibold text-white/60">
+                        {count} available
+                      </span>
+                    </div>
+                    <h4 className="mt-3 font-bold capitalize text-white group-hover:text-brand transition-colors">
+                      {meta.title}
+                    </h4>
+                    <p className="mt-1 text-xs text-white/50 leading-relaxed">
+                      {meta.desc}
+                    </p>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-white/10">
+                    <button
+                      onClick={() => onNavigate("exams")}
+                      className="w-full rounded-lg bg-white/5 py-2 text-xs font-semibold text-white/80 group-hover:bg-brand group-hover:text-black transition-colors"
+                    >
+                      Practice Section →
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {error && <p role="alert" className="text-sm text-amber-200">{error}</p>}
+        <MultilevelHistory refreshKey={0} />
+      </section>
+    );
+  }
   return (
     <section>
       <ExamTracks />
