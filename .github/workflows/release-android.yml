@@ -1,0 +1,101 @@
+name: Release Android (bestway-app)
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Target release tag (e.g. v0.5.3 or bestway-app-v0.5.3)
+        required: true
+        default: v0.5.3
+        type: string
+  push:
+    tags:
+      - "v*"
+      - "bestway-app-v*"
+
+concurrency:
+  group: android-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK and Build Tools
+        run: |
+          yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "build-tools;34.0.0" "platforms;android-34" "ndk;26.1.10909125"
+          echo "NDK_HOME=${ANDROID_HOME}/ndk/26.1.10909125" >> $GITHUB_ENV
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Initialize Tauri Android
+        run: npx tauri android init --ci
+
+      - name: Build Android Release APK (aarch64)
+        run: npx tauri android build --apk --target aarch64
+
+      - name: Sign APK
+        id: sign
+        run: |
+          keytool -genkeypair -v -keystore release.keystore -alias bestway \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass bestway2026 -keypass bestway2026 \
+            -dname "CN=BestWay, OU=Exam, O=BestWay, L=Tashkent, C=UZ"
+
+          UNSIGNED_APK=$(find src-tauri/gen/android -name "*.apk" | head -n 1)
+          echo "Found APK: $UNSIGNED_APK"
+
+          ${ANDROID_HOME}/build-tools/34.0.0/zipalign -v -p 4 "$UNSIGNED_APK" bestway-app-aligned.apk
+          ${ANDROID_HOME}/build-tools/34.0.0/apksigner sign \
+            --ks release.keystore --ks-pass pass:bestway2026 --key-pass pass:bestway2026 \
+            --out bestway-app.apk bestway-app-aligned.apk
+
+          ${ANDROID_HOME}/build-tools/34.0.0/apksigner verify --verbose bestway-app.apk
+          ls -lh bestway-app.apk
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bestway-app-apk
+          path: bestway-app.apk
+
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          gh release upload "$TAG" bestway-app.apk --clobber || true
+          if [ "$TAG" != "v0.5.3" ]; then
+            gh release upload "v0.5.3" bestway-app.apk --clobber || true
+          fi
+          if [ "$TAG" != "bestway-app-v0.5.3" ]; then
+            gh release upload "bestway-app-v0.5.3" bestway-app.apk --clobber || true
+          fi
