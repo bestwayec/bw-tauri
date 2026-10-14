@@ -75,7 +75,7 @@ jobs:
 
       - name: Verify Signed APK
         run: |
-          apksigner verify --verbose bestway-app.apk
+          apksigner verify --verbose --min-sdk-version 21 bestway-app.apk
           ls -lh bestway-app.apk
 
       - name: Upload Artifact
