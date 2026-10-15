@@ -307,6 +307,16 @@ function shapeGroup(g, base) {
 
 const SKILLS = ["listening", "reading", "writing", "speaking"];
 
+/** Timed-attempt durations issued with the start payload (minutes). */
+const SECTION_MINUTES = { listening: 30, reading: 60, writing: 60, speaking: 14 };
+
+/**
+ * `--timed-seconds=N` shortens every timed deadline to N seconds so the timer,
+ * the countdown warning and the automatic submit-on-time-up can be exercised
+ * in a live session instead of waiting out a real 60-minute section.
+ */
+const TIMED_SECONDS = Number(process.argv.find((a) => a.startsWith("--timed-seconds="))?.split("=")[1] ?? NaN);
+
 /**
  * Shape the exam for a student. `scope` (a single skill) narrows the payload
  * to that one section — the real backend scopes single-section practice
@@ -693,13 +703,13 @@ const server = http.createServer(async (req, res) => {
           a.status = "completed";
           continue;
         }
-        return ok(res, startPayload(id, a, body.mode ?? a.mode));
+        return ok(res, startPayload(id, a, body.mode ?? a.mode, body.deadlineSeconds));
       }
     }
     const id = rid("matt");
     const a = { kind: "mock", examId: "mock-1", studentId: userId, scope, mode: body.mode ?? "practice", status: "in_progress", answers: new Map(), startedAt: new Date().toISOString() };
     attempts.set(id, a);
-    return ok(res, startPayload(id, a, a.mode));
+    return ok(res, startPayload(id, a, a.mode, body.deadlineSeconds));
   }
   m = path.match(/^\/v1\/mock\/attempts\/([^/]+)\/answer$/);
   if (method === "POST" && m) {
@@ -789,23 +799,39 @@ const server = http.createServer(async (req, res) => {
   if (method === "POST" && path === "/v1/exam-desktop/heartbeat") return ok(res, { received: true });
   return fail(res, 404, "NOT_FOUND", `No mock route ${method} ${path}`);
 
-  function startPayload(id, a, mode) {
+  function startPayload(id, a, mode, overrideSeconds) {
     const saved = {};
     for (const [k, v] of a.answers) saved[k] = v;
     const scope = a.scope ?? null;
     const fullTest = (a.flow ?? "single_skill") === "full_test";
+    // Timed attempts carry real deadlines, exactly like the production backend:
+    // the runner counts down from `sectionDeadlines[skill]` (or the overall
+    // deadline of a full test) and submits by itself when the time is up.
+    // `deadlineSeconds` is a test hook for exercising that auto-submit quickly.
+    const timed = mode === "timed";
+    const override = Number(overrideSeconds);
+    const secondsFor = (skill) => {
+      if (Number.isFinite(override) && override > 0) return override;
+      if (Number.isFinite(TIMED_SECONDS) && TIMED_SECONDS > 0) return TIMED_SECONDS;
+      return (SECTION_MINUTES[skill] ?? 30) * 60;
+    };
+    const at = (skill) => new Date(Date.now() + secondsFor(skill) * 1000).toISOString();
+    const sectionDeadlines = timed
+      ? Object.fromEntries((scope ? [scope] : SKILLS).map((skill) => [skill, at(skill)]))
+      : null;
+    const overallDeadlineAt = timed && !scope ? at(SKILLS[0]) : null;
     const payload = {
       attemptId: id,
       resumed: a.answers.size > 0,
       mode,
       startedAt: a.startedAt,
-      deadlineAt: null,
+      deadlineAt: sectionDeadlines?.[scope] ?? overallDeadlineAt,
       serverTime: new Date().toISOString(),
-      durationMinutes: null,
+      durationMinutes: timed ? Math.round(secondsFor(scope ?? SKILLS[0]) / 60) : null,
       flowMode: fullTest ? "full_test" : "single_skill",
       currentSkill: fullTest ? a.currentSkill ?? SKILLS[0] : scope,
-      sectionDeadlines: null,
-      overallDeadlineAt: null,
+      sectionDeadlines,
+      overallDeadlineAt,
       exam: shapeExamForStudent(base, scope),
       annotations: [],
       savedAnswers: saved,

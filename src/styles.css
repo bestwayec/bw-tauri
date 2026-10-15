@@ -432,7 +432,12 @@ textarea.field {
   --ex-ink: #111111;
   --ex-muted: #5c5c5c;
   --ex-line: #d8d8d3;
-  --ex-accent: #1b7a3d;
+  /* Accent follows the app's brand emerald (--brand #10B981 → #059669): fills
+     use the brand gradient with white ink exactly like .btn-brand, while
+     --ex-accent-quiet is the darker tone reserved for accent-coloured text on
+     the paper background, where #10B981 itself is not readable. */
+  --ex-accent: #10b981;
+  --ex-accent-quiet: #047857;
   --ex-accent-ink: #ffffff;
   --ex-flag: #b35400;
   --ex-danger: #b3261e;
@@ -453,8 +458,9 @@ textarea.field {
   --ex-ink: #f2f2ec;
   --ex-muted: #a3a396;
   --ex-line: #303321;
-  --ex-accent: #89f336;
-  --ex-accent-ink: #101704;
+  --ex-accent: #34d399;
+  --ex-accent-quiet: #6ee7b7;
+  --ex-accent-ink: #06251a;
   --ex-flag: #ffb340;
   --ex-danger: #f87171;
   --ex-field: #0e110a;
@@ -504,7 +510,7 @@ textarea.field {
   font-weight: 600;
 }
 .exam-savestate-saved {
-  color: var(--ex-accent);
+  color: var(--ex-accent-quiet);
 }
 .exam-savestate-saving {
   color: var(--ex-muted);
@@ -548,14 +554,18 @@ textarea.field {
   padding: 4px 10px;
   font-size: 11px;
 }
+/* Primary actions carry the same emerald gradient as the app's .btn-brand. */
 .exam-btn-primary {
   border: 1px solid var(--ex-accent);
   border-radius: 8px;
-  background: var(--ex-accent);
-  color: var(--ex-accent-ink);
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #ffffff;
   padding: 6px 18px;
   font-size: 13px;
   font-weight: 700;
+}
+.exam-btn-primary:hover:enabled {
+  background: linear-gradient(135deg, #34d399, #10b981);
 }
 .exam-btn-primary:disabled {
   opacity: 0.5;
@@ -1044,7 +1054,7 @@ textarea.field {
 }
 .exam-part-active {
   border-color: var(--ex-accent);
-  color: var(--ex-accent);
+  color: var(--ex-accent-quiet);
 }
 .exam-shell[data-exam-theme="light"] .exam-part-active {
   background: color-mix(in srgb, var(--ex-accent) 10%, transparent);
