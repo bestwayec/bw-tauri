@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Bestway App",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "identifier": "uz.bestwayec.app",
   "build": {
     "frontendDist": "../dist",
