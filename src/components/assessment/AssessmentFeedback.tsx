@@ -1,9 +1,8 @@
-import { useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { getAssessment, assessmentStatus, ASSESSMENT_POLL_INTERVAL, shouldPollAssessment, type Assessment, type AssessmentResult } from '@/lib/assessment';
+import { useEffect, useState } from 'react';
+import { assessmentPhaseLabel, assessmentStatus, feedbackSpeechText, speakFeedback, speechFeedbackSupported, stopFeedbackSpeech, type Assessment, type AssessmentPhase, type AssessmentResult } from '@/lib/assessment';
 import { resolveMockMediaUrl } from '@/lib/mocks';
 import { useBlobMedia } from '@/lib/media';
-import { useSessionStore } from '@/lib/session-store';
+import { useAssessment } from '@/hooks/useAssessment';
 
 function List({ title, items }: { title: string; items: string[] }) {
   if (!items.length) return null;
@@ -55,10 +54,25 @@ export function AssessmentCard({ assessment }: { assessment: Assessment }) {
   const result = assessment.approvedFeedback ?? assessment.evaluation?.result;
   const score = assessment.finalScore ?? assessment.aiScore;
   const confidence = assessment.confidence ?? result?.confidence;
+  // Spoken feedback reads the same advice the card shows. It is offered only
+  // where the platform can actually speak, and always stops on unmount so a
+  // voice cannot follow the student off the page.
+  const [speaking, setSpeaking] = useState(false);
+  useEffect(() => () => stopFeedbackSpeech(), []);
+  const speech = assessment.approvedFeedback || assessment.evaluation?.result ? feedbackSpeechText(assessment) : null;
   return <article className="mt-4 rounded-xl border border-white/10 p-4">
     <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-bold">{assessment.skill === 'writing' ? 'Writing' : 'Speaking'} feedback</h2><p role="status" className="mt-1 text-sm text-brand">{assessmentStatus(assessment)}</p></div>
       {score !== null && <p className="text-right"><strong className="text-2xl">{score}{assessment.program === 'MULTILEVEL' ? '/75' : '/9'}</strong><span className="block text-xs text-white/50">{assessment.program === 'MULTILEVEL' ? `Estimated Multilevel ${assessment.skill === 'writing' ? 'Writing' : 'Speaking'} Score` : `Estimated IELTS ${assessment.skill === 'writing' ? 'Writing' : 'Speaking'} Band`}</span>{assessment.finalScore === null && <span className="block text-xs text-amber-200">Provisional · awaiting teacher confirmation</span>}</p>}
     </div>
+    {speech && speechFeedbackSupported() && <button
+      type="button"
+      aria-pressed={speaking}
+      className="btn-ghost mt-3 rounded-lg px-3 py-2 text-sm"
+      onClick={() => {
+        if (speaking) { stopFeedbackSpeech(); setSpeaking(false); return; }
+        setSpeaking(speakFeedback(speech, () => setSpeaking(false)));
+      }}
+    >{speaking ? '⏹ Stop reading feedback' : '🔊 Listen to feedback'}</button>}
     <p className="mt-2 text-xs text-white/50">AI estimates are unofficial practice feedback. Final score source: {assessment.finalScoreSource ?? 'Pending'}{confidence != null ? ` · AI confidence: ${Math.round(confidence * 100)}%` : ''}</p>
     {assessment.teacherScore !== null && assessment.aiScore !== null && <p className="mt-1 text-xs text-white/60">Original AI estimate: {assessment.aiScore} · Teacher score: {assessment.teacherScore}</p>}
     {!result && <p className="mt-3 text-sm text-white/60">Your submission is saved. Feedback will appear after assessment or teacher review.</p>}
@@ -73,18 +87,35 @@ export function AssessmentCard({ assessment }: { assessment: Assessment }) {
   </article>;
 }
 
+/**
+ * Live AI-assessment status for one finished attempt. Pure: the caller passes
+ * the phase it read from `useAssessment`, which keeps the wording and the
+ * states testable without a query client. Renders nothing when the attempt has
+ * no assessment at all (listening/reading-only, or a historical attempt).
+ */
+export function AiAssessmentBanner({ phase, skill, onRefresh, refreshing }: {
+  phase: AssessmentPhase;
+  skill: string;
+  onRefresh: () => void;
+  refreshing: boolean;
+}) {
+  if (phase === 'none') return null;
+  const tone = phase === 'processing'
+    ? 'border-brand/25 bg-brand/5 text-brand'
+    : phase === 'ready'
+      ? 'border-emerald-400/30 bg-emerald-400/5 text-emerald-200'
+      : 'border-amber-400/30 bg-amber-400/5 text-amber-200';
+  const icon = phase === 'processing' ? '🤖' : phase === 'ready' ? '✅' : '📨';
+  return <section role="status" aria-label="AI assessment status" className={`mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 ${tone}`}>
+    <p className="text-sm font-semibold">{icon} {assessmentPhaseLabel(phase, skill)}</p>
+    <button type="button" onClick={onRefresh} disabled={refreshing} className="btn-ghost rounded-lg px-3 py-2 text-xs">
+      {refreshing ? 'Checking…' : 'Check now'}
+    </button>
+  </section>;
+}
+
 export default function AssessmentFeedback({ attemptId }: { attemptId: string }) {
-  const userId = useSessionStore((state) => state.profile?.id);
-  const windowStart = useRef(Date.now());
-  const successfulRequests = useRef(0);
-  const query = useQuery({ queryKey: ['assessment', userId ?? null, attemptId], queryFn: async () => {
-    const data = await getAssessment(attemptId); successfulRequests.current += 1; return data;
-  }, retry: false,
-    refetchOnWindowFocus: false, refetchOnReconnect: false,
-    refetchInterval: (state) => state.state.error ? false : shouldPollAssessment(state.state.data,
-      Math.max(0, successfulRequests.current - 1), Date.now() - windowStart.current) ? ASSESSMENT_POLL_INTERVAL : false,
-  });
-  const refresh = () => { windowStart.current = Date.now(); successfulRequests.current = 0; void query.refetch(); };
+  const { query, refresh } = useAssessment(attemptId);
   return <section className="card mt-4 rounded-2xl p-5" aria-label="Assessment feedback">
     <div className="flex items-center justify-between gap-3"><h2 className="font-bold">Assessment status and feedback</h2><button type="button" disabled={query.isFetching} className="btn-ghost rounded-lg px-3 py-2 text-xs" onClick={refresh}>Refresh</button></div>
     <p className="mt-1 text-xs text-white/50">Your original answers and recordings remain saved. Status updates every 15 seconds for up to 5 minutes; refresh later if assessment is still queued.</p>

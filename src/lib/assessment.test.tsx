@@ -1,7 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { assessmentAttemptSchema, assessmentStatus, getAssessment, shouldPollAssessment, type Assessment } from './assessment';
-import { AssessmentCard } from '@/components/assessment/AssessmentFeedback';
+import { assessmentAttemptSchema, assessmentPhase, assessmentPhaseLabel, assessmentStatus, feedbackSpeechText, getAssessment, shouldPollAssessment, speakFeedback, speechFeedbackSupported, stopFeedbackSpeech, type Assessment } from './assessment';
+import { AssessmentCard, AiAssessmentBanner } from '@/components/assessment/AssessmentFeedback';
 import { get } from './api';
 
 vi.mock('./api', () => ({ get: vi.fn(), API_BASE_URL: 'https://api.example.test/v1' }));
@@ -80,5 +80,89 @@ describe('student assessment feedback preserves source evidence', () => {
     const html = renderToStaticMarkup(<AssessmentCard assessment={assessment} />);
     expect(html).toContain('Teacher review required'); expect(html).toContain('Original audio is retained');
     expect(html).not.toContain('Estimated Multilevel Speaking Score');
+  });
+});
+
+describe('automatic AI assessment status after submit', () => {
+  it('reports progress while any job runs, and completion only once they settle', () => {
+    expect(assessmentPhase(undefined)).toBe('none');
+    expect(assessmentPhase({ attemptId: 'a', assessments: [] })).toBe('none');
+    expect(assessmentPhase({ attemptId: 'a', assessments: [fixture('PENDING')] })).toBe('processing');
+    expect(assessmentPhase({ attemptId: 'a', assessments: [fixture('RETRY')] })).toBe('processing');
+    // A finished sibling skill must never hide work still in flight.
+    expect(assessmentPhase({ attemptId: 'a', assessments: [fixture('SUCCEEDED'), fixture('PROCESSING')] })).toBe('processing');
+    expect(assessmentPhase({ attemptId: 'a', assessments: [fixture('SUCCEEDED')] })).toBe('ready');
+    expect(assessmentPhase({ attemptId: 'a', assessments: [fixture('NEEDS_REVIEW')] })).toBe('review');
+    expect(assessmentPhase({ attemptId: 'a', assessments: [fixture('FAILED')] })).toBe('failed');
+  });
+
+  it('tells the student what is happening in their own terms', () => {
+    expect(assessmentPhaseLabel('processing', 'Writing')).toContain('AI is analysing your Writing');
+    expect(assessmentPhaseLabel('ready', 'Speaking')).toContain('AI feedback for your Speaking is ready');
+    expect(assessmentPhaseLabel('review', 'Writing')).toContain('teacher review');
+    expect(assessmentPhaseLabel('failed', 'Writing')).toContain('a teacher will grade it');
+    expect(assessmentPhaseLabel('none', 'Writing')).toContain('answers are saved');
+  });
+
+  it('renders the live banner, and nothing at all for an unassessed attempt', () => {
+    const html = renderToStaticMarkup(<AiAssessmentBanner phase="processing" skill="Writing" onRefresh={() => {}} refreshing={false} />);
+    expect(html).toContain('role="status"');
+    expect(html).toContain('AI is analysing your Writing');
+    expect(html).toContain('Check now');
+    const ready = renderToStaticMarkup(<AiAssessmentBanner phase="ready" skill="Speaking" onRefresh={() => {}} refreshing />);
+    expect(ready).toContain('Checking…');
+    expect(renderToStaticMarkup(<AiAssessmentBanner phase="none" skill="Writing" onRefresh={() => {}} refreshing={false} />)).toBe('');
+  });
+});
+
+describe('spoken feedback', () => {
+  it('reads the advice aloud and never reads the original answer back', () => {
+    const speech = feedbackSpeechText(fixture());
+    expect(speech).toContain('Estimated Multilevel Speaking score 51 out of 75');
+    expect(speech).toContain('teacher confirmation required');
+    expect(speech).toContain('Strengths: Relevant ideas');
+    expect(speech).toContain('Priority improvements: Balance arguments');
+    expect(speech).toContain('say It helps instead of It help');
+    expect(speech).toContain('replace good with beneficial');
+    expect(speech).toContain('Recommended next practice: Practise both sides');
+    expect(speech).toContain('This is an AI estimate');
+    expect(speech).not.toContain('script');
+  });
+
+  it('reads a teacher-approved result, and nothing while a job is still queued', () => {
+    const approved = fixture(); approved.approvedFeedback = approved.evaluation!.result;
+    expect(feedbackSpeechText(approved)).toContain('approved by your teacher');
+    expect(feedbackSpeechText(approved)).not.toContain('This is an AI estimate');
+    const queued = fixture('PENDING'); queued.evaluation = null;
+    expect(feedbackSpeechText(queued)).toBeNull();
+  });
+
+  it('speaks once, cancels the previous reading and reports the end', () => {
+    const speak = vi.fn(); const cancel = vi.fn();
+    class Utterance { text: string; rate = 1; onend: (() => void) | null = null; onerror: (() => void) | null = null;
+      constructor(text: string) { this.text = text; } }
+    vi.stubGlobal('SpeechSynthesisUtterance', Utterance);
+    vi.stubGlobal('window', { speechSynthesis: { speak, cancel }, SpeechSynthesisUtterance: Utterance });
+    expect(speechFeedbackSupported()).toBe(true);
+    const ended = vi.fn();
+    expect(speakFeedback('Band 7. Read this.', ended)).toBe(true);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    const utterance = speak.mock.calls[0][0] as Utterance;
+    expect(utterance.text).toBe('Band 7. Read this.');
+    utterance.onend?.();
+    expect(ended).toHaveBeenCalledTimes(1);
+    stopFeedbackSpeech();
+    expect(cancel).toHaveBeenCalledTimes(2);
+  });
+
+  it('degrades to the written card when speech synthesis is unavailable', () => {
+    expect(speechFeedbackSupported()).toBe(false);
+    expect(speakFeedback('nothing to say')).toBe(false);
+    expect(speakFeedback('')).toBe(false);
+    expect(() => stopFeedbackSpeech()).not.toThrow();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 });

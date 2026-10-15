@@ -1808,3 +1808,119 @@ textarea.field {
     animation: bw-fade 0.2s ease-out both !important;
   }
 }
+
+/* ============================================================
+   Desktop exam layout (Reading / Listening)
+   The CBT is used on desktop: a passage must never run the full
+   width of a wide monitor, the question column keeps a readable
+   measure, and a narrow window stacks the passage above the
+   questions instead of showing two unreadable columns.
+   ============================================================ */
+
+/* Reading comfort: cap the measure and centre it in its pane. */
+.exam-passage {
+  max-width: 74ch;
+  margin-inline: auto;
+  overflow-wrap: anywhere;
+}
+
+/* Question material shares the measure so the eye never travels a metre. */
+.exam-group,
+.exam-gapped-card,
+.exam-audio,
+.exam-figure,
+.exam-mapimg-el {
+  max-width: 82ch;
+  margin-inline: auto;
+}
+
+.exam-q-prompt,
+.exam-group-instr,
+.exam-opt,
+.exam-para p {
+  overflow-wrap: anywhere;
+}
+
+/* A notes/table document scrolls sideways instead of widening the pane. */
+.exam-gapped-card {
+  overflow-x: auto;
+}
+
+/* Stacked reading (narrow window): passage above the questions. */
+.exam-stack-passage {
+  margin-bottom: 18px;
+  border: 1px solid var(--ex-line);
+  border-radius: 12px;
+  background: var(--ex-pane);
+  overflow: hidden;
+}
+.exam-stack-passage .exam-pane-head {
+  padding: 8px 14px;
+}
+.exam-stack-passage-body {
+  padding: 14px;
+}
+
+/* The divider is a real control, so it must show keyboard focus. */
+.exam-divider:focus-visible {
+  outline: 3px solid var(--ex-accent);
+  outline-offset: -1px;
+}
+
+/* The candidate line truncates instead of pushing the countdown around. */
+.exam-topbar-name,
+.exam-topbar-section {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Wide desktops: more pane padding as the window grows. */
+@media (min-width: 1440px) {
+  .exam-pane-scroll,
+  .exam-single {
+    padding: 20px 24px;
+  }
+
+  .exam-pane-right .exam-pane-scroll > *:last-child,
+  .exam-single > *:last-child {
+    margin-bottom: 0;
+  }
+}
+
+@media (min-width: 1920px) {
+  .exam-pane-scroll,
+  .exam-single {
+    padding: 24px 34px;
+  }
+
+  .exam-timer {
+    font-size: 22px;
+  }
+
+  .exam-passage {
+    max-width: 78ch;
+  }
+}
+
+/* Narrow windows: the top bar wraps rather than crushing the countdown. */
+@media (max-width: 1099px) {
+  .exam-topbar {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    padding: 8px 12px;
+  }
+
+  .exam-topbar-mid {
+    margin-left: 0;
+  }
+
+  .exam-topbar-controls {
+    margin-left: auto;
+    flex-wrap: wrap;
+  }
+
+  .exam-timer {
+    font-size: 18px;
+  }
+}

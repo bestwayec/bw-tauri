@@ -12,6 +12,8 @@
  * - Mock exams covering ALL 15 question types, gapped contentHtml docs,
  *   auth-protected media, HTTP Range audio, ?attemptId= replay counting.
  * - Legacy /tests flow, heartbeat, flag-cheat, desktop-version.
+ * - AI assessment feedback for Writing/Speaking submits, served at
+ *   GET /v1/assessment/attempts/:id (PENDING -> PROCESSING -> SUCCEEDED).
  *
  * Usage:
  *   node tools/mock-server/server.mjs [--port 3101]
@@ -275,6 +277,7 @@ const legacyTest = {
 let activeProgram = "MULTILEVEL";
 const attempts = new Map(); // attemptId -> { examId|testId, kind, studentId, mode, answers:Map, status, startedAt }
 const audioPlays = new Map(); // `${groupId}:${attemptId}` -> count
+const assessmentJobs = new Map(); // attemptId -> [job] (AI Writing/Speaking feedback)
 
 // Deterministic fake audio (32KB) + 1px PNG.
 const AUDIO = Buffer.alloc(32 * 1024);
@@ -328,6 +331,236 @@ function requestedScope(source) {
     (Array.isArray(source.skills) && source.skills.length === 1 ? source.skills[0] : null);
   const skill = typeof raw === "string" ? raw.trim().toLowerCase() : "";
   return SKILLS.includes(skill) ? skill : null;
+}
+
+// ---------------------------------------------------------------------------
+// AI assessment fixture (Writing / Speaking feedback)
+// ---------------------------------------------------------------------------
+// Mirrors the real backend: `POST /mock/attempts/:id/submit` enqueues one job
+// per Writing/Speaking skill in the graded scope, and
+// `GET /assessment/attempts/:id` reports them. The client contract lives in
+// src/lib/assessment.ts (`assessmentAttemptSchema`) — this fixture must keep
+// validating against it and must never leak provider-only fields.
+
+const ASSESSMENT_PROGRAMS = {
+  ielts_academic: "IELTS_ACADEMIC",
+  ielts_general: "IELTS_GENERAL",
+  multilevel: "MULTILEVEL",
+};
+const ASSESSMENT_SKILLS = ["writing", "speaking"];
+const ASSESSMENT_DEFAULT_DELAY_MS = 1500;
+
+/** Test hook: shorten the simulated AI latency (0..60s, default 1.5s). */
+function assessmentDelayMs(raw) {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return ASSESSMENT_DEFAULT_DELAY_MS;
+  return Math.min(60_000, Math.max(0, Math.round(value)));
+}
+
+function wordCount(text) {
+  const trimmed = String(text ?? "").replace(/\s+/g, " ").trim();
+  return trimmed ? trimmed.split(" ").length : 0;
+}
+
+/** Only patterns the answer actually contains are ever reported. */
+const GRAMMAR_RULES = [
+  { find: /\bpeople is\b/i, original: "people is", corrected: "people are", explanation: '"People" is plural, so it takes a plural verb.' },
+  { find: /\bmore better\b/i, original: "more better", corrected: "better", explanation: '"Better" is already comparative.' },
+  { find: /\bi am agree\b/i, original: "I am agree", corrected: "I agree", explanation: '"Agree" is a verb and does not take "am".' },
+];
+const VOCABULARY_RULES = [
+  { find: /\bgood\b/i, original: "good", alternative: "beneficial", explanation: "A more precise word for a positive effect." },
+  { find: /\bbad\b/i, original: "bad", alternative: "detrimental", explanation: "A more precise word for a negative effect." },
+  { find: /\bbig\b/i, original: "big", alternative: "substantial", explanation: "A more formal word for scale." },
+];
+
+/** One assessment job for one skill, derived only from the saved answers. */
+function buildAssessmentJob(attemptId, attempt, skill, base, delayMs, now) {
+  const section = mockExam.sections.find((s) => s.skill === skill);
+  if (!section) return null;
+  const program = ASSESSMENT_PROGRAMS[mockExam.type] ?? "IELTS_ACADEMIC";
+  const spoken = skill === "speaking";
+  const rows = section.groups.flatMap((group) =>
+    group.questions.map((question) => {
+      const saved = attempt.answers.get(question.id);
+      const audio = saved === "[audio]";
+      const original = audio || saved == null ? "" : String(saved);
+      // A recorded take is represented by its transcript, exactly like the real
+      // assessment pipeline (text comes from speech-to-text, audio stays intact).
+      const transcript = audio ? `Synthetic transcript for ${question.prompt}` : null;
+      const text = audio ? transcript : original;
+      return { question, group, audio, original, text, transcript, submitted: audio || !!original.trim(), words: wordCount(text) };
+    }),
+  );
+  const totalWords = rows.reduce((sum, row) => sum + row.words, 0);
+  const answered = rows.filter((row) => row.submitted).length;
+  // A deterministic estimate from the submission itself: the fixture never
+  // invents work the student did not hand in.
+  const band = totalWords === 0 ? 0 : totalWords >= 250 ? 7 : totalWords >= 150 ? 6 : 5;
+  const holistic = Math.round((band / 9) * 75);
+  const joined = rows.map((row) => row.text).join("\n");
+  const argumentative = rows.some((row) => row.question.type === "essay_task2") && answered > 0;
+  const forCovered = argumentative ? /(on the one hand|\bfor\b|support|proponent)/i.test(joined) : null;
+  const againstCovered = argumentative ? /(however|on the other hand|against|critic|opponent)/i.test(joined) : null;
+  const grammarCorrections = GRAMMAR_RULES.filter((rule) => rule.find.test(joined)).map((rule) => ({
+    original: rule.original,
+    corrected: rule.corrected,
+    explanation: rule.explanation,
+  }));
+  const vocabularyUpgrades = VOCABULARY_RULES.filter((rule) => rule.find.test(joined)).map((rule) => ({
+    original: rule.original,
+    alternative: rule.alternative,
+    explanation: rule.explanation,
+  }));
+  const parts = rows.map((row) => ({
+    id: row.question.id,
+    max: row.question.points,
+    task: row.question.prompt,
+    context: row.group.title ?? "",
+  }));
+  const submissions = rows.map((row) => ({
+    questionId: row.question.id,
+    partId: row.question.id,
+    prompt: row.question.prompt,
+    context: row.group.title ?? "",
+    originalResponse: row.audio ? "" : row.original,
+    wordCount: row.words,
+    audioUrl: row.audio ? `${base}/mock/attempts/${attemptId}/speaking/${row.question.id}` : null,
+    transcript: row.transcript
+      ? {
+          text: row.transcript,
+          confidence: 0.9,
+          segments: [{ start: 0, end: 12, text: row.transcript, confidence: 0.9 }],
+          pronunciationEvidence: "UNAVAILABLE",
+        }
+      : null,
+  }));
+  const resultParts = rows.map((row) => ({
+    id: row.question.id,
+    rawScore: program === "MULTILEVEL" ? Math.round((band / 9) * row.question.points) : null,
+    criteria:
+      program === "MULTILEVEL"
+        ? {}
+        : { task_response: band, coherence_cohesion: band, lexical_resource: band, grammatical_range_accuracy: band },
+    evidence: {
+      task_response: row.submitted
+        ? `${row.text.slice(0, 60)}${row.text.length > 60 ? "…" : ""}`
+        : "No answer was submitted for this task.",
+    },
+    feedback: {
+      taskCoverage: row.submitted ? `Answered with ${row.words} words in this task.` : "No answer was submitted for this task.",
+      grammar: grammarCorrections.length
+        ? "Some sentences need the corrections listed below."
+        : "Sentences are grammatically clear; keep checking verb forms.",
+      vocabulary: vocabularyUpgrades.length
+        ? "Word choice is clear but general in places; see the alternatives below."
+        : "Word choice fits the task.",
+      fluencyCohesion: spoken
+        ? "Ideas are linked with simple connectors; add signposting between turns."
+        : "Paragraphs follow a clear progression; the conclusion restates the position.",
+      ideaDevelopment: "Each body paragraph carries one main idea plus an example.",
+      register: spoken ? "Spoken register is appropriate for the interview." : "Register is appropriately formal.",
+      spellingPunctuation: "Punctuation is mostly accurate; check commas in long clauses.",
+      strengths: row.submitted ? ["The task is answered directly."] : [],
+      issues: row.submitted ? ["Develop this idea with a concrete example."] : ["Answer this task before submitting."],
+      missedPrompts: row.submitted ? [] : [`Question ${row.question.number} was left unanswered.`],
+      usefulPhrases: spoken ? ["That's an interesting question…", "To sum up…"] : ["On the one hand…", "A further consideration is…"],
+      forCovered,
+      againstCovered,
+      position:
+        forCovered === null
+          ? "Not applicable to this task."
+          : forCovered
+            ? "The supporting side is covered."
+            : "The supporting side is missing.",
+      argumentBalance:
+        againstCovered === null
+          ? "Not applicable to this task."
+          : againstCovered
+            ? "Both sides are represented; keep the balance even."
+            : "The opposing side is not developed; add a counter-argument paragraph.",
+    },
+  }));
+  return {
+    id: rid("assess"),
+    skill,
+    program,
+    policyMode: (attempt.flow ?? "single_skill") === "full_test" ? "FULL_MOCK_AI_WITH_REVIEW" : "PRACTICE_AUTO_AI",
+    createdAt: now,
+    delayMs,
+    aiScore: program === "MULTILEVEL" ? holistic : band,
+    confidence: 0.8,
+    rubricVersion:
+      program === "MULTILEVEL"
+        ? `${spoken ? "MULTILEVEL_SPEAKING" : "MULTILEVEL_WRITING"}_RUBRIC_V1`
+        : `${spoken ? "IELTS_SPEAKING" : "IELTS_WRITING"}_RUBRIC_V1`,
+    promptVersion: "PROMPT_V1",
+    parts,
+    submissions,
+    result: {
+      parts: resultParts,
+      overallStrengths: [answered === rows.length ? "Every task in the section was answered." : `Answered ${answered} of ${rows.length} task(s).`],
+      priorityImprovements: ["Develop each idea with a concrete example.", "Widen vocabulary to avoid repetition."],
+      grammarCorrections,
+      vocabularyUpgrades,
+      improvedExamples: rows.map((row) => ({
+        partId: row.question.id,
+        text: `Model opening for "${row.question.prompt}": state the topic in one sentence, then add a reason and one example.`,
+      })),
+      recommendedPractice: spoken
+        ? ["Record one Speaking Part 2 answer and re-listen for fluency.", "Practise signposting: firstly, however, in the end."]
+        : ["Write one timed 250-word Task 2 essay.", "Rewrite the weaker task using the corrections below."],
+      confidence: 0.8,
+      pronunciationEvidence: "UNAVAILABLE",
+    },
+  };
+}
+
+/** Jobs enqueued by a submit, one per Writing/Speaking skill in the scope. */
+function createAssessmentJobs(attemptId, attempt, skills, base, delayRaw) {
+  const delayMs = assessmentDelayMs(delayRaw);
+  const now = Date.now();
+  return skills
+    .filter((skill) => ASSESSMENT_SKILLS.includes(skill))
+    .map((skill) => buildAssessmentJob(attemptId, attempt, skill, base, delayMs, now))
+    .filter(Boolean);
+}
+
+/** Status from elapsed time only, so no timer is left behind by a request. */
+function assessmentStatus(job, now) {
+  const elapsed = now - job.createdAt;
+  if (elapsed < job.delayMs / 2) return "PENDING";
+  if (elapsed < job.delayMs) return "PROCESSING";
+  return "SUCCEEDED";
+}
+
+/**
+ * The student-visible projection. Scores, confidence and rubric output appear
+ * only once the job has SUCCEEDED — a queued job never carries a fabricated
+ * grade. `finalScore` stays null: the teacher remains the final authority.
+ */
+function assessmentView(job, now) {
+  const status = assessmentStatus(job, now);
+  const done = status === "SUCCEEDED";
+  return {
+    id: job.id,
+    skill: job.skill,
+    program: job.program,
+    status,
+    policyMode: job.policyMode,
+    version: 1,
+    aiScore: done ? job.aiScore : null,
+    teacherScore: null,
+    finalScore: null,
+    finalScoreSource: null,
+    confidence: done ? job.confidence : null,
+    rubricVersion: job.rubricVersion,
+    promptVersion: job.promptVersion,
+    evaluation: done ? { result: job.result } : null,
+    approvedFeedback: null,
+    submissions: job.submissions,
+    parts: job.parts,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -503,6 +736,9 @@ const server = http.createServer(async (req, res) => {
       : (a.scope ? [a.scope] : SKILLS);
     const rawScores = {};
     for (const s of skills) rawScores[s] = { score: a.answers.size, max: 10 };
+    // Same side effect as the real backend: submitting enqueues the AI feedback
+    // for the Writing/Speaking skills it graded. Listening/Reading need none.
+    assessmentJobs.set(m[1], createAssessmentJobs(m[1], a, skills, base, body.assessmentDelayMs));
     return ok(res, { status: "completed", rawScores, sectionBands: { reading: 6.5 }, overallBand: 6.5, cefrLevel: "B2" });
   }
   m = path.match(/^\/v1\/mock\/attempts\/([^/]+)\/flag-cheat$/);
@@ -534,6 +770,20 @@ const server = http.createServer(async (req, res) => {
   if (method === "GET" && m) {
     res.writeHead(200, { "Content-Type": "image/png", "Content-Length": PNG.length });
     return res.end(PNG);
+  }
+
+  // --- AI assessment (Writing/Speaking feedback; see src/lib/assessment.ts) ---
+  m = path.match(/^\/v1\/assessment\/attempts\/([^/]+)$/);
+  if (method === "GET" && m) {
+    let attemptId = m[1];
+    try {
+      attemptId = decodeURIComponent(m[1]);
+    } catch {
+      /* keep the raw path segment */
+    }
+    if (!attempts.has(attemptId)) return fail(res, 404, "ATTEMPT_NOT_FOUND", "No such attempt");
+    const now = Date.now();
+    return ok(res, { attemptId, assessments: (assessmentJobs.get(attemptId) ?? []).map((job) => assessmentView(job, now)) });
   }
 
   if (method === "POST" && path === "/v1/exam-desktop/heartbeat") return ok(res, { received: true });

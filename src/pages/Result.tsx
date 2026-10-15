@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import AttemptReview from "@/components/exam/AttemptReview";
 import { MOCK_SKILL_LABEL, type MockSkill, type MockExamType } from "@/lib/mocks";
-import AssessmentFeedback from '@/components/assessment/AssessmentFeedback';
+import AssessmentFeedback, { AiAssessmentBanner } from '@/components/assessment/AssessmentFeedback';
+import { assessmentPhase } from '@/lib/assessment';
+import { useAssessment } from '@/hooks/useAssessment';
 
 export interface MockResultSummary {
   skill: MockSkill;
@@ -76,6 +78,15 @@ function ScoreRing({ score, max }: { score: number; max: number | null }) {
 
 export default function Result({ testTitle, testType, autoScore, maxScore, attemptId, mock, onBack, onHistory }: Props) {
   const hasScore = autoScore !== null && autoScore !== undefined;
+  // Writing and Speaking are graded by the AI as soon as they are submitted, so
+  // watch that job and tell the student straight away instead of leaving them
+  // under a generic "submitted for grading" line. Reading/Listening attempts
+  // never issue the request.
+  const assessed = mock?.skill === 'writing' || mock?.skill === 'speaking';
+  const { query: assessmentQuery, refresh: refreshAssessment } = useAssessment(
+    assessed ? attemptId ?? null : null,
+    assessed,
+  );
   if (mock) {
     const multilevel = mock.examType === 'multilevel';
     const band = multilevel ? mock.overallScore ?? mock.standardScores?.[mock.skill]?.estimatedStandardScore : mock.sectionBands?.[mock.skill] ?? mock.overallBand;
@@ -134,6 +145,14 @@ export default function Result({ testTitle, testType, autoScore, maxScore, attem
             </div>
           </div>
         </div>
+        {assessed && (
+          <AiAssessmentBanner
+            phase={assessmentPhase(assessmentQuery.data)}
+            skill={MOCK_SKILL_LABEL[mock.skill]}
+            onRefresh={refreshAssessment}
+            refreshing={assessmentQuery.isFetching}
+          />
+        )}
         {attemptId && <AssessmentFeedback key={attemptId} attemptId={attemptId} />}
       </section>
     );

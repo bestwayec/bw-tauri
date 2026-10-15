@@ -27,6 +27,18 @@ import {
 } from '@/lib/offline-exam';
 import { clearSecurityLog, logLockdownEvent, type SecurityLogEntry } from '@/lib/proctoring';
 import { useProctorSnapshots } from '@/hooks/useProctorSnapshots';
+import { useViewportWidth } from '@/hooks/useViewportWidth';
+import {
+  examLayout,
+  nudgeSplit,
+  readSplit,
+  SPLIT_DEFAULT,
+  SPLIT_MAX,
+  SPLIT_MIN,
+  splitColumns,
+  splitValueText,
+  writeSplit,
+} from '@/lib/exam-layout';
 
 export interface ExamRunnerProps {
   attemptId: string;
@@ -187,7 +199,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [timeUp, setTimeUp] = useState(false);
-  const [leftWidth, setLeftWidth] = useState(50);
+  const [leftWidth, setLeftWidth] = useState(() => readSplit(p.attemptId));
 
   const dirty = useRef<Set<string>>(
     new Set(
@@ -306,7 +318,12 @@ export default function ExamRunner(p: ExamRunnerProps) {
   }, [allQuestions, p]);
 
   const part = p.parts[partIdx] ?? null;
-  const split = !!part?.passageText;
+  const viewportWidth = useViewportWidth();
+  // Reading gets the familiar two-pane CBT view on a wide window, and stacks the
+  // passage above the questions when the window is too narrow for two readable
+  // columns. Listening (no passage) is always one column.
+  const layout = examLayout(!!part?.passageText, viewportWidth);
+  const split = layout === "split";
 
   // ---- autosave (debounced per answer, bulk flush, offline queue) ----
   const saveInFlight = useRef<Promise<void> | null>(null);
@@ -530,6 +547,14 @@ export default function ExamRunner(p: ExamRunnerProps) {
     };
   }, [split]);
 
+  // Remember the pane split per attempt: it is a study preference, so it must
+  // survive part navigation and a reload. Debounced — a drag must not write on
+  // every frame.
+  useEffect(() => {
+    const id = window.setTimeout(() => writeSplit(p.attemptId, leftWidth), 300);
+    return () => window.clearTimeout(id);
+  }, [leftWidth, p.attemptId]);
+
   if (!part) {
     return (
       <section className="exam-empty">
@@ -573,7 +598,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
 
       <main className="exam-body">
         {split ? (
-          <div className="exam-split" style={{ gridTemplateColumns: `${leftWidth}% 8px ${100 - leftWidth}%` }}>
+          <div className="exam-split" style={{ gridTemplateColumns: splitColumns(leftWidth) }}>
             <div className="exam-pane exam-pane-left">
               <div className="exam-pane-head">
                 <span>{part.title ?? part.label}</span>
@@ -598,10 +623,21 @@ export default function ExamRunner(p: ExamRunnerProps) {
             <div
               ref={dividerRef}
               role="separator"
+              tabIndex={0}
               aria-orientation="vertical"
               aria-label="Resize panes"
-              title="Drag to resize · double-click to reset"
-              onDoubleClick={() => setLeftWidth(50)}
+              aria-valuenow={leftWidth}
+              aria-valuemin={SPLIT_MIN}
+              aria-valuemax={SPLIT_MAX}
+              aria-valuetext={splitValueText(leftWidth)}
+              title="Drag to resize · arrow keys to nudge · double-click to reset"
+              onDoubleClick={() => setLeftWidth(SPLIT_DEFAULT)}
+              onKeyDown={(e) => {
+                const next = nudgeSplit(e.key, leftWidth);
+                if (next === leftWidth) return;
+                e.preventDefault();
+                setLeftWidth(next);
+              }}
               className="exam-divider"
             />
             <div className="exam-pane exam-pane-right">
@@ -623,6 +659,32 @@ export default function ExamRunner(p: ExamRunnerProps) {
           </div>
         ) : (
           <div className="exam-single">
+            {layout === "stacked" && part.passageText && (
+              <section className="exam-stack-passage" aria-label="Passage">
+                <div className="exam-pane-head">
+                  <span>{part.title ?? part.label}</span>
+                  <button
+                    type="button"
+                    onClick={() => setNoteOpen((v) => !v)}
+                    aria-pressed={noteOpen}
+                    className="exam-btn-ghost exam-btn-xs"
+                  >
+                    {noteOpen ? "Hide notes" : "Notes"}
+                  </button>
+                </div>
+                <div className="exam-stack-passage-body">
+                  <PassagePane
+                    partKey={part.key}
+                    passageText={part.passageText}
+                    fontSize={fontSize}
+                    storageKey={p.storageKey}
+                    onPersist={p.persistMarks}
+                    noteOpen={noteOpen}
+                    onToggleNote={() => setNoteOpen((v) => !v)}
+                  />
+                </div>
+              </section>
+            )}
             <PartQuestions
               part={part}
               gapped={gapped}

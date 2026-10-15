@@ -63,3 +63,111 @@ export function assessmentStatus(assessment: Assessment): string {
     NEEDS_REVIEW: 'Teacher review required', FAILED: 'Failed — manual review pending' };
   return labels[assessment.status];
 }
+
+/** Score headline for one graded skill, or null while nothing is graded yet. */
+export function feedbackScoreLabel(assessment: Assessment): string | null {
+  const score = assessment.finalScore ?? assessment.aiScore;
+  if (score === null || score === undefined) return null;
+  const skill = assessment.skill === 'writing' ? 'Writing' : 'Speaking';
+  return assessment.program === 'MULTILEVEL'
+    ? `Estimated Multilevel ${skill} score ${score} out of 75`
+    : `Estimated IELTS ${skill} band ${score}`;
+}
+
+/** Where an attempt's AI work stands, from the student's point of view. */
+export type AssessmentPhase = 'none' | 'processing' | 'ready' | 'review' | 'failed';
+
+/**
+ * Progress beats completion: while any job is still running the student keeps
+ * watching that job, even when a sibling skill already finished.
+ */
+export function assessmentPhase(data: AssessmentAttempt | undefined): AssessmentPhase {
+  const jobs = data?.assessments ?? [];
+  if (jobs.length === 0) return 'none';
+  if (jobs.some((job) => job.status === 'PENDING' || job.status === 'PROCESSING' || job.status === 'RETRY')) return 'processing';
+  if (jobs.some((job) => job.status === 'SUCCEEDED')) return 'ready';
+  if (jobs.some((job) => job.status === 'FAILED')) return 'failed';
+  return 'review';
+}
+
+/** What the student is told while the AI works, and once it has finished. */
+export function assessmentPhaseLabel(phase: AssessmentPhase, skill: string): string {
+  switch (phase) {
+    case 'processing': return `AI is analysing your ${skill} — feedback appears below automatically.`;
+    case 'ready': return `AI feedback for your ${skill} is ready — read it below.`;
+    case 'review': return `Your ${skill} needs teacher review — the AI estimate is shown below.`;
+    case 'failed': return `AI assessment for your ${skill} could not complete — a teacher will grade it.`;
+    case 'none': return `Your ${skill} answers are saved. Feedback appears here once assessment starts.`;
+  }
+}
+
+/** Join short phrases into one spoken sentence, dropping empties. */
+function sentenceList(items: string[]): string | null {
+  const cleaned = items.map((item) => item.trim().replace(/[.\s]+$/, '')).filter(Boolean);
+  return cleaned.length > 0 ? cleaned.join('. ') : null;
+}
+
+/**
+ * Spoken version of the written feedback: score, status, strengths, priority
+ * improvements, up to three corrections and the recommended practice. The
+ * original answer is deliberately not read back — the student has just written
+ * it, and a full essay read aloud would bury the advice.
+ */
+export function feedbackSpeechText(assessment: Assessment): string | null {
+  const result = assessment.approvedFeedback ?? assessment.evaluation?.result;
+  if (!result) return null;
+  const sentences: string[] = [];
+  const score = feedbackScoreLabel(assessment);
+  if (score) sentences.push(`${score}.`);
+  sentences.push(`${assessmentStatus(assessment)}.`);
+  // The written card marks the same distinction; spoken feedback must not blur
+  // a teacher-approved result into an AI estimate.
+  sentences.push(assessment.approvedFeedback ? 'This feedback was approved by your teacher.' : 'This is an AI estimate.');
+  const sections: Array<[string, string[]]> = [
+    ['Strengths', result.overallStrengths],
+    ['Priority improvements', result.priorityImprovements],
+    ['Grammar', result.grammarCorrections.slice(0, 3).map((correction) => `say ${correction.corrected} instead of ${correction.original}`)],
+    ['Vocabulary', result.vocabularyUpgrades.slice(0, 3).map((upgrade) => `replace ${upgrade.original} with ${upgrade.alternative}`)],
+    ['Recommended next practice', result.recommendedPractice],
+  ];
+  for (const [label, items] of sections) {
+    const joined = sentenceList(items);
+    if (joined) sentences.push(`${label}: ${joined}.`);
+  }
+  return sentences.join(' ');
+}
+
+/** Speech synthesis is missing on some platforms: feedback degrades to the card. */
+export function speechFeedbackSupported(): boolean {
+  return typeof window !== 'undefined' && 'speechSynthesis' in window && typeof window.SpeechSynthesisUtterance === 'function';
+}
+
+/**
+ * Read feedback aloud. False means speech synthesis is unavailable, so the
+ * written card stays the one source of feedback.
+ */
+export function speakFeedback(text: string, onEnd?: () => void): boolean {
+  if (!text || !speechFeedbackSupported()) return false;
+  try {
+    const synth = window.speechSynthesis;
+    synth.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.98;
+    utterance.onend = () => onEnd?.();
+    utterance.onerror = () => onEnd?.();
+    synth.speak(utterance);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Stop any feedback being read (leaving the page, starting another card). */
+export function stopFeedbackSpeech(): void {
+  if (!speechFeedbackSupported()) return;
+  try {
+    window.speechSynthesis.cancel();
+  } catch {
+    /* nothing to stop */
+  }
+}
