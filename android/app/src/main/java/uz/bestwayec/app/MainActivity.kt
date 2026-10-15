@@ -38,7 +38,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val BASE_URL = "https://bestwayec.uz/?platform=mobile_app"
-        private const val USER_AGENT_SUFFIX = " BestWay-Android/0.5.4 MobileApp"
+        private const val USER_AGENT_SUFFIX = " BestWay-Android/0.5.9 MobileApp"
         private const val REQUEST_RECORD_AUDIO = 1001
     }
 
@@ -47,7 +47,7 @@ class MainActivity : AppCompatActivity() {
         fun isMobileApp(): Boolean = true
 
         @android.webkit.JavascriptInterface
-        fun getVersion(): String = "0.5.4"
+        fun getVersion(): String = "0.5.9"
     }
 
     private lateinit var swipeRefresh: SwipeRefreshLayout
@@ -143,6 +143,7 @@ class MainActivity : AppCompatActivity() {
             setCookie("https://bestwayec.uz", "bw_mobile_app=1; path=/; max-age=31536000")
         }
 
+        webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         webView.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
 
         webView.settings.apply {
@@ -156,6 +157,8 @@ class MainActivity : AppCompatActivity() {
             userAgentString = "${userAgentString}$USER_AGENT_SUFFIX"
             useWideViewPort = true
             loadWithOverviewMode = true
+            @Suppress("DEPRECATION")
+            setRenderPriority(WebSettings.RenderPriority.HIGH)
         }
 
         webView.webChromeClient = object : WebChromeClient() {
