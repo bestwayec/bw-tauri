@@ -253,7 +253,23 @@ export async function exchangeCode(code: string, verifier: string, deviceId: str
     { code, verifier, deviceId },
     { token: null },
   );
-  if (session?.accessToken) await setSession(session.accessToken, session.refreshToken ?? null);
+  if (session?.accessToken) {
+    try {
+      localStorage.setItem("bestway.accessToken", session.accessToken);
+      if (session.refreshToken) localStorage.setItem("bestway.refreshToken", session.refreshToken);
+    } catch {
+      /* ignore */
+    }
+    const profile = session.user?.id
+      ? {
+          id: session.user.id,
+          name: typeof session.user.name === "string" ? session.user.name : null,
+          phone: typeof session.user.phone === "string" ? session.user.phone : null,
+          role: typeof session.user.role === "string" ? session.user.role : undefined,
+        }
+      : null;
+    await setSession(session.accessToken, session.refreshToken ?? null, profile);
+  }
   return session;
 }
 

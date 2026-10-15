@@ -25,7 +25,11 @@ export function isProgramDataKey(key: readonly unknown[]) {
 }
 
 export async function getPrograms(): Promise<ProgramState> {
-  return parseOrThrow('Exam programs', programStateSchema, await get<unknown>('/exam-programs/mine'));
+  try {
+    return parseOrThrow('Exam programs', programStateSchema, await get<unknown>('/exam-programs/mine'));
+  } catch {
+    return parseOrThrow('Exam programs', programStateSchema, await get<unknown>('/assessment/tracks'));
+  }
 }
 
 export async function selectProgram(program: ExamProgram): Promise<ProgramState> {
@@ -46,7 +50,11 @@ export async function refreshProgramContext(client: QueryClient, userId: string 
 export function usePrograms() {
   const userId = useSessionStore((state) => state.profile?.id);
   const ready = useSessionStore((state) => state.status === 'ready');
-  return useQuery({ queryKey: ['exam-programs', userId ?? null], queryFn: getPrograms, enabled: ready && !!userId });
+  return useQuery({
+    queryKey: ['exam-programs', userId ?? null],
+    queryFn: getPrograms,
+    enabled: ready && !!userId,
+  });
 }
 
 export function belongsToProgram(type: string | null | undefined, program: ExamProgram) {

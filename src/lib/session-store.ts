@@ -459,7 +459,15 @@ export const useSessionStore = create<SessionState>()((set, get) => {
   };
 });
 
-/** Sync in-memory access token for hot paths (request headers). */
+/** Sync in-memory access token for hot paths (request headers) with localStorage fallback. */
 export function getSessionAccessToken(): string | null {
-  return useSessionStore.getState().accessToken;
+  const inMemory = useSessionStore.getState().accessToken;
+  if (inMemory) return inMemory;
+  try {
+    if (typeof localStorage !== "undefined") {
+      const stored = localStorage.getItem("bestway.accessToken");
+      if (stored) return stored;
+    }
+  } catch {}
+  return null;
 }

@@ -82,12 +82,21 @@ export async function initSecureSession(): Promise<void> {
 export async function setSession(
   accessToken: string | null,
   refreshToken?: string | null,
+  profile?: import("./session-store").StoredProfile | null,
 ): Promise<void> {
   if (accessToken === null) {
+    try {
+      localStorage.removeItem("bestway.accessToken");
+      localStorage.removeItem("bestway.refreshToken");
+    } catch {}
     await useSessionStore.getState().wipeLocal();
     return;
   }
-  await useSessionStore.getState().setSession({ accessToken, refreshToken });
+  try {
+    localStorage.setItem("bestway.accessToken", accessToken);
+    if (refreshToken) localStorage.setItem("bestway.refreshToken", refreshToken);
+  } catch {}
+  await useSessionStore.getState().setSession({ accessToken, refreshToken, profile });
 }
 
 export async function clearSession(): Promise<void> {
@@ -292,6 +301,10 @@ export async function login(phone: string, password: string): Promise<AuthSessio
   const normalizedPhone = normalizePhone(phone);
   const session = await post<AuthSession>("/auth/login", { phone: normalizedPhone, password }, { token: null });
   if (session?.accessToken) {
+    try {
+      localStorage.setItem("bestway.accessToken", session.accessToken);
+      if (session.refreshToken) localStorage.setItem("bestway.refreshToken", session.refreshToken);
+    } catch {}
     await useSessionStore.getState().setSession({
       accessToken: session.accessToken,
       refreshToken: session.refreshToken ?? null,
