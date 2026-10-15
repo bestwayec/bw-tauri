@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 export interface PassageMarks {
   highlights: string[];
+  underlines?: string[];
   note: string;
 }
 
@@ -20,42 +21,59 @@ type Props = {
 function readMarks(storageKey: string, partKey: string): PassageMarks {
   try {
     const raw = localStorage.getItem(`${storageKey}.${partKey}`);
-    if (!raw) return { highlights: [], note: "" };
+    if (!raw) return { highlights: [], underlines: [], note: "" };
     const p = JSON.parse(raw) as Partial<PassageMarks>;
     return {
       highlights: Array.isArray(p.highlights) ? p.highlights.filter((h) => typeof h === "string") : [],
+      underlines: Array.isArray(p.underlines) ? p.underlines.filter((u) => typeof u === "string") : [],
       note: typeof p.note === "string" ? p.note : "",
     };
   } catch {
-    return { highlights: [], note: "" };
+    return { highlights: [], underlines: [], note: "" };
   }
 }
 
-/** Split text on highlight phrases; matched spans render as <mark>. */
-function splitHighlights(text: string, phrases: string[]): Array<{ text: string; mark: boolean }> {
-  const live = phrases.filter((h) => h.length > 1 && text.includes(h));
-  if (live.length === 0) return [{ text, mark: false }];
-  // Longest first so nested phrases resolve to the outer one.
-  live.sort((a, b) => b.length - a.length);
-  const out: Array<{ text: string; mark: boolean }> = [];
-  let rest = text;
-  while (rest) {
-    let best: string | null = null;
-    let at = -1;
-    for (const h of live) {
-      const i = rest.indexOf(h);
-      if (i !== -1 && (at === -1 || i < at)) {
-        at = i;
-        best = h;
+interface TextSegment {
+  text: string;
+  mark: boolean;
+  underline: boolean;
+}
+
+/** Split text on highlight and underline phrases cleanly. */
+function splitMarks(text: string, phrases: string[], underlines: string[] = []): TextSegment[] {
+  if (!text) return [];
+  const len = text.length;
+  const isMark = new Uint8Array(len);
+  const isUnderline = new Uint8Array(len);
+
+  const applyRanges = (list: string[], target: Uint8Array) => {
+    for (const phrase of list) {
+      if (!phrase || phrase.length < 2) continue;
+      let startIdx = 0;
+      while (startIdx < len) {
+        const at = text.indexOf(phrase, startIdx);
+        if (at === -1) break;
+        for (let i = at; i < at + phrase.length; i++) target[i] = 1;
+        startIdx = at + 1;
       }
     }
-    if (best == null || at === -1) {
-      out.push({ text: rest, mark: false });
-      break;
+  };
+
+  applyRanges(phrases, isMark);
+  applyRanges(underlines, isUnderline);
+
+  const out: TextSegment[] = [];
+  let cur = 0;
+  for (let i = 1; i <= len; i++) {
+    const same = i < len && isMark[i] === isMark[cur] && isUnderline[i] === isUnderline[cur];
+    if (!same || i === len) {
+      out.push({
+        text: text.slice(cur, i),
+        mark: isMark[cur] === 1,
+        underline: isUnderline[cur] === 1,
+      });
+      cur = i;
     }
-    if (at > 0) out.push({ text: rest.slice(0, at), mark: false });
-    out.push({ text: best, mark: true });
-    rest = rest.slice(at + best.length);
   }
   return out;
 }
@@ -136,11 +154,23 @@ export default function PassagePane(p: Props) {
     setMenu(null);
   }
 
+  function doUnderline() {
+    if (!menu) return;
+    const cur = marks.underlines ?? [];
+    if (!cur.includes(menu.text)) {
+      commit({ ...marks, underlines: [...cur, menu.text] });
+    }
+    window.getSelection()?.removeAllRanges();
+    setMenu(null);
+  }
+
   function doClear() {
     if (!menu) return;
-    const hit = marks.highlights.filter((h) => h.includes(menu.text) || menu.text.includes(h));
-    const next = hit.length > 0 ? marks.highlights.filter((h) => !hit.includes(h)) : [];
-    commit({ ...marks, highlights: next });
+    const hitH = marks.highlights.filter((h) => h.includes(menu.text) || menu.text.includes(h));
+    const nextH = hitH.length > 0 ? marks.highlights.filter((h) => !hitH.includes(h)) : marks.highlights;
+    const hitU = (marks.underlines ?? []).filter((u) => u.includes(menu.text) || menu.text.includes(u));
+    const nextU = hitU.length > 0 ? (marks.underlines ?? []).filter((u) => !hitU.includes(u)) : (marks.underlines ?? []);
+    commit({ ...marks, highlights: nextH, underlines: nextU });
     window.getSelection()?.removeAllRanges();
     setMenu(null);
   }
@@ -154,11 +184,41 @@ export default function PassagePane(p: Props) {
     if (!p.noteOpen) p.onToggleNote();
   }
 
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setMenu(null);
+        return;
+      }
+      if (e.altKey && (e.key === "h" || e.key === "H")) {
+        e.preventDefault();
+        const s = selectionInBox();
+        if (s) {
+          commit({ ...marks, highlights: [...marks.highlights, s.text] });
+          window.getSelection()?.removeAllRanges();
+          setMenu(null);
+        }
+      } else if (e.altKey && (e.key === "u" || e.key === "U")) {
+        e.preventDefault();
+        const s = selectionInBox();
+        if (s) {
+          const cur = marks.underlines ?? [];
+          commit({ ...marks, underlines: [...cur, s.text] });
+          window.getSelection()?.removeAllRanges();
+          setMenu(null);
+        }
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [marks]);
+
   return (
     <div className="exam-passagewrap">
       <div
         ref={boxRef}
         onMouseUp={onMouseUp}
+        onTouchEnd={() => window.setTimeout(onMouseUp, 100)}
         className="exam-passage"
         style={{ fontSize: p.fontSize }}
       >
@@ -168,15 +228,27 @@ export default function PassagePane(p: Props) {
               {String.fromCharCode(65 + i)}
             </span>
             <p>
-              {splitHighlights(para, marks.highlights).map((s, j) =>
-                s.mark ? (
-                  <mark key={j} className="exam-mark">
-                    {s.text}
-                  </mark>
-                ) : (
-                  <span key={j}>{s.text}</span>
-                ),
-              )}
+              {splitMarks(para, marks.highlights, marks.underlines ?? []).map((s, j) => {
+                let node: React.ReactNode = <span>{s.text}</span>;
+                if (s.underline) {
+                  node = (
+                    <span
+                      style={{
+                        textDecoration: "underline",
+                        textDecorationColor: "#38bdf8",
+                        textDecorationThickness: "2.5px",
+                        textUnderlineOffset: "3px",
+                      }}
+                    >
+                      {node}
+                    </span>
+                  );
+                }
+                if (s.mark) {
+                  node = <mark className="exam-mark">{node}</mark>;
+                }
+                return <span key={j}>{node}</span>;
+              })}
             </p>
           </div>
         ))}
@@ -187,8 +259,11 @@ export default function PassagePane(p: Props) {
             role="menu"
             aria-label="Text tools"
           >
-            <button type="button" role="menuitem" onClick={doHighlight} className="exam-selbtn">
+            <button type="button" role="menuitem" onClick={doHighlight} className="exam-selbtn" title="Alt+H">
               Highlight
+            </button>
+            <button type="button" role="menuitem" onClick={doUnderline} className="exam-selbtn" title="Alt+U">
+              Underline
             </button>
             <button type="button" role="menuitem" onClick={doClear} className="exam-selbtn">
               Clear
