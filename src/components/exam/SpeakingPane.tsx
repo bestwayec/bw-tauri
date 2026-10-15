@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { RunnerQuestion } from "@/lib/tests";
 import { markActiveRecording } from '@/lib/durable-recordings';
+import { microphoneTrack, openMicrophone, processingSummary } from '@/lib/audio-capture';
+import Waveform from './Waveform';
 
 type Props = {
   q: RunnerQuestion;
@@ -45,6 +47,9 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
   const [recState, setRecState] = useState<RecState>("idle");
   const [recError, setRecError] = useState<string | null>(null);
   const [clipUrl, setClipUrl] = useState<string | null>(null);
+  // Live stream drives the waveform; the ref stays the single owner for cleanup.
+  const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
+  const [recElapsed, setRecElapsed] = useState(0);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -66,6 +71,7 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
       }
     });
     streamRef.current = null;
+    setLiveStream(null);
   };
 
   const stopRecording = () => {
@@ -163,9 +169,12 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
     requesting.current = true;
     try {
       if (recordingKey) markActiveRecording(recordingKey, true);
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Constrained capture: echo cancellation + noise suppression + auto gain.
+      const stream = await openMicrophone();
       if (!alive.current) { stream.getTracks().forEach((track) => track.stop()); if (recordingKey) markActiveRecording(recordingKey, false); return; }
       streamRef.current = stream;
+      setLiveStream(stream);
+      setRecElapsed(0);
       chunksRef.current = [];
       const rec = new MediaRecorder(stream);
       recorderRef.current = rec;
@@ -198,17 +207,27 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
       };
       rec.start();
       setRecState("recording");
-    } catch {
+    } catch (e) {
       stopTracks();
       if (recordingKey) markActiveRecording(recordingKey, false);
       setRecState("error");
-      setRecError("Microphone blocked — allow access in the OS prompt, or practice with timers + notes.");
+      setRecError(
+        e instanceof Error ? e.message : "Microphone blocked — allow access in the OS prompt, or practice with timers + notes.",
+      );
     } finally { requesting.current = false; }
   }
+
+  // Elapsed timer for the recorder header (shown with the waveform).
+  useEffect(() => {
+    if (recState !== "recording") return;
+    const id = window.setInterval(() => setRecElapsed((s) => s + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [recState]);
 
   const part = partLabel(q.prompt);
   const prepDone = prepLeft <= 0;
   const speakDone = speakLeft <= 0;
+  const inputTrack = microphoneTrack(liveStream);
 
   return (
     <div>
@@ -310,8 +329,17 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
             )}
           </div>
         </div>
+        {recState === "recording" && (
+          <div className="mt-2 space-y-1">
+            <Waveform stream={liveStream} active bars={32} label="Practice recording" elapsedSeconds={recElapsed} />
+            <p className="text-[10px] leading-relaxed text-white/40">Input processing: {processingSummary(inputTrack)}</p>
+          </div>
+        )}
         {clipUrl && recState === "recorded" && (
-          <audio controls src={clipUrl} className="mt-2 w-full" aria-label="Your recorded practice take" />
+          <>
+            <Waveform stream={null} active={false} bars={32} label="Recorded take" />
+            <audio controls src={clipUrl} className="mt-2 w-full" aria-label="Your recorded practice take" />
+          </>
         )}
         {recError && (
           <p role="alert" className="mt-2 text-[11px] leading-relaxed text-amber-200/90">{recError}</p>

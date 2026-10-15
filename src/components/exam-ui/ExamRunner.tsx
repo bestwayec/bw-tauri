@@ -16,8 +16,17 @@ import SubmitConfirmModal from "./SubmitConfirmModal";
 import TopBar, { type SaveState } from "./TopBar";
 import { isAnswered, mergeAudioDone, nextUnanswered, remainingMs, serverOffsetMs, type UIPart } from "./model";
 import { answerRuleHint, exceedsAnswerConstraint, type AnswerRule } from '@/lib/objective-answers';
-import { reportCheat, type CheatScope } from '@/lib/cheat';
-import { mapCheatEventToKind, releaseKioskLockdown, useLockdown, type LockdownCheatEvent } from '@/hooks/useLockdown';
+import type { CheatScope } from '@/lib/cheat';
+import { releaseKioskLockdown, useLockdown, type LockdownCheatEvent } from '@/hooks/useLockdown';
+import {
+  cacheAnswer,
+  clearAttemptCache,
+  readPendingAnswers,
+  resolvePendingAnswers,
+  startOfflineSync,
+} from '@/lib/offline-exam';
+import { clearSecurityLog, logLockdownEvent, type SecurityLogEntry } from '@/lib/proctoring';
+import { useProctorSnapshots } from '@/hooks/useProctorSnapshots';
 
 export interface ExamRunnerProps {
   attemptId: string;
@@ -48,6 +57,10 @@ export interface ExamRunnerProps {
   lockdown?: boolean;
   /** Optional callback fired on lockdown cheat/focus-loss events. */
   onCheat?: (event: LockdownCheatEvent) => void;
+  /** Random webcam integrity snapshots while the exam runs. @default true */
+  proctoring?: boolean;
+  /** Every security event (snapshot, blocked camera, focus loss) as it is logged. */
+  onSecurityEvent?: (entry: SecurityLogEntry) => void;
 }
 
 function friendlyError(e: unknown): string {
@@ -112,16 +125,24 @@ export default function ExamRunner(p: ExamRunnerProps) {
   const handleCheat = useCallback(
     (event: LockdownCheatEvent) => {
       p.onCheat?.(event);
-      const kind = mapCheatEventToKind(event);
-      if (kind && p.attemptId) {
-        void reportCheat(p.attemptId, kind, cheatScope).catch(() => undefined);
-      }
+      if (!p.attemptId) return;
+      // One call does both halves of the audit: the durable local security
+      // trail (survives offline) and the invigilator's flag-cheat panel.
+      void logLockdownEvent(p.attemptId, event, undefined, cheatScope).catch(() => undefined);
     },
     [p.attemptId, p.onCheat, cheatScope],
   );
   useLockdown({
     locked: p.lockdown ?? true,
     onCheat: handleCheat,
+  });
+  // Background integrity snapshots: one frame every 10-15 minutes, logged
+  // locally and forwarded to the invigilator. Silent by design — a blocked or
+  // missing camera must never interrupt the attempt.
+  useProctorSnapshots({
+    attemptId: p.attemptId,
+    active: (p.proctoring ?? true) && !!p.attemptId,
+    onEvent: p.onSecurityEvent,
   });
 
   const versioned = p.parts.some((part) => part.questions.some((q) => q.guidance));
@@ -205,6 +226,41 @@ export default function ExamRunner(p: ExamRunnerProps) {
     else persistTimer.current = window.setTimeout(write, 500);
   }
 
+  // Offline-first restore: an answer given while the connection was down lives
+  // only in the local mirror, so bring it back into the exam. The server
+  // snapshot always wins for questions it already knows about.
+  const recoveredRef = useRef(false);
+  useEffect(() => {
+    if (recoveredRef.current || !p.attemptId) return;
+    recoveredRef.current = true;
+    let alive = true;
+    void (async () => {
+      try {
+        const pending = await readPendingAnswers(p.attemptId);
+        if (!alive || pending.length === 0) return;
+        const server: Record<string, string> = p.initialAnswers ?? {};
+        const restored: Record<string, string> = {};
+        for (const item of pending) {
+          if (versioned && !writableIds.has(item.questionId)) continue;
+          if (server[item.questionId] !== undefined) continue;
+          restored[item.questionId] = item.response;
+        }
+        const ids = Object.keys(restored);
+        if (ids.length === 0) return;
+        answersRef.current = { ...answersRef.current, ...restored };
+        for (const id of ids) dirty.current.add(id);
+        setAnswers((current) => ({ ...current, ...restored }));
+        setSaveState("saving");
+        persistQueue();
+      } catch {
+        /* recovery is best-effort — the exam continues regardless */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [p.attemptId, p.initialAnswers, versioned, writableIds]);
+
   useEffect(
     () => () => {
       if (persistTimer.current) window.clearTimeout(persistTimer.current);
@@ -266,6 +322,8 @@ export default function ExamRunner(p: ExamRunnerProps) {
       else await p.saveMany(payload);
       for (const item of payload) if (answersRef.current[item.questionId] === item.response) dirty.current.delete(item.questionId);
       persistQueue();
+      // The server holds these now — drop the offline mirror entries.
+      void resolvePendingAnswers(p.attemptId, payload.map((item) => item.questionId)).catch(() => undefined);
       if (dirty.current.size === 0) {
         try {
           localStorage.removeItem(queueKey(p.attemptId));
@@ -290,6 +348,9 @@ export default function ExamRunner(p: ExamRunnerProps) {
     answersRef.current = { ...answersRef.current, [qid]: value };
     dirty.current.add(qid);
     persistQueue();
+    // Mirror every answer locally the moment it is typed, before any request:
+    // this survives a reload or a crash with no network at all.
+    void cacheAnswer(p.attemptId, qid, value).catch(() => undefined);
     setAnswers((a) => (a[qid] === value ? a : { ...a, [qid]: value }));
     if (allQuestions.some((q) => q.guidance)) { setSaveState('saving'); scheduleFlush(); return; }
     if (immediate) {
@@ -315,25 +376,22 @@ export default function ExamRunner(p: ExamRunnerProps) {
     }
   }
 
-  // Retry the offline queue when connectivity returns + periodic flush.
+  // Background sync worker: flush the queue immediately, then every 10s, and
+  // the instant connectivity returns. A failing flush is silent (the answers
+  // stay mirrored locally) — the indicator just shows they are not saved yet.
   useEffect(() => {
-    const retry = () => {
-      if (dirty.current.size > 0) {
-        setSaveState("saving");
-        void flush().catch(() => setSaveState("offline"));
-      } else {
-        setSaveState(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "saved");
-      }
-    };
-    const id = window.setInterval(retry, 15000);
-    window.addEventListener("online", retry);
-    window.addEventListener("offline", retry);
-    return () => {
-      window.clearInterval(id);
-      window.removeEventListener("online", retry);
-      window.removeEventListener("offline", retry);
-    };
-  }, [flush]);
+    return startOfflineSync({
+      attemptId: p.attemptId,
+      flush: () => flush(),
+      onState: (state) => {
+        if (state === "offline") setSaveState("offline");
+        else if (state === "pending") setSaveState(dirty.current.size > 0 ? "saving" : "saved");
+        else if (dirty.current.size === 0) {
+          setSaveState(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "saved");
+        }
+      },
+    });
+  }, [flush, p.attemptId]);
 
   // ---- countdown (server-corrected) + auto-submit ----
   const doSubmit = useCallback(
@@ -348,6 +406,10 @@ export default function ExamRunner(p: ExamRunnerProps) {
         await flushBeforeSubmission(flush, { versioned, auto }, (e) => setError(friendlyError(e)));
         submittedRef.current = true;
         await p.submit();
+        // The attempt is handed in: forget the local copies of its exam, its
+        // mirrored answers and its security trail so the next attempt starts clean.
+        void clearAttemptCache(p.attemptId).catch(() => undefined);
+        void clearSecurityLog(p.attemptId).catch(() => undefined);
         // Submission succeeded (and navigation is in flight) — drop the kiosk
         // lockdown immediately instead of waiting for the runner to unmount.
         releaseKioskLockdown();

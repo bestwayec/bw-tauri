@@ -181,17 +181,29 @@ export default function App() {
   // Silent on failure — a failed check must never disturb the student.
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const updateChecked = useRef(false);
+  const updateTimer = useRef<number | null>(null);
   useEffect(() => {
     if (!student || updateChecked.current) return;
     updateChecked.current = true;
-    const t = window.setTimeout(() => {
+    updateTimer.current = window.setTimeout(() => {
+      updateTimer.current = null;
       void (async () => {
         const info = await checkForUpdate();
         if (info && getDismissedVersion() !== info.latest) setUpdate(info);
       })();
     }, 3000);
-    return () => window.clearTimeout(t);
+    // No per-render cleanup: `student` is replaced every time the session store
+    // revalidates the profile, and clearing the timer there silently cancelled
+    // the only update check of the session (the `updateChecked` guard then
+    // stopped it from ever being rescheduled). The timer is cancelled on
+    // unmount instead.
   }, [student]);
+  useEffect(
+    () => () => {
+      if (updateTimer.current != null) window.clearTimeout(updateTimer.current);
+    },
+    [],
+  );
 
   // Single session store drives auth UI. The store renders the cached profile
   // immediately and revalidates in the background — a network failure never

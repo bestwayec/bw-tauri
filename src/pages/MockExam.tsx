@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ExamRunner from "@/components/exam-ui/ExamRunner";
+import IntegrityCheck from "@/components/exam/IntegrityCheck";
+import { proctorSupported, type SecurityLogEntry } from "@/lib/proctoring";
+import { cacheExamPayload, readCachedExam } from "@/lib/offline-exam";
 import { hasActiveRecording, hasPendingRecordings, recordingKey, recoverRecording } from '@/lib/durable-recordings';
 import { uploadRetainedMockRecording } from '@/lib/mock-recordings';
 import { post } from '@/lib/api';
-import { mockSectionToParts } from "@/components/exam-ui/model";
+import { mockSectionToParts, type UIPart } from "@/components/exam-ui/model";
 import {
   bulkMockAnswers,
   MOCK_SKILL_LABEL,
@@ -51,7 +54,54 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
     singleSkill && singleSkill !== skill
       ? `This attempt is scoped to ${MOCK_SKILL_LABEL[singleSkill]} only.`
       : null;
-  const parts = useMemo(() => mockSectionToParts(section, attemptId, timed).map((part) => ({ ...part, questions: part.questions.map((q) => ({ ...q, ...(q.kind === 'speaking' || q.guidance ? { recordingContext: { attemptId, timed, hasAudio: start.savedAnswers[q.id] === '[audio]', profileVersion: start.exam.speakingProfileVersion } } : {}) })) })), [section, attemptId, timed, start.savedAnswers, start.exam.speakingProfileVersion]);
+  const buildParts = useCallback(
+    (source: MockShapedSection): UIPart[] =>
+      mockSectionToParts(source, attemptId, timed).map((part) => ({
+        ...part,
+        questions: part.questions.map((q) => ({
+          ...q,
+          ...(q.kind === 'speaking' || q.guidance
+            ? { recordingContext: { attemptId, timed, hasAudio: start.savedAnswers[q.id] === '[audio]', profileVersion: start.exam.speakingProfileVersion } }
+            : {}),
+        })),
+      })),
+    [attemptId, timed, start.savedAnswers, start.exam.speakingProfileVersion],
+  );
+  const parts = useMemo(() => buildParts(section), [buildParts, section]);
+  const [cachedParts, setCachedParts] = useState<UIPart[] | null>(null);
+
+  // Offline-first: the exam the student was given is cached locally the moment
+  // the attempt opens, so a restart (or a network drop) never has to rebuild it
+  // from the server. If the server hands us a section with nothing to answer,
+  // the cached copy stands in instead of an empty exam.
+  useEffect(() => {
+    void cacheExamPayload(attemptId, { start, section }).catch(() => undefined);
+  }, [attemptId, start, section]);
+  useEffect(() => {
+    if (parts.some((part) => part.questions.length > 0)) {
+      setCachedParts(null);
+      return;
+    }
+    let alive = true;
+    void readCachedExam<{ section?: MockShapedSection }>(attemptId)
+      .then((cached) => {
+        if (!alive || !cached?.section) return;
+        const rebuilt = buildParts(cached.section);
+        if (rebuilt.some((part) => part.questions.length > 0)) setCachedParts(rebuilt);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [attemptId, parts, buildParts]);
+  const effectiveParts = cachedParts ?? parts;
+
+  // Pre-exam camera check. A missing or refused camera is never fatal: the
+  // student continues without it and the attempt records focus/window events.
+  const [integrity, setIntegrity] = useState<{ snapshot: string | null; skipped: boolean } | null>(
+    () => (proctorSupported() ? null : { snapshot: null, skipped: true }),
+  );
+  const [securityEvent, setSecurityEvent] = useState<SecurityLogEntry | null>(null);
 
   const [uploadNotes, setUploadNotes] = useState<Record<string, string>>({});
   const [pendingTakes, setPendingTakes] = useState<Record<string, Blob>>({});
@@ -105,10 +155,19 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
     } finally { uploading.current.delete(qid); }
   }
 
+  if (!integrity) {
+    return <IntegrityCheck attemptId={attemptId} onReady={setIntegrity} onCancel={onBackToSections} />;
+  }
+
   return (
     <>
     {scopedNotice && <p role="status" className="my-2 rounded-lg bg-white/5 p-3 text-xs text-white/60">{scopedNotice}</p>}
     {recoveryError && <p role="alert" className="my-2 rounded-lg bg-amber-400/10 p-3 text-sm">{recoveryError}</p>}
+    <p role="status" className="my-2 rounded-lg bg-white/5 p-2 text-[11px] text-white/50">
+      Integrity monitoring is on — focus and window changes are logged, and a webcam snapshot is taken at random intervals.
+      {securityEvent?.kind === "webcam_snapshot" ? ` Last check: ${new Date(securityEvent.at).toLocaleTimeString()}.` : ""}
+      {integrity.skipped ? " Camera check skipped for this attempt." : ""}
+    </p>
     {Object.entries(pendingTakes).length > 0 && <section className="card my-2 rounded-xl p-3" aria-label="Saved recordings awaiting upload"><p className="text-sm">Saved recordings must finish uploading before submission.</p>{Object.entries(pendingTakes).map(([qid, blob]) => <button key={qid} type="button" disabled={uploading.current.has(qid)} className="btn-ghost mt-2 rounded-lg px-3 py-2 text-sm" onClick={() => void handleBlob(qid, blob)}>Retry saved recording · {section.groups.flatMap((group) => group.questions).find((question) => question.id === qid)?.number ?? qid}</button>)}</section>}
     <ExamRunner
       attemptId={attemptId}
@@ -118,7 +177,7 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
       timed={timed}
       serverTime={start.serverTime}
       deadlineIso={deadlineIso}
-      parts={parts}
+      parts={effectiveParts}
       initialAnswers={initialAnswers}
       initialAudioDone={audioDoneMap}
       storageKey={`examui.marks.mock.${attemptId}`}
@@ -140,6 +199,7 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
       }}
       onSpeakBlob={(qid, blob) => void handleBlob(qid, blob)}
       speakNote={(qid) => uploadNotes[qid] ?? null}
+      onSecurityEvent={setSecurityEvent}
       onExit={onExit}
       onBack={onBackToSections}
     />

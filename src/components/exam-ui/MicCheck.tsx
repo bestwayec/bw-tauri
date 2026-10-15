@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { microphoneTrack, openMicrophone, processingSummary } from "@/lib/audio-capture";
+import Waveform from "@/components/exam/Waveform";
 
 /** Length of the microphone test take, in seconds. */
 export const MIC_CHECK_SECONDS = 5;
@@ -65,18 +67,17 @@ export function levelFromSamples(samples: Uint8Array): number {
 export default function MicCheck() {
   const [status, setStatus] = useState<Status>("idle");
   const [left, setLeft] = useState(MIC_CHECK_SECONDS);
-  const [level, setLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [clipUrl, setClipUrl] = useState<string | null>(null);
   const [hidden, setHidden] = useState(false);
+  // Live stream drives the waveform; the ref stays the owner for cleanup.
+  const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
 
   const supports = microphoneSupported();
   const permissionTimer = useRef<number | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const rafRef = useRef<number | null>(null);
   const timerRef = useRef<number | null>(null);
   const alive = useRef(true);
 
@@ -85,8 +86,6 @@ export default function MicCheck() {
     permissionTimer.current = null;
     if (timerRef.current) window.clearInterval(timerRef.current);
     timerRef.current = null;
-    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-    rafRef.current = null;
     streamRef.current?.getTracks().forEach((t) => {
       try {
         t.stop();
@@ -95,12 +94,7 @@ export default function MicCheck() {
       }
     });
     streamRef.current = null;
-    try {
-      void audioCtxRef.current?.close();
-    } catch {
-      /* ignore */
-    }
-    audioCtxRef.current = null;
+    setLiveStream(null);
   }
 
   useEffect(
@@ -115,31 +109,6 @@ export default function MicCheck() {
     [],
   );
 
-  function meter(stream: MediaStream) {
-    try {
-      const Ctor =
-        typeof AudioContext !== "undefined"
-          ? AudioContext
-          : (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!Ctor) return;
-      const ctx = new Ctor();
-      audioCtxRef.current = ctx;
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
-      ctx.createMediaStreamSource(stream).connect(analyser);
-      const samples = new Uint8Array(analyser.fftSize);
-      const tick = () => {
-        if (!alive.current) return;
-        analyser.getByteTimeDomainData(samples);
-        setLevel(levelFromSamples(samples));
-        rafRef.current = requestAnimationFrame(tick);
-      };
-      rafRef.current = requestAnimationFrame(tick);
-    } catch {
-      /* metering is a nice-to-have — the test itself still works */
-    }
-  }
-
   async function start() {
     if (status === "listening" || status === "checking") return;
     setError(null);
@@ -147,7 +116,6 @@ export default function MicCheck() {
       if (prev) URL.revokeObjectURL(prev);
       return null;
     });
-    setLevel(0);
     setLeft(MIC_CHECK_SECONDS);
     if (!supports) {
       setStatus("error");
@@ -163,7 +131,8 @@ export default function MicCheck() {
       setError((e) => e ?? "No answer from the microphone permission prompt — allow access in your browser or OS settings, then test again.");
     }, MIC_PERMISSION_TIMEOUT_MS);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Constrained capture: echo cancellation + noise suppression + auto gain.
+      const stream = await openMicrophone();
       if (permissionTimer.current) window.clearTimeout(permissionTimer.current);
       permissionTimer.current = null;
       if (!alive.current) {
@@ -171,7 +140,7 @@ export default function MicCheck() {
         return;
       }
       streamRef.current = stream;
-      meter(stream);
+      setLiveStream(stream);
       chunksRef.current = [];
       const rec = new MediaRecorder(stream);
       recorderRef.current = rec;
@@ -183,7 +152,6 @@ export default function MicCheck() {
         cleanup();
         recorderRef.current = null;
         if (!alive.current) return;
-        setLevel(0);
         if (blob.size > 0) {
           setClipUrl((prev) => {
             if (prev) URL.revokeObjectURL(prev);
@@ -220,7 +188,8 @@ export default function MicCheck() {
     } catch (e) {
       cleanup();
       setStatus("error");
-      setError(micCheckFailure(e));
+      // openMicrophone already returns friendly copy; micCheckFailure covers the rest.
+      setError(e instanceof Error && e.message ? e.message : micCheckFailure(e));
     }
   }
 
@@ -262,13 +231,17 @@ export default function MicCheck() {
       </div>
 
       {status === "listening" && (
-        <div className="exam-miccheck-meter" role="img" aria-label={`Input level ${Math.round(level * 100)} percent`}>
-          {Array.from({ length: BARS }, (_, i) => (
-            <span
-              key={i}
-              className={`exam-miccheck-bar${level * BARS > i ? " exam-miccheck-bar-on" : ""}`}
-            />
-          ))}
+        <div className="min-w-[140px] flex-1 space-y-1">
+          <Waveform
+            stream={liveStream}
+            active
+            bars={BARS}
+            label="Microphone input"
+            elapsedSeconds={Math.max(0, MIC_CHECK_SECONDS - left)}
+          />
+          <p className="text-[10px] leading-relaxed text-white/40">
+            Input processing: {processingSummary(microphoneTrack(liveStream))}
+          </p>
         </div>
       )}
 

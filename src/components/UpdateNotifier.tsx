@@ -44,7 +44,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 /**
- * Version-update toast, top-right — same structure as the reference
+ * Version-update toast, bottom-right (out of the way of the exam UI and the
+ * toasts that live top-right) — same structure as the reference
  * Announcement card (leading icon, dismiss, title, description, full-width
  * secondary CTA), restyled to the app's dark + brand identity.
  *
@@ -146,18 +147,18 @@ export default function UpdateNotifier({ update, onClose, deferInstall }: Props)
           ? "Installing…"
           : status === "opening"
             ? "Opening…"
-            : "Update now";
+            : "Download & update";
 
   return (
     <div
       role="region"
       aria-label="Application update available"
-      className="pointer-events-none fixed right-4 top-4 z-[70] w-[320px] max-w-[calc(100vw-2rem)]"
+      className="pointer-events-none fixed bottom-4 right-4 z-[70] w-[320px] max-w-[calc(100vw-2rem)]"
     >
       <AnimatePresence onExitComplete={onClose}>
         {!dismissed && (
           <motion.div
-            initial={{ opacity: 0, y: -12, scale: 0.95, filter: "blur(6px)" }}
+            initial={{ opacity: 0, y: 16, scale: 0.95, filter: "blur(6px)" }}
             animate={{
               opacity: 1,
               y: 0,
@@ -217,7 +218,7 @@ export default function UpdateNotifier({ update, onClose, deferInstall }: Props)
               <div className="flex w-full flex-col items-start">
                 <p className="w-full text-sm font-semibold text-white">New version available</p>
                 <p className="mt-0.5 w-full text-[13px] leading-snug text-white/55">
-                  Bestway Exam {update.latest} is ready — you&apos;re on {update.current}.
+                  Click to download &amp; update — Bestway Exam {update.latest} is ready, you&apos;re on {update.current}.
                 </p>
               </div>
             </div>

@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { recordingKey, recoverRecording, retainRecording, releaseRecording, markActiveRecording } from '@/lib/durable-recordings';
 import { startFullSpeakingCapture } from '@/lib/speaking-capture';
+import { openMicrophone, processingSummary } from '@/lib/audio-capture';
+import Waveform from './Waveform';
 
 export interface MediaPhase { startedAt: string; prepEndsAt: string; expiresAt: string; plays: number; serverTime: string; playLimit: number; responseSeconds?: number; minDurationMs?: number; maxDurationMs?: number; timingPolicy?: 'FULL_RESPONSE_WINDOW_V1' }
 function seconds(iso: string, offset: number) { return Math.max(0, Math.ceil((Date.parse(iso) - Date.now() - offset)/1000)); }
@@ -130,7 +132,8 @@ export function MultilevelRecorder({ attemptId, questionId, timed, initialHasAud
     try {
       closeMicrophone();
       if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') throw new Error('Microphone recording is unavailable on this device.');
-      const input = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Constrained capture: echo cancellation + noise suppression + auto gain.
+      const input = await openMicrophone();
       if (!aliveRef.current || generation.current !== current) { input.getTracks().forEach((track) => track.stop()); return; }
       stream.current = input;
       if (!MediaRecorder.isTypeSupported('audio/webm') && !MediaRecorder.isTypeSupported('audio/mp4')) throw new Error('Recording format is unsupported');
@@ -181,7 +184,8 @@ export function MultilevelRecorder({ attemptId, questionId, timed, initialHasAud
     <p role="status">{recorded && ['idle', 'saved'].includes(status) ? `Recording uploaded${recordedSeconds != null ? ` · ${recordedSeconds}s` : ''}` : status} {phase && ['preparing', 'recording'].includes(status) && `${left}s remaining`}</p>
     {!pending && !(timed && recorded) && <>
       <button type="button" disabled={['checking','starting','preparing','recording','finalizing','uploading'].includes(status)} onClick={() => void preflight()}>Test microphone</button>
-      {status === 'ready' && <><meter aria-label="Microphone input level" min="0" max="1" value={level} /><p>Speak and check that the meter responds.</p><button type="button" onClick={() => void start()}>Start response</button></>}
+      {status === 'ready' && <><meter aria-label="Microphone input level" min="0" max="1" value={level} /><p>Speak and check that the meter responds.</p>{stream.current && <Waveform stream={stream.current} active={false} label="Microphone input" />}{stream.current && <p className="text-[11px] opacity-70">{processingSummary(stream.current.getAudioTracks()[0] ?? null)}</p>}<button type="button" onClick={() => void start()}>Start response</button></>}
+      {status === 'recording' && <Waveform stream={stream.current} active bars={32} label="Response recording" />}
     </>}
     {pending && <button type="button" disabled={status === 'uploading'} onClick={() => void send(pending)}>Retry upload of saved recording</button>}
     {error && <p role="alert">{error}</p>}
