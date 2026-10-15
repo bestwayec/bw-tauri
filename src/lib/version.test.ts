@@ -56,15 +56,15 @@ describe("installerUrlFor", () => {
   });
 
   it("refuses unsafe download URLs and never substitutes another release", () => {
-    expect(installerUrlFor("0.5.7", "javascript:alert(1)")).toBeNull();
-    expect(installerUrlFor("0.5.7", "http://evil.test/pkg.exe")).toBeNull();
-    expect(installerUrlFor("0.5.7", "file:///etc/passwd")).toBeNull();
+    expect(installerUrlFor("0.9.9", "javascript:alert(1)")).toBeNull();
+    expect(installerUrlFor("0.9.9", "http://evil.test/pkg.exe")).toBeNull();
+    expect(installerUrlFor("0.9.9", "file:///etc/passwd")).toBeNull();
     expect(installerUrlFor("0.9.9", null)).toBeNull();
   });
 
   it("falls back to the published installer of exactly this release", () => {
-    expect(installerUrlFor("0.5.6", null)).toBe(DESKTOP_INSTALLER_URL);
-    expect(installerUrlFor("0.5.6", "javascript:alert(1)")).toBe(DESKTOP_INSTALLER_URL);
+    expect(installerUrlFor(pkg.version, null)).toBe(DESKTOP_INSTALLER_URL);
+    expect(installerUrlFor(pkg.version, "javascript:alert(1)")).toBe(DESKTOP_INSTALLER_URL);
   });
 });
 
@@ -86,21 +86,21 @@ describe("checkForUpdate", () => {
 
   it("returns the advertised release with a safe installer URL", async () => {
     vi.mocked(get).mockResolvedValueOnce({
-      version: "0.5.7",
+      version: "0.9.9",
       downloadUrl: "https://cdn.example.test/app-0.5.7.exe",
     });
     await expect(checkForUpdate()).resolves.toEqual({
       current: APP_VERSION,
-      latest: "0.5.7",
+      latest: "0.9.9",
       downloadUrl: "https://cdn.example.test/app-0.5.7.exe",
     });
   });
 
   it("nulls an unsafe download URL instead of offering it", async () => {
-    vi.mocked(get).mockResolvedValueOnce({ version: "0.5.7", downloadUrl: "javascript:alert(1)" });
+    vi.mocked(get).mockResolvedValueOnce({ version: "0.9.9", downloadUrl: "javascript:alert(1)" });
     await expect(checkForUpdate()).resolves.toEqual({
       current: APP_VERSION,
-      latest: "0.5.7",
+      latest: "0.9.9",
       downloadUrl: null,
     });
   });
