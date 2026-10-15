@@ -1091,6 +1091,159 @@ textarea.field {
   gap: 6px;
   align-items: center;
 }
+.exam-progress {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ex-ink);
+  white-space: nowrap;
+}
+.exam-legend {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 11px;
+  color: var(--ex-muted);
+}
+.exam-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.exam-legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  border: 1px solid var(--ex-line);
+  display: inline-block;
+}
+.exam-legend-answered {
+  background: var(--ex-accent);
+  border-color: var(--ex-accent);
+}
+.exam-legend-flagged {
+  border-color: var(--ex-flag);
+  background: transparent;
+}
+.exam-legend-todo {
+  color: var(--ex-muted);
+}
+
+/* ---- speaking microphone check ---- */
+.exam-miccheck {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--ex-line);
+  background: var(--ex-pane);
+}
+.exam-miccheck-copy {
+  min-width: 220px;
+  flex: 1;
+}
+.exam-miccheck-head {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--ex-ink);
+}
+.exam-miccheck-note {
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ex-muted);
+}
+.exam-miccheck-meter {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 22px;
+}
+.exam-miccheck-bar {
+  width: 5px;
+  height: 20%;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ex-accent) 20%, transparent);
+  transition: height 90ms linear;
+}
+.exam-miccheck-bar-on {
+  height: 100%;
+  background: var(--ex-accent);
+}
+.exam-miccheck-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.exam-miccheck-audio {
+  height: 30px;
+  max-width: 200px;
+}
+.exam-miccheck-error {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 11px;
+  color: var(--ex-flag);
+}
+.exam-miccheck-reopen {
+  margin: 8px 16px 0;
+  padding: 5px 10px;
+  border: 1px solid var(--ex-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ex-ink);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* ---- submit confirmation ---- */
+.exam-confirm-line {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ex-ink);
+}
+.exam-confirm-warn {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--ex-flag);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ex-flag) 12%, transparent);
+}
+.exam-confirm-warn-head {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ex-flag);
+}
+.exam-confirm-warn-nums {
+  margin: 3px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  word-break: break-word;
+  color: var(--ex-ink);
+}
+.exam-confirm-warn-note {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ex-muted);
+}
+.exam-confirm-note {
+  margin: 0 0 14px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ex-muted);
+}
+.exam-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
 
 /* ---- help dialog ---- */
 .exam-help {

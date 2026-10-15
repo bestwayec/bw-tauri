@@ -23,9 +23,13 @@ type Props = {
   /** Last part: submit button replaces Next. */
   isLastPart: boolean;
   submitting: boolean;
-  submitLabel: string;
-  onSubmit: () => void;
+  submitLabel: string;    onSubmit: () => void;
 };
+
+/** Total answered across the whole section (palette + progress readout). */
+export function answeredCount(answered: boolean[]): number {
+  return answered.filter(Boolean).length;
+}
 
 const STATE_CLASS: Record<QState, string> = {
   current: "exam-qbtn-current",
@@ -76,6 +80,22 @@ export default function BottomNav(p: Props) {
         })}
       </div>
 
+      <p className="exam-progress" role="status" aria-live="polite">
+        {answeredCount(p.answered)}/{p.answered.length} answered
+      </p>
+
+      <div className="exam-legend" aria-label="Question palette legend">
+        <span className="exam-legend-item">
+          <i className="exam-legend-dot exam-legend-answered" aria-hidden="true" /> answered
+        </span>
+        <span className="exam-legend-item">
+          <i className="exam-legend-dot exam-legend-flagged" aria-hidden="true" /> flagged
+        </span>
+        <span className="exam-legend-item">
+          <i className="exam-legend-dot exam-legend-todo" aria-hidden="true" /> empty
+        </span>
+      </div>
+
       <div className="exam-navbtns">
         <button
           type="button"
@@ -86,8 +106,14 @@ export default function BottomNav(p: Props) {
         >
           {(p.flagged[p.currentQ] ?? false) ? "⚑ Flagged" : "⚐ Flag"}
         </button>
-        <button type="button" onClick={p.onPrev} disabled={!p.canPrev} className="exam-btn-ghost">
-          ← Prev
+        <button
+          type="button"
+          onClick={p.onPrev}
+          disabled={!p.canPrev}
+          title={p.canPrev ? "Go to the previous part" : "This is the first part"}
+          className="exam-btn-ghost"
+        >
+          ← Previous Part
         </button>
         {p.isLastPart ? (
           <button
@@ -99,8 +125,8 @@ export default function BottomNav(p: Props) {
             {p.submitting ? "Submitting…" : p.submitLabel}
           </button>
         ) : (
-          <button type="button" onClick={p.onNext} className="exam-btn-primary">
-            Next →
+          <button type="button" onClick={p.onNext} title="Go to the next part" className="exam-btn-primary">
+            Next Part →
           </button>
         )}
       </div>

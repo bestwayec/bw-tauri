@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { openInBrowser } from "@/lib/oauth";
-import { dismissVersion, type UpdateInfo } from "@/lib/version";
+import { dismissVersion, installerUrlFor, type UpdateInfo } from "@/lib/version";
 import { isSafeHttpUrl } from "@/lib/secure-storage";
 
 type Props = {
@@ -18,15 +18,44 @@ type Props = {
 type Status = "idle" | "checking" | "downloading" | "installing" | "opening" | "error";
 
 /**
+ * Budget for the signed updater probe. A Tauri IPC call that never settles
+ * (disabled plugin, wedged network stack) must not leave the button stuck on
+ * "Checking…" forever — after this the manual installer path takes over.
+ * Deliberately NOT applied to `downloadAndInstall`: a real install must never
+ * be abandoned mid-flight.
+ */
+const UPDATER_CHECK_TIMEOUT_MS = 8_000;
+
+/** Reject when `promise` has not settled within `ms`; otherwise pass it through. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Update check timed out after ${ms}ms`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+/**
  * Version-update toast, top-right — same structure as the reference
  * Announcement card (leading icon, dismiss, title, description, full-width
  * secondary CTA), restyled to the app's dark + brand identity.
  *
  * Update flow: tries the signed Tauri updater (`check()` →
  * `downloadAndInstall()` → relaunch) first so binary authenticity is
- * verified via `plugins.updater.pubkey`. Falls back to manual
- * `openInBrowser(downloadUrl)` (still gated by `isSafeHttpUrl`) when the
- * updater is unavailable (browser dev, offline, no update found).
+ * verified via `plugins.updater.pubkey`. The probe is bounded by
+ * `UPDATER_CHECK_TIMEOUT_MS`, so a wedged IPC call falls through instead of
+ * hanging on "Checking…". Falls back to a manual `openInBrowser(...)` when
+ * the updater is unavailable (browser dev, offline, no update found,
+ * timed out): the backend URL when it is safe, otherwise this release's
+ * published installer — always gated by `isSafeHttpUrl`.
  *
  * Dismissal plays a soft blur + scale-down exit via motion, persists the
  * dismissed version (same version never nags twice), then unmounts.
@@ -44,18 +73,20 @@ export default function UpdateNotifier({ update, onClose, deferInstall }: Props)
 
   const busy = status === "checking" || status === "downloading" || status === "installing" || status === "opening";
 
-  const openManually = async () => {
-    if (!update.downloadUrl) return;
-    if (!isSafeHttpUrl(update.downloadUrl)) return;
+  const openManually = async (url: string) => {
+    if (!isSafeHttpUrl(url)) return;
     setStatus("opening");
     try {
-      await openInBrowser(update.downloadUrl);
+      await openInBrowser(url);
     } catch {
       /* opener already fell back to a tab; nothing more to do */
     } finally {
       setStatus("idle");
     }
   };
+
+  /** Backend download URL when it is safe, otherwise this release's installer. */
+  const manualUrl = installerUrlFor(update.latest, update.downloadUrl);
 
   const handleAction = async () => {
     if (busy) return;
@@ -65,7 +96,7 @@ export default function UpdateNotifier({ update, onClose, deferInstall }: Props)
     try {
       setStatus("checking");
       const updater = await import("@tauri-apps/plugin-updater");
-      const found = await updater.check();
+      const found = await withTimeout(updater.check(), UPDATER_CHECK_TIMEOUT_MS);
       if (found) {
         setStatus("downloading");
         await found.downloadAndInstall((e) => {
@@ -85,23 +116,23 @@ export default function UpdateNotifier({ update, onClose, deferInstall }: Props)
         return;
       }
     } catch {
-      // Not in Tauri runtime, updater disabled, or check failed —
+      // Not in Tauri runtime, updater disabled, check failed or timed out —
       // fall through to the manual download path below.
     }
     // Fallback: manual download in the system browser (defense-in-depth:
     // isSafeHttpUrl re-validated here even though version.ts already nulled
     // unsafe URLs at fetch time).
-    if (!update.downloadUrl) {
+    if (!manualUrl) {
       setError("No download available for this update.");
       setStatus("error");
       return;
     }
-    if (!isSafeHttpUrl(update.downloadUrl)) {
+    if (!isSafeHttpUrl(manualUrl)) {
       setError("Blocked unsafe download URL.");
       setStatus("error");
       return;
     }
-    await openManually();
+    await openManually(manualUrl);
   };
 
   const label =
@@ -196,7 +227,7 @@ export default function UpdateNotifier({ update, onClose, deferInstall }: Props)
                 An exam is in progress — the update will install after you finish. Nothing restarts meanwhile.
               </p>
             ) : (
-              (update.downloadUrl || status !== "idle") && (
+              (manualUrl || status !== "idle") && (
                 <button
                   type="button"
                   onClick={() => void handleAction()}

@@ -6,6 +6,7 @@ import {
   isAnswered,
   legacyKindOf,
   legacyStartToParts,
+  mergeAudioDone,
   mockKindOf,
   mockSectionToParts,
   nextUnanswered,
@@ -40,6 +41,29 @@ function section(over: Partial<MockShapedSection> = {}): MockShapedSection {
     ...over,
   };
 }
+
+describe("mergeAudioDone", () => {
+  it("marks an uploaded take as answered without dropping existing entries", () => {
+    const before = { "q-1": true };
+    expect(mergeAudioDone(before, { "q-2": true })).toEqual({ "q-1": true, "q-2": true });
+  });
+
+  it("returns the same object when nothing is new so the runner does not rerender", () => {
+    const before = { "q-1": true };
+    expect(mergeAudioDone(before, { "q-1": true })).toBe(before);
+    expect(mergeAudioDone(before, {})).toBe(before);
+    expect(mergeAudioDone(before, undefined)).toBe(before);
+  });
+
+  it("never un-answers a question when a parent map omits or clears it", () => {
+    expect(mergeAudioDone({ "q-1": true }, { "q-1": false })).toEqual({ "q-1": true });
+  });
+
+  it("an uploaded take counts as answered through isAnswered", () => {
+    expect(isAnswered("", true)).toBe(true);
+    expect(isAnswered("", false)).toBe(false);
+  });
+});
 
 describe("mockKindOf covers all 15 backend types", () => {
   const cases: Array<[MockShapedQuestion["type"], string]> = [

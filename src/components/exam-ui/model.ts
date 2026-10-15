@@ -298,6 +298,27 @@ export function isAnswered(value: string | undefined, audioDone: boolean): boole
   return audioDone || (value ?? "").trim().length > 0;
 }
 
+/**
+ * Merge newly uploaded recordings into the runner's answered-audio map.
+ * A take that reached the server stays answered, so entries are only ever
+ * added. Returns the same object when nothing changed (no rerender).
+ */
+export function mergeAudioDone(
+  previous: Record<string, boolean>,
+  incoming: Record<string, boolean> | undefined,
+): Record<string, boolean> {
+  if (!incoming) return previous;
+  let changed = false;
+  const next = { ...previous };
+  for (const [questionId, done] of Object.entries(incoming)) {
+    if (done && !next[questionId]) {
+      next[questionId] = true;
+      changed = true;
+    }
+  }
+  return changed ? next : previous;
+}
+
 /** Next unanswered question index after `from` (wraps), or null when all done. */
 export function nextUnanswered(total: number, from: number, answered: boolean[]): number | null {
   for (let step = 1; step <= total; step++) {

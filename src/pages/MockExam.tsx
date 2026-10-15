@@ -8,7 +8,9 @@ import {
   bulkMockAnswers,
   MOCK_SKILL_LABEL,
   saveMockAnswer,
+  singleSectionOf,
   submitMockAttempt,
+  submitSkillsFor,
   type MockShapedSection,
   type MockStartResult,
   type MockSubmitResult,
@@ -40,6 +42,15 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
   const attemptId = start.attemptId;
   const skill = section.skill;
   const timed = start.mode === "timed";
+  // Single-section practice: the server scoped this attempt to one skill, so
+  // the runner only ever sees that section and submit never waits on the
+  // sections the student did not choose (see submitSkillsFor).
+  const singleSkill = singleSectionOf(start);
+  const sectionTitle = start.attemptTypeLabel ?? `${start.exam.title} — ${MOCK_SKILL_LABEL[skill]}`;
+  const scopedNotice =
+    singleSkill && singleSkill !== skill
+      ? `This attempt is scoped to ${MOCK_SKILL_LABEL[singleSkill]} only.`
+      : null;
   const parts = useMemo(() => mockSectionToParts(section, attemptId, timed).map((part) => ({ ...part, questions: part.questions.map((q) => ({ ...q, ...(q.kind === 'speaking' || q.guidance ? { recordingContext: { attemptId, timed, hasAudio: start.savedAnswers[q.id] === '[audio]', profileVersion: start.exam.speakingProfileVersion } } : {}) })) })), [section, attemptId, timed, start.savedAnswers, start.exam.speakingProfileVersion]);
 
   const [uploadNotes, setUploadNotes] = useState<Record<string, string>>({});
@@ -96,12 +107,13 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
 
   return (
     <>
+    {scopedNotice && <p role="status" className="my-2 rounded-lg bg-white/5 p-3 text-xs text-white/60">{scopedNotice}</p>}
     {recoveryError && <p role="alert" className="my-2 rounded-lg bg-amber-400/10 p-3 text-sm">{recoveryError}</p>}
     {Object.entries(pendingTakes).length > 0 && <section className="card my-2 rounded-xl p-3" aria-label="Saved recordings awaiting upload"><p className="text-sm">Saved recordings must finish uploading before submission.</p>{Object.entries(pendingTakes).map(([qid, blob]) => <button key={qid} type="button" disabled={uploading.current.has(qid)} className="btn-ghost mt-2 rounded-lg px-3 py-2 text-sm" onClick={() => void handleBlob(qid, blob)}>Retry saved recording · {section.groups.flatMap((group) => group.questions).find((question) => question.id === qid)?.number ?? qid}</button>)}</section>}
     <ExamRunner
       attemptId={attemptId}
       candidateName={studentName}
-      sectionTitle={`${start.exam.title} — ${MOCK_SKILL_LABEL[skill]}`}
+      sectionTitle={sectionTitle}
       skill={skill}
       timed={timed}
       serverTime={start.serverTime}
@@ -120,7 +132,11 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
           const next = await post<{ currentSkill: MockShapedSection['skill']; serverTime: string; sectionDeadlines: MockStartResult['sectionDeadlines']; overallDeadlineAt: string | null }>(`/mock/attempts/${attemptId}/advance`, {});
           onAdvance?.({ ...start, ...next }); return;
         }
-        onFinish(await submitMockAttempt(attemptId, start.exam.specificationVersion ? undefined : [skill]));
+        // Single-section attempts are already scoped server-side: submit the
+        // attempt as it stands. Multi-section attempts still declare the
+        // section being finished so grading stays section-only.
+        const result = await submitMockAttempt(attemptId, submitSkillsFor(start, skill));
+        onFinish(result);
       }}
       onSpeakBlob={(qid, blob) => void handleBlob(qid, blob)}
       speakNote={(qid) => uploadNotes[qid] ?? null}

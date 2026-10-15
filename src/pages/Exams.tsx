@@ -11,13 +11,15 @@ import {
   startMockExam,
   type MockAttemptMode,
   type MockExamListItem,
+  type MockSkill,
   type MockStartResult,
 } from "@/lib/mocks";
+import MockSectionPicker, { type MockStartChoice } from "@/components/exam-ui/MockSectionPicker";
 
 type Props = {
   studentName: string | null;
   onStart: (test: TestListItem, start: StartResult) => void;
-  onStartMock: (mock: MockExamListItem, start: MockStartResult) => void;
+  onStartMock: (mock: MockExamListItem, start: MockStartResult, section?: MockSkill) => void;
 };
 
 const TYPE_STYLE: Record<string, string> = {
@@ -71,6 +73,8 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
   const [category, setCategory] = useState<CatalogueCategory>('all');
   const [startingId, setStartingId] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
+  // Start-of-exam choice (Full Mock vs one section) — no request until confirmed.
+  const [picker, setPicker] = useState<{ mock: MockExamListItem; mode: MockAttemptMode } | null>(null);
 
   const testsQuery = useQuery({
     queryKey: programQueryKey('tests', userId, program),
@@ -119,13 +123,26 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
     }
   }
 
-  async function handleStartMock(mock: MockExamListItem, mode: MockAttemptMode) {
+  function handleStartMock(mock: MockExamListItem, mode: MockAttemptMode) {
     if (mock.ready === false) return;
+    setStartError(null);
+    setPicker({ mock, mode });
+  }
+
+  /** Modal confirmed: start (or resume) the attempt with the chosen scope. */
+  async function startChosen(choice: MockStartChoice) {
+    const mock = picker?.mock;
+    if (!mock) return;
     setStartingId(`mock:${mock.id}`);
     setStartError(null);
     try {
-      const start = await startMockExam(mock.id, { mode, flow: mock.type === 'multilevel' && mock.profile === 'full_mock' ? 'full_test' : 'single_skill' });
-      onStartMock(mock, start);
+      const start = await startMockExam(mock.id, {
+        mode: choice.mode,
+        flow: choice.flow,
+        section: choice.section,
+      });
+      setPicker(null);
+      onStartMock(mock, start, choice.section);
     } catch (e) {
       setStartError(`${mock.title}: ${friendlyError(e)}`);
     } finally {
@@ -374,10 +391,24 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
         </ul>
       )}
 
-      {startError && (
+      {startError && !picker && (
         <p role="alert" className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
           {startError}
         </p>
+      )}
+
+      {picker && (
+        <MockSectionPicker
+          exam={picker.mock}
+          mode={picker.mode}
+          busy={startingId !== null}
+          error={startError}
+          onCancel={() => {
+            setPicker(null);
+            setStartError(null);
+          }}
+          onStart={(choice) => void startChosen(choice)}
+        />
       )}
     </section>
   );

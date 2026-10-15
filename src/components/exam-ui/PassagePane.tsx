@@ -164,6 +164,20 @@ export default function PassagePane(p: Props) {
     setMenu(null);
   }
 
+  /** Add a phrase once — repeated Alt+H/Alt+U must never stack duplicates. */
+  function addPhrase(kind: "highlight" | "underline", text: string) {
+    const pair = text.trim();
+    if (pair.length < 2) return;
+    if (kind === "highlight") {
+      if (marks.highlights.includes(pair)) return;
+      commit({ ...marks, highlights: [...marks.highlights, pair] });
+    } else {
+      const cur = marks.underlines ?? [];
+      if (cur.includes(pair)) return;
+      commit({ ...marks, underlines: [...cur, pair] });
+    }
+  }
+
   function doClear() {
     if (!menu) return;
     const hitH = marks.highlights.filter((h) => h.includes(menu.text) || menu.text.includes(h));
@@ -194,7 +208,7 @@ export default function PassagePane(p: Props) {
         e.preventDefault();
         const s = selectionInBox();
         if (s) {
-          commit({ ...marks, highlights: [...marks.highlights, s.text] });
+          addPhrase("highlight", s.text);
           window.getSelection()?.removeAllRanges();
           setMenu(null);
         }
@@ -202,8 +216,7 @@ export default function PassagePane(p: Props) {
         e.preventDefault();
         const s = selectionInBox();
         if (s) {
-          const cur = marks.underlines ?? [];
-          commit({ ...marks, underlines: [...cur, s.text] });
+          addPhrase("underline", s.text);
           window.getSelection()?.removeAllRanges();
           setMenu(null);
         }
@@ -258,6 +271,7 @@ export default function PassagePane(p: Props) {
             style={{ left: Math.max(8, menu.x), top: Math.max(8, menu.y) }}
             role="menu"
             aria-label="Text tools"
+            onMouseDown={(e) => e.preventDefault()}
           >
             <button type="button" role="menuitem" onClick={doHighlight} className="exam-selbtn" title="Alt+H">
               Highlight

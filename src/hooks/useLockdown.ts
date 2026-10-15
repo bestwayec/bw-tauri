@@ -157,6 +157,17 @@ export async function tryTauriInvoke(
   }
 }
 
+/**
+ * Release the kiosk lockdown right now: native `set_locked({ locked: false })`
+ * plus fullscreen exit. Used the moment a submission succeeds so the student is
+ * never left locked inside a finished exam, even before the runner unmounts.
+ * Safe to call outside the Tauri runtime (resolves to a no-op).
+ */
+export function releaseKioskLockdown(): void {
+  void tryTauriInvoke("set_locked", { locked: false });
+  tryExitFullscreen();
+}
+
 function tryClearClipboard(): void {
   try {
     if (typeof navigator !== "undefined") {

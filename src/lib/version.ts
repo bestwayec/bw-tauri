@@ -4,8 +4,21 @@ import { isSafeHttpUrl } from "./secure-storage";
 /**
  * Bundled desktop version — must match package.json + tauri.conf.json.
  * Used only when the Tauri runtime API is unavailable (plain browser dev).
+ *
+ * A stale value here makes the app compare itself against an older release and
+ * show a bogus "New version available" toast, so it is asserted against
+ * package.json in version.test.ts.
  */
-export const APP_VERSION = "0.2.2";
+export const APP_VERSION = "0.5.6";
+
+/**
+ * Current release of the manual-installer channel. The signed in-place updater
+ * is not advertised for every build, so the toast can fall back to the
+ * published installer of exactly this version — never of another one.
+ */
+export const DESKTOP_INSTALLER_VERSION = "0.5.6";
+export const DESKTOP_INSTALLER_URL =
+  "https://bestwayec.uz/media/downloads/Bestway.App_0.5.6_x64-setup.exe";
 
 export interface DesktopRelease {
   version: string;
@@ -45,6 +58,31 @@ export function compareVersions(a: string, b: string): number {
 }
 
 /**
+ * True only when the backend advertises a strictly newer version.
+ * Same-or-older announcements and malformed/empty versions never nag.
+ */
+export function shouldNotifyUpdate(current: string, latest: string): boolean {
+  const next = typeof latest === "string" ? latest.trim() : "";
+  const now = typeof current === "string" ? current.trim() : "";
+  if (!next || !now) return false;
+  // A version that parses to all-zero parts (e.g. "latest", "") is malformed.
+  if (!/^\d+(\.\d+)*$/.test(next) || !/^\d+(\.\d+)*$/.test(now)) return false;
+  return compareVersions(now, next) < 0;
+}
+
+/**
+ * Installer URL the toast may open: the backend's URL when it is safe,
+ * otherwise the published installer for the advertised version — and never
+ * the current installer for a different version.
+ */
+export function installerUrlFor(latest: string, downloadUrl: string | null): string | null {
+  const advertised = typeof downloadUrl === "string" && downloadUrl ? downloadUrl.trim() : null;
+  if (advertised && isSafeHttpUrl(advertised)) return advertised;
+  const next = typeof latest === "string" ? latest.trim() : "";
+  return next === DESKTOP_INSTALLER_VERSION ? DESKTOP_INSTALLER_URL : null;
+}
+
+/**
  * Returns update info when the backend advertises a NEWER version,
  * null when up-to-date / unreachable / malformed. Never throws —
  * a failed check must never disturb the student.
@@ -60,7 +98,7 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
     ]);
     const latest = typeof rel?.version === "string" ? rel.version.trim() : "";
     if (!latest) return null;
-    if (compareVersions(current, latest) >= 0) return null;
+    if (!shouldNotifyUpdate(current, latest)) return null;
     let downloadUrl: string | null =
       typeof rel?.downloadUrl === "string" && rel.downloadUrl ? rel.downloadUrl.trim() : null;
     if (downloadUrl && !isSafeHttpUrl(downloadUrl)) downloadUrl = null;

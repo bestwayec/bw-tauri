@@ -34,9 +34,11 @@ import { useSessionStore } from "@/lib/session-store";
 import { tryTauriInvoke } from "@/hooks/useLockdown";
 import { usePrograms } from '@/lib/programs';
 import type { StartResult, TestListItem } from "@/lib/tests";
+import { targetSectionOf } from "@/lib/mocks";
 import type {
   MockExamListItem,
   MockShapedSection,
+  MockSkill,
   MockStartResult,
   MockSubmitResult,
 } from "@/lib/mocks";
@@ -267,13 +269,21 @@ export default function App() {
     setRoute("result");
   };
 
-  const handleStartMock = (mock: MockExamListItem, start: MockStartResult) => {
+  /**
+   * `chosen` is the section the student picked in the start modal. A
+   * single-section attempt is scoped server-side, so the runner opens straight
+   * into that section (and only that section) without a second picker.
+   */
+  const handleStartMock = (mock: MockExamListItem, start: MockStartResult, chosen?: MockSkill) => {
     setActiveMock(mock);
     setActiveMockStart(start);
-    setActiveMockSection(start.flowMode === 'full_test' ? start.exam.sections.find((s) => s.skill === start.currentSkill) ?? null : null);
+    const wanted = targetSectionOf(start, chosen);
+    const section = wanted ? start.exam.sections.find((s) => s.skill === wanted) ?? null : null;
+    setActiveMockSection(section);
     setLastMockResult(null);
     setLastScore(null);
-    setRoute(start.flowMode === 'full_test' ? 'mockRunner' : 'mockSections');
+    // No resolvable section (multi-skill partial practice): fall back to the picker page.
+    setRoute(section ? 'mockRunner' : 'mockSections');
   };
 
   const handleFinishMock = (result: MockSubmitResult) => {

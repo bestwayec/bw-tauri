@@ -147,6 +147,49 @@ export interface MockStartResult {
   exam: MockShapedExam;
   annotations: unknown[];
   savedAnswers: Record<string, string>;
+  /**
+   * Single-section practice metadata. The backend scopes `exam.sections` to the
+   * chosen skill for these attempts, so no other section is ever downloaded.
+   */
+  isSingleSection?: boolean;
+  singleSection?: MockSkill | null;
+  attemptTypeLabel?: string;
+}
+
+/**
+ * The one section this attempt is allowed to answer, or null for a full mock.
+ * Read from the server response first (authoritative scope), then fall back to
+ * a single scoped section. Used by App routing and the runner submit path.
+ */
+export function singleSectionOf(start: Pick<MockStartResult, 'isSingleSection' | 'singleSection' | 'flowMode' | 'exam'>): MockSkill | null {
+  if (start.isSingleSection && start.singleSection) return start.singleSection;
+  if (start.flowMode === 'full_test') return null;
+  return start.exam.sections.length === 1 ? start.exam.sections[0].skill : null;
+}
+
+/**
+ * `skills` argument for the submit call of `skill`.
+ *
+ * A single-section attempt is already scoped server-side, so it is submitted
+ * as-is — the sections the student did not choose are never required (the
+ * server skips its completeness check for these attempts). Multi-section
+ * attempts still declare the section being finished so grading stays
+ * section-only.
+ */
+export function submitSkillsFor(
+  start: Pick<MockStartResult, 'isSingleSection' | 'singleSection' | 'flowMode' | 'exam'>,
+  skill: MockSkill,
+): MockSkill[] | undefined {
+  return singleSectionOf(start) ? undefined : [skill];
+}
+
+/** Section the runner should open for a start response, or null when unknown. */
+export function targetSectionOf(start: MockStartResult, chosen?: MockSkill | null): MockSkill | null {
+  const single = singleSectionOf(start);
+  if (single) return single;
+  const wanted = start.flowMode === 'full_test' ? start.currentSkill : (chosen ?? null);
+  if (wanted && start.exam.sections.some((s) => s.skill === wanted)) return wanted;
+  return start.exam.sections.length === 1 ? start.exam.sections[0].skill : null;
 }
 
 export interface MockSubmitResult {
@@ -168,14 +211,40 @@ export async function listMockExams(program?: ExamProgram, practiceLevel?: Pract
   return parseOrThrow("GET /mock/exams", MockExamListSchema, raw);
 }
 
+export interface MockStartOptions {
+  mode?: MockAttemptMode;
+  flow?: 'single_skill' | 'full_test';
+  /**
+   * Single-section practice: the backend narrows the attempt scope to this
+   * skill (attempt becomes `partial`, so the other sections are neither
+   * downloaded nor required at submit time).
+   */
+  section?: MockSkill;
+}
+
+/**
+ * Start (or resume) a mock attempt.
+ *
+ * Full mock sends `flow: 'full_test'` and nothing else. Single-section
+ * practice sends the skill three ways — `section`, `section_filter` and
+ * `skills` — because the backend accepts any of them and older deployments
+ * read only one of these fields.
+ */
 export async function startMockExam(
   examId: string,
-  opts?: { mode?: MockAttemptMode; flow?: 'single_skill' | 'full_test' },
+  opts?: MockStartOptions,
 ): Promise<MockStartResult> {
-  const raw = await post<unknown>(`/mock/exams/${encodeURIComponent(examId)}/start`, {
+  const section = opts?.section;
+  const payload: Record<string, unknown> = {
     mode: opts?.mode ?? "practice",
     flow: opts?.flow ?? 'single_skill',
-  });
+  };
+  if (section) {
+    payload.section = section;
+    payload.section_filter = section;
+    payload.skills = [section];
+  }
+  const raw = await post<unknown>(`/mock/exams/${encodeURIComponent(examId)}/start`, payload);
   return parseOrThrow("POST /mock/exams/:id/start", MockStartResultSchema, raw);
 }
 
@@ -256,4 +325,20 @@ export const MOCK_SKILL_LABEL: Record<MockSkill, string> = {
   reading: "Reading",
   writing: "Writing",
   speaking: "Speaking",
+};
+
+/** Approximate single-section practice durations shown on the start picker. */
+export const MOCK_SECTION_MINUTES: Record<MockSkill, number> = {
+  listening: 35,
+  reading: 60,
+  writing: 60,
+  speaking: 15,
+};
+
+/** Section picker copy: emoji + short label for the single-section options. */
+export const MOCK_SECTION_ICON: Record<MockSkill, string> = {
+  listening: "🎧",
+  reading: "📖",
+  writing: "✍️",
+  speaking: "🗣️",
 };

@@ -242,6 +242,77 @@ describe("mock flow", () => {
   });
 });
 
+interface ScopedStart {
+  attemptId: string;
+  flowMode: string;
+  isSingleSection?: boolean;
+  singleSection?: string;
+  attemptTypeLabel?: string;
+  practiceScope?: { skills?: string[]; section_filter?: string };
+  exam: {
+    questionCount: number;
+    sections: Array<{ skill: string; groups: Array<{ questions: Array<{ id: string }> }> }>;
+  };
+}
+
+describe("single-section practice scope", () => {
+  it("scopes a section_filter start to that one section", async () => {
+    const r = await api("/mock/exams/mock-1/start", {
+      method: "POST",
+      token: access,
+      body: { mode: "practice", flow: "single_skill", section_filter: "writing" },
+    });
+    expect(r.status).toBe(200);
+    const data = r.json.data as ScopedStart;
+    expect(data.flowMode).toBe("single_skill");
+    expect(data.isSingleSection).toBe(true);
+    expect(data.singleSection).toBe("writing");
+    expect(data.attemptTypeLabel).toContain("Writing");
+    expect(data.exam.sections.map((s) => s.skill)).toEqual(["writing"]);
+    expect(data.practiceScope?.section_filter).toBe("writing");
+    // Only the scoped section is downloaded; questionCount describes that scope alone.
+    expect(data.exam.questionCount).toBe(
+      data.exam.sections.reduce((sum, s) => sum + s.groups.reduce((a, g) => a + g.questions.length, 0), 0),
+    );
+  });
+
+  it("accepts the section key, switches scope with a fresh attempt and submits cleanly", async () => {
+    const r = await api("/mock/exams/mock-1/start", {
+      method: "POST",
+      token: access,
+      body: { mode: "practice", section: "speaking" },
+    });
+    expect(r.status).toBe(200);
+    const data = r.json.data as ScopedStart;
+    expect(data.isSingleSection).toBe(true);
+    expect(data.singleSection).toBe("speaking");
+    expect(data.exam.sections.map((s) => s.skill)).toEqual(["speaking"]);
+    // An empty submit owes nothing from the other sections: it grades only the scope.
+    const s = await api(`/mock/attempts/${data.attemptId}/submit`, {
+      method: "POST",
+      token: access,
+      body: {},
+    });
+    expect(s.status).toBe(200);
+    const result = s.json.data as { status: string; rawScores: Record<string, unknown> };
+    expect(result.status).toBe("completed");
+    expect(Object.keys(result.rawScores)).toEqual(["speaking"]);
+  });
+
+  it("keeps an unscoped start on all four sections with no single-section metadata", async () => {
+    const r = await api("/mock/exams/mock-1/start", {
+      method: "POST",
+      token: access,
+      body: { mode: "practice", flow: "single_skill" },
+    });
+    expect(r.status).toBe(200);
+    const data = r.json.data as ScopedStart;
+    expect(data.exam.sections.length).toBe(4);
+    expect(data.isSingleSection).toBeUndefined();
+    expect(data.singleSection).toBeUndefined();
+  });
+});
+
 describe("reuse detection", () => {
   it("re-presenting a used refresh token revokes the family", async () => {
     // `refresh` was already rotated once in the rotation test.

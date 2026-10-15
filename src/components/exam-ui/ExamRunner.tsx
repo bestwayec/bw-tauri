@@ -9,13 +9,15 @@ import { MultilevelListening, type MediaPhase } from '@/components/exam/multilev
 import { post } from '@/lib/api';
 import { flushBeforeSubmission } from '@/lib/exam-submission';
 import { fetchAuthenticatedMedia } from '@/lib/media';
+import MicCheck from "./MicCheck";
 import PassagePane, { type PassageMarks } from "./PassagePane";
 import QuestionGroup from "./QuestionGroup";
+import SubmitConfirmModal from "./SubmitConfirmModal";
 import TopBar, { type SaveState } from "./TopBar";
-import { isAnswered, nextUnanswered, remainingMs, serverOffsetMs, type UIPart } from "./model";
+import { isAnswered, mergeAudioDone, nextUnanswered, remainingMs, serverOffsetMs, type UIPart } from "./model";
 import { answerRuleHint, exceedsAnswerConstraint, type AnswerRule } from '@/lib/objective-answers';
 import { reportCheat, type CheatScope } from '@/lib/cheat';
-import { mapCheatEventToKind, useLockdown, type LockdownCheatEvent } from '@/hooks/useLockdown';
+import { mapCheatEventToKind, releaseKioskLockdown, useLockdown, type LockdownCheatEvent } from '@/hooks/useLockdown';
 
 export interface ExamRunnerProps {
   attemptId: string;
@@ -145,6 +147,13 @@ export default function ExamRunner(p: ExamRunnerProps) {
     const saved = (event: Event) => { const detail=(event as CustomEvent<{attemptId:string;questionId:string}>).detail; if(detail?.attemptId===p.attemptId) setAudioDone((previous)=>({...previous,[detail.questionId]:true})); };
     window.addEventListener('multilevel:recording-uploaded',saved); return()=>window.removeEventListener('multilevel:recording-uploaded',saved);
   },[p.attemptId]);
+  // An uploaded take makes its question answered: keep the palette, the part
+  // counters and the submit summary in sync with the recordings the parent
+  // has already stored on the server.
+  const initialAudioDone = p.initialAudioDone;
+  useEffect(() => {
+    setAudioDone((previous) => mergeAudioDone(previous, initialAudioDone));
+  }, [initialAudioDone]);
   const [flags, setFlags] = useState<Record<string, boolean>>(() => ({}));
   const [currentQ, setCurrentQ] = useState(0);
   const [fontSize, setFontSize] = useState(17);
@@ -154,6 +163,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
   const [volume, setVolumeState] = useState(() => getVolume());
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [submitting, setSubmitting] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [timeUp, setTimeUp] = useState(false);
   const [leftWidth, setLeftWidth] = useState(50);
@@ -329,15 +339,18 @@ export default function ExamRunner(p: ExamRunnerProps) {
   const doSubmit = useCallback(
     async (auto: boolean) => {
       if (submittingRef.current || submittedRef.current) return;
-      if (!auto && !confirm("Submit this section? You won't be able to change answers afterwards."))
-        return;
       submittingRef.current = true;
       setSubmitting(true);
       setError(null);
       try {
+        // Flush every unsaved draft first: the server must hold the final
+        // answers before the submit call is made.
         await flushBeforeSubmission(flush, { versioned, auto }, (e) => setError(friendlyError(e)));
         submittedRef.current = true;
         await p.submit();
+        // Submission succeeded (and navigation is in flight) — drop the kiosk
+        // lockdown immediately instead of waiting for the runner to unmount.
+        releaseKioskLockdown();
       } catch (e) {
         submittedRef.current = false;
         submittingRef.current = false;
@@ -348,6 +361,12 @@ export default function ExamRunner(p: ExamRunnerProps) {
     },
     [flush, p, versioned],
   );
+
+  /** Manual submit opens the confirmation summary; the timer submits directly. */
+  const requestSubmit = useCallback(() => {
+    if (submittingRef.current || submittedRef.current) return;
+    setConfirmOpen(true);
+  }, []);
 
   useEffect(() => {
     if (p.deadlineIso == null) return;
@@ -488,6 +507,8 @@ export default function ExamRunner(p: ExamRunnerProps) {
         </p>
       )}
 
+      {p.skill === "speaking" && <MicCheck />}
+
       <main className="exam-body">
         {split ? (
           <div className="exam-split" style={{ gridTemplateColumns: `${leftWidth}% 8px ${100 - leftWidth}%` }}>
@@ -588,7 +609,22 @@ export default function ExamRunner(p: ExamRunnerProps) {
         isLastPart={partIdx >= p.parts.length - 1}
         submitting={submitting}
         submitLabel={p.submitLabel}
-        onSubmit={() => void doSubmit(false)}
+        onSubmit={requestSubmit}
+      />
+
+      <SubmitConfirmModal
+        open={confirmOpen}
+        answered={answeredArr.filter(Boolean).length}
+        total={total}
+        flagged={flaggedArr.filter(Boolean).length}
+        unansweredNumbers={allQuestions.filter((_, i) => !answeredArr[i]).map((q) => q.number)}
+        submitting={submitting}
+        submitLabel={p.submitLabel}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => {
+          setConfirmOpen(false);
+          void doSubmit(false);
+        }}
       />
 
       {helpOpen && (

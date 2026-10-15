@@ -153,6 +153,10 @@ export const MockStartResultSchema = z.object({
   }),
   annotations: z.array(z.unknown()),
   savedAnswers: z.record(z.string(), z.string()),
+  // Single-section practice scope (server-authoritative).
+  isSingleSection: z.boolean().optional(),
+  singleSection: MockSkillSchema.nullable().optional(),
+  attemptTypeLabel: z.string().optional(),
 });
 
 export const MockSubmitResultSchema = z.object({

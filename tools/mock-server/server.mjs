@@ -235,6 +235,9 @@ const speakingGroups = [G({ title: "Part 1", questions: [Q("speaking_task", "Tal
 const mockExam = {
   id: "mock-1",
   type: "ielts_academic",
+  // A full-test blueprint: `full_test` flow and the start picker's Full Mock
+  // action are only offered for `full_mock` exams (backend rule).
+  profile: "full_mock",
   title: "Mock Server Full Test",
   description: "Covers all 15 question types.",
   level: "Academic",
@@ -268,6 +271,8 @@ const legacyTest = {
   sections: ["reading"],
 };
 
+// Server-owned exam track (mirrors GET/PATCH /exam-programs/mine).
+let activeProgram = "MULTILEVEL";
 const attempts = new Map(); // attemptId -> { examId|testId, kind, studentId, mode, answers:Map, status, startedAt }
 const audioPlays = new Map(); // `${groupId}:${attemptId}` -> count
 
@@ -297,11 +302,32 @@ function shapeGroup(g, base) {
   };
 }
 
-function shapeExamForStudent(base) {
-  return {
+const SKILLS = ["listening", "reading", "writing", "speaking"];
+
+/**
+ * Shape the exam for a student. `scope` (a single skill) narrows the payload
+ * to that one section — the real backend scopes single-section practice
+ * attempts the same way, so the other sections are never downloaded.
+ */
+function shapeExamForStudent(base, scope = null) {
+  const sections = scope ? mockExam.sections.filter((s) => s.skill === scope) : mockExam.sections;
+  const shaped = {
     ...mockExam,
-    sections: mockExam.sections.map((s) => ({ ...s, groups: s.groups.map((g) => shapeGroup(g, base)) })),
+    sections: sections.map((s) => ({ ...s, groups: s.groups.map((g) => shapeGroup(g, base)) })),
   };
+  shaped.questionCount = shaped.sections.reduce((s, x) => s + x.groups.reduce((a, g) => a + g.questions.length, 0), 0);
+  return shaped;
+}
+
+/**
+ * Single-section practice is requested with `section`, `section_filter` or a
+ * one-element `skills` array; anything unrecognised means "no scope".
+ */
+function requestedScope(source) {
+  const raw = source.section ?? source.section_filter ??
+    (Array.isArray(source.skills) && source.skills.length === 1 ? source.skills[0] : null);
+  const skill = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  return SKILLS.includes(skill) ? skill : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -312,6 +338,18 @@ const server = http.createServer(async (req, res) => {
   const u = new URL(req.url ?? "/", "http://x");
   const path = u.pathname;
   const method = req.method ?? "GET";
+  // Dev-only CORS so the app can be exercised from a browser origin
+  // (VITE_API_URL=http://127.0.0.1:3101/v1 npm run dev). Loopback, in-memory,
+  // no credentials beyond the mock bearer token.
+  res.setHeader("Access-Control-Allow-Origin", req.headers.origin ?? "*");
+  res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Range");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges, Content-Length");
+  res.setHeader("Vary", "Origin");
+  if (method === "OPTIONS") {
+    res.writeHead(204);
+    return res.end();
+  }
   const body = method === "GET" || method === "HEAD" ? {} : await readBody(req);
   const base = `http://127.0.0.1:${PORT}/v1`;
 
@@ -355,6 +393,15 @@ const server = http.createServer(async (req, res) => {
   }
   if (method === "GET" && path === "/v1/desktop-version") {
     return ok(res, { version: "9.9.9", downloadUrl: null });
+  }
+
+  // --- exam tracks (Dashboard/Exams gate their queries on this) ---
+  if (method === "GET" && path === "/v1/exam-programs/mine") {
+    return ok(res, { availablePrograms: ["IELTS", "MULTILEVEL"], activeProgram, accessPolicy: "SELF_SELECT" });
+  }
+  if (method === "PATCH" && path === "/v1/exam-programs/mine") {
+    if (body.program === "IELTS" || body.program === "MULTILEVEL") activeProgram = body.program;
+    return ok(res, { availablePrograms: ["IELTS", "MULTILEVEL"], activeProgram, accessPolicy: "SELF_SELECT" });
   }
 
   // --- legacy tests ---
@@ -404,13 +451,20 @@ const server = http.createServer(async (req, res) => {
   }
   m = path.match(/^\/v1\/mock\/exams\/([^/]+)\/start$/);
   if (method === "POST" && m) {
+    const scope = requestedScope(body);
     for (const [id, a] of attempts) {
       if (a.kind === "mock" && a.studentId === userId && a.status === "in_progress") {
-        return ok(res, startPayload(id, a, body.mode ?? "practice"));
+        if ((a.scope ?? null) !== scope) {
+          // A different practice scope needs its own attempt; the real backend
+          // force-submits the stale one and starts fresh.
+          a.status = "completed";
+          continue;
+        }
+        return ok(res, startPayload(id, a, body.mode ?? a.mode));
       }
     }
     const id = rid("matt");
-    const a = { kind: "mock", examId: "mock-1", studentId: userId, mode: body.mode ?? "practice", status: "in_progress", answers: new Map(), startedAt: new Date().toISOString() };
+    const a = { kind: "mock", examId: "mock-1", studentId: userId, scope, mode: body.mode ?? "practice", status: "in_progress", answers: new Map(), startedAt: new Date().toISOString() };
     attempts.set(id, a);
     return ok(res, startPayload(id, a, a.mode));
   }
@@ -442,7 +496,11 @@ const server = http.createServer(async (req, res) => {
     if (!a) return fail(res, 404, "ATTEMPT_NOT_FOUND", "No such attempt");
     if (a.status !== "in_progress") return fail(res, 400, "MOCK_ATTEMPT_FINISHED", "Already submitted");
     a.status = "completed";
-    const skills = Array.isArray(body.skills) && body.skills.length ? body.skills : ["listening", "reading", "writing", "speaking"];
+    // A scoped attempt owns exactly one section, so an empty submit grades only
+    // that section (the real backend does the same for partial attempts).
+    const skills = Array.isArray(body.skills) && body.skills.length
+      ? body.skills
+      : (a.scope ? [a.scope] : SKILLS);
     const rawScores = {};
     for (const s of skills) rawScores[s] = { score: a.answers.size, max: 10 };
     return ok(res, { status: "completed", rawScores, sectionBands: { reading: 6.5 }, overallBand: 6.5, cefrLevel: "B2" });
@@ -484,7 +542,9 @@ const server = http.createServer(async (req, res) => {
   function startPayload(id, a, mode) {
     const saved = {};
     for (const [k, v] of a.answers) saved[k] = v;
-    return {
+    const scope = a.scope ?? null;
+    const fullTest = (a.flow ?? "single_skill") === "full_test";
+    const payload = {
       attemptId: id,
       resumed: a.answers.size > 0,
       mode,
@@ -492,14 +552,21 @@ const server = http.createServer(async (req, res) => {
       deadlineAt: null,
       serverTime: new Date().toISOString(),
       durationMinutes: null,
-      flowMode: "single_skill",
-      currentSkill: null,
+      flowMode: fullTest ? "full_test" : "single_skill",
+      currentSkill: fullTest ? a.currentSkill ?? SKILLS[0] : scope,
       sectionDeadlines: null,
       overallDeadlineAt: null,
-      exam: shapeExamForStudent(base),
+      exam: shapeExamForStudent(base, scope),
       annotations: [],
       savedAnswers: saved,
     };
+    if (scope) {
+      payload.isSingleSection = true;
+      payload.singleSection = scope;
+      payload.attemptTypeLabel = `Single Section: ${scope[0].toUpperCase()}${scope.slice(1)}`;
+      payload.practiceScope = { skills: [scope], single_section: scope, section_filter: scope };
+    }
+    return payload;
   }
 });
 
