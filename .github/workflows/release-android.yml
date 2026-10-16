@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Target release tag (e.g. v0.6.0 or bestway-app-v0.6.0)
+        description: Target release tag (e.g. v0.7.0 or bestway-app-v0.7.0)
         required: true
-        default: v0.6.0
+        default: v0.7.0
         type: string
   push:
     tags:
@@ -71,7 +71,7 @@ jobs:
             apksigner sign \
               --ks "$RUNNER_TEMP/release.keystore" --ks-key-alias "$KEY_ALIAS" \
               --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEY_PASSWORD \
-              --min-sdk-version 21 \
+              --min-sdk-version 24 \
               --v1-signing-enabled true \
               --v2-signing-enabled true \
               --v3-signing-enabled true \
@@ -85,7 +85,7 @@ jobs:
 
             apksigner sign \
               --ks release.keystore --ks-pass pass:bestway2026 --key-pass pass:bestway2026 \
-              --min-sdk-version 21 \
+              --min-sdk-version 24 \
               --v1-signing-enabled true \
               --v2-signing-enabled true \
               --v3-signing-enabled true \
@@ -94,7 +94,7 @@ jobs:
 
       - name: Verify Signed APK
         run: |
-          apksigner verify --verbose --print-certs --min-sdk-version 21 bestway-app.apk | tee verify.txt
+          apksigner verify --verbose --print-certs --min-sdk-version 24 bestway-app.apk | tee verify.txt
           grep -q "^Verifies" verify.txt
           grep -q "Verified using v2 scheme (APK Signature Scheme v2): true" verify.txt
           grep -q "Verified using v3 scheme (APK Signature Scheme v3): true" verify.txt
@@ -115,9 +115,9 @@ jobs:
           TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           gh release upload "$TAG" bestway-app.apk --clobber || gh release create "$TAG" bestway-app.apk --title "BestWay App $TAG" --notes "Release BestWay Android $TAG" || true
-          if [ "$TAG" != "v0.6.0" ]; then
-            gh release upload "v0.6.0" bestway-app.apk --clobber || gh release create "v0.6.0" bestway-app.apk --title "BestWay App v0.6.0" --notes "Release BestWay Android v0.6.0" || true
+          if [ "$TAG" != "v0.7.0" ]; then
+            gh release upload "v0.7.0" bestway-app.apk --clobber || gh release create "v0.7.0" bestway-app.apk --title "BestWay App v0.7.0" --notes "Release BestWay Android v0.7.0" || true
           fi
-          if [ "$TAG" != "bestway-app-v0.6.0" ]; then
-            gh release upload "bestway-app-v0.6.0" bestway-app.apk --clobber || gh release create "bestway-app-v0.6.0" bestway-app.apk --title "BestWay App v0.6.0" --notes "Release BestWay Android v0.6.0" || true
+          if [ "$TAG" != "bestway-app-v0.7.0" ]; then
+            gh release upload "bestway-app-v0.7.0" bestway-app.apk --clobber || gh release create "bestway-app-v0.7.0" bestway-app.apk --title "BestWay App v0.7.0" --notes "Release BestWay Android v0.7.0" || true
           fi

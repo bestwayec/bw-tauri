@@ -14,6 +14,7 @@ import {
 
 export interface QuestionGroupProps {
   part: UIPart;
+  attemptId?: string;
   answers: Record<string, string>;
   flags: Record<string, boolean>;
   uploadNotes?: Record<string, string>;
@@ -123,6 +124,7 @@ export default function QuestionGroup(p: QuestionGroupProps) {
                 {widget === "essay" && (
                   <EssayWidget
                     {...base}
+                    attemptId={p.attemptId}
                     minWords={q.guidance?.wordMin ?? essayMin(q.prompt, p.part.instructions)}
                     onChange={(v, im) => p.onAnswer(q.id, v, im)}
                   />

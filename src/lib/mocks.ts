@@ -17,7 +17,7 @@ import { resolveBackendMediaUrl } from './media-url';
  *
  * api.ts `request()` already unwraps `{ success, data }` -> `data`.
  */
-import { get, post } from "./api";
+import { del, get, post } from "./api";
 import type { ExamProgram, PracticeLevel } from './programs';
 import {
   MockExamListSchema,
@@ -298,6 +298,34 @@ export async function uploadMockSpeaking(
     form,
     { timeoutMs: 60_000 },
   );
+}
+
+export interface WritingOcrResponse {
+  saved?: boolean;
+  ocrText: string;
+  imageUrls?: string[];
+  pages?: Array<{ page: number; imageUrl?: string; text?: string }>;
+  wordCount?: number;
+}
+
+export async function uploadMockWritingOcr(
+  attemptId: string,
+  questionId: string,
+  files: File[],
+): Promise<WritingOcrResponse> {
+  const form = new FormData();
+  for (const file of files) {
+    form.append("images", file, file.name);
+  }
+  return post<WritingOcrResponse>(
+    `/v1/mock/attempts/${encodeURIComponent(attemptId)}/writing/${encodeURIComponent(questionId)}/ocr`,
+    form,
+    { timeoutMs: 60_000 },
+  );
+}
+
+export async function deleteMockExam(examId: string): Promise<void> {
+  await del(`/v1/mock/exams/${encodeURIComponent(examId)}`);
 }
 
 /**

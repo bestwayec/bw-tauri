@@ -149,18 +149,33 @@ export function ShortWidget({ q, value, onChange, fontSize }: WidgetProps) {
   );
 }
 
-/** Essay editor with live word count and minimum hint. */
+import WritingImageOcr from "./WritingImageOcr";
+
+/** Essay editor with live word count, handwriting image upload, and OCR extraction. */
 export function EssayWidget({
   q,
   value,
   onChange,
   fontSize,
   minWords,
-}: WidgetProps & { minWords: number | null }) {
+  attemptId,
+}: WidgetProps & { minWords: number | null; attemptId?: string }) {
   const words = countWords(value);
   const low = minWords != null && words < minWords;
   return (
     <div>
+      <WritingImageOcr
+        attemptId={attemptId}
+        questionId={q.id}
+        currentText={value}
+        onExtractedText={(ocrText, mode) => {
+          const next =
+            mode === "append" && value.trim()
+              ? `${value.trim()}\n\n${ocrText}`
+              : ocrText;
+          onChange(next, true);
+        }}
+      />
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}

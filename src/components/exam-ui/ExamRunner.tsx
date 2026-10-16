@@ -644,6 +644,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
               <div className="exam-pane-scroll">
                 <PartQuestions
                   part={part}
+                  attemptId={p.attemptId}
                   gapped={gapped}
                   cardQuestions={cardQuestions}
                   answers={answers}
@@ -687,6 +688,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
             )}
             <PartQuestions
               part={part}
+              attemptId={p.attemptId}
               gapped={gapped}
               cardQuestions={cardQuestions}
               answers={answers}
@@ -774,6 +776,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
 /** Per-part material + questions (split right pane or single column). */
 export function PartQuestions(props: {
   part: UIPart;
+  attemptId?: string;
   gapped: boolean;
   cardQuestions: UIPart["questions"];
   answers: Record<string, string>;
@@ -834,6 +837,7 @@ export function PartQuestions(props: {
       )}
       <QuestionGroup
         part={part}
+        attemptId={props.attemptId}
         only={props.gapped ? props.cardQuestions : undefined}
         answers={props.answers}
         flags={props.flags}

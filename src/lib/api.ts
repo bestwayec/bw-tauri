@@ -159,9 +159,16 @@ function isAuthPath(path: string): boolean {
   );
 }
 
+function normalizeApiPath(path: string): string {
+  if (path.startsWith("/api/v1/")) return path.slice("/api/v1".length);
+  if (path.startsWith("/v1/")) return path.slice("/v1".length);
+  return path.startsWith("/") ? path : `/${path}`;
+}
+
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { query, body, token, headers, _retried, timeoutMs: requestedTimeout, signal: callerSignal, ...rest } = options as RequestOptions & { signal?: AbortSignal };
-  const url = `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}${buildQuery(query)}`;
+  const cleanPath = normalizeApiPath(path);
+  const url = `${API_BASE_URL}${cleanPath}${buildQuery(query)}`;
 
   const accessToken = token !== undefined ? token : getAccessTokenCached();
   const isMultipart = typeof FormData !== 'undefined' && body instanceof FormData;
@@ -256,6 +263,35 @@ export function patch<T>(path: string, body?: any, init?: RequestOptions): Promi
 
 export function del<T>(path: string, query?: QueryParams, init?: RequestOptions): Promise<T> {
   return request<T>(path, { ...init, query, method: "DELETE" });
+}
+
+export async function downloadBlob(
+  path: string,
+  query?: QueryParams,
+): Promise<{ blob: Blob; filename?: string }> {
+  const cleanPath = normalizeApiPath(path);
+  const url = `${API_BASE_URL}${cleanPath}${buildQuery(query)}`;
+  const accessToken = getAccessTokenCached();
+  const res = await fetch(url, {
+    method: "GET",
+    headers: {
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+  });
+  if (!res.ok) {
+    let payload: unknown = null;
+    try {
+      payload = await res.json();
+    } catch {
+      /* ignore */
+    }
+    throw toApiError(res.status, payload, `Download failed: ${res.status}`);
+  }
+  const cd = res.headers.get("content-disposition") ?? "";
+  const match = /filename\*?=(?:UTF-8'')?["']?([^"';\n]+)["']?/i.exec(cd);
+  const filename = match?.[1] ? decodeURIComponent(match[1]) : undefined;
+  const blob = await res.blob();
+  return { blob, filename };
 }
 
 // ---------------------------------------------------------------------------

@@ -4,9 +4,10 @@ import { PRACTICE_LEVELS, programQueryKey, type PracticeLevel } from '@/lib/prog
 import { matchesCatalogue, type CatalogueCategory } from '@/lib/catalogue';
 import { useSessionStore } from '@/lib/session-store';
 import { useQuery } from "@tanstack/react-query";
-import { API_BASE_URL } from "@/lib/api";
+import { API_BASE_URL, del } from "@/lib/api";
 import { listTests, startTest, type StartResult, type TestListItem } from "@/lib/tests";
 import {
+  deleteMockExam,
   listMockExams,
   startMockExam,
   type MockAttemptMode,
@@ -69,10 +70,15 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
   const programs = usePrograms();
   const program = programs.data?.activeProgram;
   const userId = useSessionStore((state) => state.profile?.id);
+  const userRole = useSessionStore((state) => state.profile?.role);
+  const canDeleteExam =
+    userRole === "teacher" || userRole === "admin" || userRole === "super_admin";
   const [practiceLevel, setPracticeLevel] = useState<PracticeLevel | 'All'>('All');
   const [category, setCategory] = useState<CatalogueCategory>('all');
   const [startingId, setStartingId] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ kind: "mock" | "test"; id: string; title: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
   // Start-of-exam choice (Full Mock vs one section) — no request until confirmed.
   const [picker, setPicker] = useState<{ mock: MockExamListItem; mode: MockAttemptMode } | null>(null);
 
@@ -285,13 +291,26 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
                         </p>
                       )}
                     </div>
-                    <button
-                      onClick={() => void handleStartTest(t)}
-                      disabled={startingId !== null || empty}
-                      className="btn-brand shrink-0 rounded-xl px-5 py-2.5 text-sm font-bold disabled:opacity-50"
-                    >
-                      {startingId === t.id ? "Starting…" : empty ? "Empty" : "Start →"}
-                    </button>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {canDeleteExam && (
+                        <button
+                          type="button"
+                          title="Imtihonni o'chirish"
+                          aria-label={`Delete ${t.title}`}
+                          onClick={() => setDeleteTarget({ kind: "test", id: t.id, title: t.title })}
+                          className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-xs font-bold text-red-300 hover:bg-red-500/20"
+                        >
+                          🗑
+                        </button>
+                      )}
+                      <button
+                        onClick={() => void handleStartTest(t)}
+                        disabled={startingId !== null || empty}
+                        className="btn-brand shrink-0 rounded-xl px-5 py-2.5 text-sm font-bold disabled:opacity-50"
+                      >
+                        {startingId === t.id ? "Starting…" : empty ? "Empty" : "Start →"}
+                      </button>
+                    </div>
                   </div>
                   {empty && (
                     <p className="mt-2 text-[11px] text-amber-300/80">
@@ -346,6 +365,17 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
                     <div className="shrink-0 text-right">
                       <p className="text-[10px] font-semibold uppercase tracking-wider text-violet-300">Mock</p>
                       <p className="mt-1 text-[11px] text-white/40">{empty ? "Empty" : `${m.questionCount} Q`}</p>
+                      {canDeleteExam && (
+                        <button
+                          type="button"
+                          title="Imtihonni o'chirish"
+                          aria-label={`Delete ${m.title}`}
+                          onClick={() => setDeleteTarget({ kind: "mock", id: m.id, title: m.title })}
+                          className="mt-2 inline-flex items-center rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] font-bold text-red-300 hover:bg-red-500/20"
+                        >
+                          🗑 O&apos;chirish
+                        </button>
+                      )}
                     </div>
                   </div>
                   {empty && (
@@ -395,6 +425,53 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
         <p role="alert" className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
           {startError}
         </p>
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-md">
+          <div className="card w-full max-w-md rounded-3xl border border-white/15 p-6 shadow-2xl">
+            <h3 className="text-base font-bold text-white">Imtihonni o&apos;chirishni tasdiqlang</h3>
+            <p className="mt-2 text-xs text-white/60">
+              &ldquo;{deleteTarget.title}&rdquo; imtihonini butunlay o&apos;chirib tashlamoqchimisiz? Bu amalni ortga qaytarib bo&apos;lmaydi.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setDeleteTarget(null)}
+                className="rounded-xl border border-white/15 px-4 py-2 text-xs font-semibold text-white/70 hover:bg-white/10"
+              >
+                Bekor qilish
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={async () => {
+                  setDeleting(true);
+                  setStartError(null);
+                  try {
+                    if (deleteTarget.kind === "mock") {
+                      await deleteMockExam(deleteTarget.id);
+                      await mocksQuery.refetch();
+                    } else {
+                      await del(`/v1/tests/${encodeURIComponent(deleteTarget.id)}`);
+                      await testsQuery.refetch();
+                    }
+                    setDeleteTarget(null);
+                  } catch (e) {
+                    setStartError(friendlyError(e));
+                    setDeleteTarget(null);
+                  } finally {
+                    setDeleting(false);
+                  }
+                }}
+                className="rounded-xl bg-red-600 px-4 py-2 text-xs font-bold text-white hover:bg-red-500 disabled:opacity-50"
+              >
+                {deleting ? "O'chirilmoqda..." : "O'chirish"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {picker && (

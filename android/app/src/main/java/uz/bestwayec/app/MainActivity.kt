@@ -40,7 +40,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val BASE_URL = "https://bestwayec.uz/?platform=mobile_app"
-        private const val USER_AGENT_SUFFIX = " BestWay-Android/0.6.0 MobileApp"
+        private const val USER_AGENT_SUFFIX = " BestWayApp/0.7.0 BestWay-Android/0.7.0 MobileApp"
         private const val REQUEST_RECORD_AUDIO = 1001
     }
 
@@ -49,7 +49,7 @@ class MainActivity : AppCompatActivity() {
         fun isMobileApp(): Boolean = true
 
         @android.webkit.JavascriptInterface
-        fun getVersion(): String = "0.6.0"
+        fun getVersion(): String = "0.7.0"
     }
 
     private lateinit var swipeRefresh: SwipeRefreshLayout
