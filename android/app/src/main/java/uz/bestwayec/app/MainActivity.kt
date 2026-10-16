@@ -30,6 +30,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import android.graphics.Color
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -38,7 +40,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val BASE_URL = "https://bestwayec.uz/?platform=mobile_app"
-        private const val USER_AGENT_SUFFIX = " BestWay-Android/0.5.9 MobileApp"
+        private const val USER_AGENT_SUFFIX = " BestWay-Android/0.6.0 MobileApp"
         private const val REQUEST_RECORD_AUDIO = 1001
     }
 
@@ -47,7 +49,7 @@ class MainActivity : AppCompatActivity() {
         fun isMobileApp(): Boolean = true
 
         @android.webkit.JavascriptInterface
-        fun getVersion(): String = "0.5.9"
+        fun getVersion(): String = "0.6.0"
     }
 
     private lateinit var swipeRefresh: SwipeRefreshLayout
@@ -113,6 +115,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        applySystemBars()
 
         initViews()
         setupWebView()
@@ -351,15 +354,32 @@ class MainActivity : AppCompatActivity() {
             url.contains("/multilevel")
     }
 
+    /** Pull-to-refresh is limited to the dashboard so it can never reload an exam or a form mid-edit. */
+    private fun isDashboard(url: String?): Boolean {
+        if (url == null) return false
+        val path = Uri.parse(url).path ?: return false
+        return path.endsWith("/dashboard") || path.endsWith("/dashboard/")
+    }
+
+    /** Status/navigation bars match the app canvas (#0B0F17) with light icons. */
+    private fun applySystemBars() {
+        val canvas = Color.parseColor("#0B0F17")
+        window.statusBarColor = canvas
+        window.navigationBarColor = canvas
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
+    }
+
     private fun checkExamMode(url: String?) {
         val isExam = isCurrentExam(url)
         if (isExam) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-            swipeRefresh.isEnabled = false
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-            swipeRefresh.isEnabled = true
         }
+        swipeRefresh.isEnabled = !isExam && isDashboard(url)
     }
 
     private fun setupListeners() {

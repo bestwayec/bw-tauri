@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Target release tag (e.g. v0.5.4 or bestway-app-v0.5.4)
+        description: Target release tag (e.g. v0.6.0 or bestway-app-v0.6.0)
         required: true
-        default: v0.5.4
+        default: v0.6.0
         type: string
   push:
     tags:
@@ -58,25 +58,39 @@ jobs:
         run: |
           zipalign -v -p 4 android/app/build/outputs/apk/release/app-release-unsigned.apk bestway-app-aligned.apk
 
-      - name: Sign APK
-        run: |
-          keytool -genkeypair -v -keystore release.keystore -alias bestway \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass bestway2026 -keypass bestway2026 \
-            -dname "CN=BestWay, OU=Exam, O=BestWay, L=Tashkent, C=UZ"
 
+      - name: Sign APK (official release keystore, v1+v2+v3)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "FATAL: ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD secrets are required. Refusing to sign with a throwaway key." >&2
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
           apksigner sign \
-            --ks release.keystore --ks-pass pass:bestway2026 --key-pass pass:bestway2026 \
-            --min-sdk-version 21 \
+            --ks "$RUNNER_TEMP/release.keystore" --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEY_PASSWORD \
+            --min-sdk-version 24 \
             --v1-signing-enabled true \
             --v2-signing-enabled true \
             --v3-signing-enabled true \
             --out bestway-app.apk bestway-app-aligned.apk
+          rm -f "$RUNNER_TEMP/release.keystore"
 
       - name: Verify Signed APK
         run: |
-          apksigner verify --verbose --min-sdk-version 21 bestway-app.apk
-          ls -lh bestway-app.apk
+          apksigner verify --verbose --print-certs --min-sdk-version 24 bestway-app.apk | tee verify.txt
+          grep -q "Verified using v1 scheme (JAR signing): true" verify.txt
+          grep -q "Verified using v2 scheme (APK Signature Scheme v2): true" verify.txt
+          grep -q "Verified using v3 scheme (APK Signature Scheme v3): true" verify.txt
+          SIZE=$(stat -c%s bestway-app.apk)
+          echo "APK size: $SIZE bytes"
+          if [ "$SIZE" -lt 3145728 ]; then echo "FATAL: APK below 3 MB, rejected as stub" >&2; exit 1; fi
+          sha256sum bestway-app.apk
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -89,10 +103,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
-          gh release upload "$TAG" bestway-app.apk --clobber || gh release create "$TAG" bestway-app.apk --title "BestWay App $TAG" --notes "Release BestWay Android $TAG" || true
-          if [ "$TAG" != "v0.5.4" ]; then
-            gh release upload "v0.5.4" bestway-app.apk --clobber || gh release create "v0.5.4" bestway-app.apk --title "BestWay App v0.5.4" --notes "Release BestWay Android v0.5.4" || true
-          fi
-          if [ "$TAG" != "bestway-app-v0.5.4" ]; then
-            gh release upload "bestway-app-v0.5.4" bestway-app.apk --clobber || gh release create "bestway-app-v0.5.4" bestway-app.apk --title "BestWay App v0.5.4" --notes "Release BestWay Android v0.5.4" || true
-          fi
+          gh release upload "$TAG" bestway-app.apk --clobber || gh release create "$TAG" bestway-app.apk --title "BestWay App $TAG" --notes "Release BestWay Android $TAG"
