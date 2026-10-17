@@ -58,6 +58,9 @@ export interface UIQuestion {
   recordingContext?: { attemptId: string; timed: boolean; hasAudio: boolean; profileVersion?: string | null };
 }
 
+export type SimulatorMode = "cdi" | "dtm";
+export type ContrastTheme = "standard" | "dark" | "grey";
+
 export interface UIPart {
   key: string;
   /**
@@ -74,6 +77,8 @@ export interface UIPart {
   contentLayout?: string | null;
   optionsReusable?: boolean | null;
   audioUrl: string | null;
+  audioStartSec?: number | null;
+  stimulusRef?: string | null;
   imageUrl: string | null;
   /** Timed listening: play once, no pause/seek. */
   strictAudio: boolean;
@@ -182,6 +187,56 @@ function partLabel(skill: string, idx: number): string {
   return `Part ${idx + 1}`;
 }
 
+/** Extract a non-negative audio start timestamp (seconds) from audioStartSec or stimulusRef JSON. */
+export function parseAudioStartSec(
+  audioStartSec?: number | null,
+  stimulusRef?: string | Record<string, unknown> | null,
+): number | null {
+  if (typeof audioStartSec === "number" && Number.isFinite(audioStartSec) && audioStartSec >= 0) {
+    return audioStartSec;
+  }
+  if (!stimulusRef) return null;
+  try {
+    const obj = typeof stimulusRef === "string" ? (JSON.parse(stimulusRef) as Record<string, unknown>) : stimulusRef;
+    if (obj && typeof obj === "object") {
+      const candidate = obj.startSec ?? obj.audioStartSec ?? obj.start_sec;
+      if (typeof candidate === "number" && Number.isFinite(candidate) && candidate >= 0) {
+        return candidate;
+      }
+      if (typeof candidate === "string" && candidate.trim() !== "") {
+        const parsed = Number(candidate);
+        if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+      }
+    }
+  } catch {
+    /* ignore non-JSON stimulusRef */
+  }
+  return null;
+}
+
+/** Official DTM Bottom Question Palette status classes. */
+export function dtmQuestionColorClass(answered: boolean, flagged: boolean, isCurrent = false): string {
+  const base = flagged
+    ? "bg-amber-400 text-slate-950"
+    : answered
+      ? "bg-emerald-600 text-white"
+      : "bg-slate-600/40 text-slate-200";
+  return isCurrent ? `${base} ring-2 ring-white` : base;
+}
+
+/** CDI 3-contrast theme metadata. */
+export function contrastThemePalette(theme: ContrastTheme): { bg: string; text: string; label: string } {
+  switch (theme) {
+    case "dark":
+      return { bg: "#09090b", text: "#fef08a", label: "High Contrast" };
+    case "grey":
+      return { bg: "#2d3139", text: "#f8fafc", label: "Soft Grey" };
+    case "standard":
+    default:
+      return { bg: "#f4f4f1", text: "#111111", label: "Standard" };
+  }
+}
+
 /** Mock section -> parts (one backend group per part), global numbering. */
 export function mockSectionToParts(
   section: MockShapedSection,
@@ -194,6 +249,7 @@ export function mockSectionToParts(
     const questions: UIQuestion[] = [...g.questions]
       .sort((a, b) => a.sortOrder - b.sortOrder || a.number - b.number)
       .map((q) => ({ ...toUIQuestion(q), number: ++n }));
+    const startSec = parseAudioStartSec(g.audioStartSec, g.stimulusRef);
     return {
       key: g.id,
       label: (section.skill === 'speaking' || section.skill === 'writing') && g.questions[0]?.guidance
@@ -206,6 +262,8 @@ export function mockSectionToParts(
       contentLayout: g.contentLayout,
       optionsReusable: g.optionsReusable,
       audioUrl: mockGroupAudioUrl(g, attemptId, timed && section.skill === "listening"),
+      ...(startSec != null ? { audioStartSec: startSec } : {}),
+      ...(g.stimulusRef ? { stimulusRef: g.stimulusRef } : {}),
       imageUrl: resolveMockMediaUrl(g.imageUrl),
       strictAudio: timed && section.skill === "listening" && !!g.audioUrl,
       ...(g.questions[0]?.guidance && timed && section.skill === 'listening' ? { multilevelAudio: { attemptId, groupId: g.id } } : {}),

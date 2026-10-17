@@ -175,6 +175,7 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
       sectionTitle={sectionTitle}
       skill={skill}
       timed={timed}
+      simulatorMode={start.simulatorMode ?? (start.exam.type === "multilevel" ? "dtm" : "cdi")}
       serverTime={start.serverTime}
       deadlineIso={deadlineIso}
       parts={effectiveParts}

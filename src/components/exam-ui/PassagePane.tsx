@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+export interface StickyMarginNote {
+  id: string;
+  quote: string;
+  comment: string;
+  createdAt: string;
+}
+
 export interface PassageMarks {
   highlights: string[];
   underlines?: string[];
+  stickyNotes?: StickyMarginNote[];
   note: string;
 }
 
@@ -18,18 +26,24 @@ type Props = {
   onToggleNote: () => void;
 };
 
-function readMarks(storageKey: string, partKey: string): PassageMarks {
+export function readMarks(storageKey: string, partKey: string): PassageMarks {
   try {
     const raw = localStorage.getItem(`${storageKey}.${partKey}`);
-    if (!raw) return { highlights: [], underlines: [], note: "" };
+    if (!raw) return { highlights: [], underlines: [], stickyNotes: [], note: "" };
     const p = JSON.parse(raw) as Partial<PassageMarks>;
     return {
       highlights: Array.isArray(p.highlights) ? p.highlights.filter((h) => typeof h === "string") : [],
       underlines: Array.isArray(p.underlines) ? p.underlines.filter((u) => typeof u === "string") : [],
+      stickyNotes: Array.isArray(p.stickyNotes)
+        ? p.stickyNotes.filter(
+            (n): n is StickyMarginNote =>
+              !!n && typeof n === "object" && typeof n.id === "string" && typeof n.comment === "string",
+          )
+        : [],
       note: typeof p.note === "string" ? p.note : "",
     };
   } catch {
-    return { highlights: [], underlines: [], note: "" };
+    return { highlights: [], underlines: [], stickyNotes: [], note: "" };
   }
 }
 
@@ -40,7 +54,7 @@ interface TextSegment {
 }
 
 /** Split text on highlight and underline phrases cleanly. */
-function splitMarks(text: string, phrases: string[], underlines: string[] = []): TextSegment[] {
+export function splitMarks(text: string, phrases: string[], underlines: string[] = []): TextSegment[] {
   if (!text) return [];
   const len = text.length;
   const isMark = new Uint8Array(len);
@@ -80,12 +94,14 @@ function splitMarks(text: string, phrases: string[], underlines: string[] = []):
 
 /**
  * Reading passage with paragraph letters (A, B, C…), text selection tools
- * (Highlight / Clear / Add note) and a private note box. Marks persist to
- * localStorage immediately and to the server when `onPersist` is provided.
+ * (Highlight / Underline / Clear / Add margin note) and a private Margin Notes drawer.
+ * Marks persist to localStorage immediately and to the server when `onPersist` is provided.
  */
 export default function PassagePane(p: Props) {
   const [marks, setMarks] = useState<PassageMarks>(() => readMarks(p.storageKey, p.partKey));
   const [menu, setMenu] = useState<{ x: number; y: number; text: string } | null>(null);
+  const [newStickyComment, setNewStickyComment] = useState("");
+  const [pendingQuote, setPendingQuote] = useState<string>("");
   const boxRef = useRef<HTMLDivElement | null>(null);
   const persistTimer = useRef<number | null>(null);
   const onPersistRef = useRef(p.onPersist);
@@ -95,6 +111,8 @@ export default function PassagePane(p: Props) {
   useEffect(() => {
     setMarks(readMarks(p.storageKey, p.partKey));
     setMenu(null);
+    setPendingQuote("");
+    setNewStickyComment("");
   }, [p.storageKey, p.partKey]);
 
   useEffect(
@@ -192,10 +210,38 @@ export default function PassagePane(p: Props) {
   function doQuote() {
     if (!menu) return;
     const quote = `> ${menu.text}\n`;
-    commit({ ...marks, note: marks.note ? `${marks.note.replace(/\s+$/, "")}\n${quote}` : quote });
+    const nextHighlights = marks.highlights.includes(menu.text)
+      ? marks.highlights
+      : [...marks.highlights, menu.text];
+    setPendingQuote(menu.text);
+    commit({
+      ...marks,
+      highlights: nextHighlights,
+      note: marks.note ? `${marks.note.replace(/\s+$/, "")}\n${quote}` : quote,
+    });
     window.getSelection()?.removeAllRanges();
     setMenu(null);
     if (!p.noteOpen) p.onToggleNote();
+  }
+
+  function addStickyNote() {
+    const comment = newStickyComment.trim();
+    if (!comment && !pendingQuote) return;
+    const entry: StickyMarginNote = {
+      id: `note-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      quote: pendingQuote,
+      comment: comment || pendingQuote,
+      createdAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
+    const nextSticky = [...(marks.stickyNotes ?? []), entry];
+    commit({ ...marks, stickyNotes: nextSticky });
+    setNewStickyComment("");
+    setPendingQuote("");
+  }
+
+  function removeStickyNote(id: string) {
+    const nextSticky = (marks.stickyNotes ?? []).filter((n) => n.id !== id);
+    commit({ ...marks, stickyNotes: nextSticky });
   }
 
   useEffect(() => {
@@ -225,6 +271,8 @@ export default function PassagePane(p: Props) {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [marks]);
+
+  const stickyList = marks.stickyNotes ?? [];
 
   return (
     <div className="exam-passagewrap">
@@ -289,8 +337,68 @@ export default function PassagePane(p: Props) {
         )}
       </div>
       {p.noteOpen && (
-        <div className="exam-notebox">
-          <p className="exam-notehead">My notes (private — not graded)</p>
+        <div className="exam-notebox" role="region" aria-label="Margin notes and highlights">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <p className="exam-notehead">Margin Notes & Sticky Annotations ({stickyList.length})</p>
+            {marks.highlights.length > 0 && (
+              <button
+                type="button"
+                onClick={() => commit({ ...marks, highlights: [], underlines: [] })}
+                className="exam-btn-ghost exam-btn-xs"
+              >
+                Clear {marks.highlights.length} highlight{marks.highlights.length === 1 ? "" : "s"}
+              </button>
+            )}
+          </div>
+
+          {stickyList.length > 0 && (
+            <ul className="mb-3 space-y-2">
+              {stickyList.map((item) => (
+                <li
+                  key={item.id}
+                  className="rounded-lg border border-[var(--ex-line)] bg-[var(--ex-field)] p-2.5 text-xs"
+                >
+                  {item.quote && (
+                    <blockquote className="mb-1 border-l-2 border-amber-400 pl-2 italic opacity-80">
+                      &ldquo;{item.quote}&rdquo;
+                    </blockquote>
+                  )}
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-medium">{item.comment}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeStickyNote(item.id)}
+                      aria-label="Delete margin note"
+                      className="text-[11px] opacity-60 hover:opacity-100"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="mb-3 flex gap-2">
+            <input
+              type="text"
+              value={newStickyComment}
+              onChange={(e) => setNewStickyComment(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addStickyNote();
+                }
+              }}
+              placeholder={pendingQuote ? `Add sticky note for "${pendingQuote.slice(0, 28)}…"` : "Add a sticky margin note…"}
+              className="exam-input text-xs"
+            />
+            <button type="button" onClick={addStickyNote} className="exam-btn-primary exam-btn-xs shrink-0">
+              + Pin
+            </button>
+          </div>
+
+          <p className="exam-notehead">Scratchpad (private — not graded)</p>
           <textarea
             value={marks.note}
             onChange={(e) => commit({ ...marks, note: e.target.value })}

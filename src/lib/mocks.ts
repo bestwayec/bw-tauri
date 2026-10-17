@@ -99,6 +99,8 @@ export interface MockShapedGroup {
   imageUrl: string | null;
   partNumber: number | null;
   audioDurationSec: number | null;
+  audioStartSec?: number | null;
+  stimulusRef?: string | null;
   audioPlayLimit: number;
   questions: MockShapedQuestion[];
 }
@@ -136,6 +138,7 @@ export interface MockStartResult {
   attemptId: string;
   resumed: boolean;
   mode: MockAttemptMode;
+  simulatorMode?: "cdi" | "dtm" | null;
   startedAt: string;
   deadlineAt: string | null;
   serverTime: string;

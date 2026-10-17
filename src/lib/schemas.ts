@@ -107,6 +107,8 @@ export const MockShapedGroupSchema = z.object({
   imageUrl: nullableString,
   partNumber: nullableNumber,
   audioDurationSec: nullableNumber,
+  audioStartSec: nullableNumber.optional(),
+  stimulusRef: nullableString.optional(),
   audioPlayLimit: z.number(),
   questions: z.array(MockShapedQuestionSchema),
 });
@@ -125,6 +127,7 @@ export const MockStartResultSchema = z.object({
   attemptId: z.string(),
   resumed: z.boolean(),
   mode: z.enum(["practice", "timed"]),
+  simulatorMode: z.enum(["cdi", "dtm"]).nullable().optional(),
   startedAt: z.string(),
   deadlineAt: nullableString,
   serverTime: z.string(),

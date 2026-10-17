@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useBlobMedia } from "@/lib/media";
 import { getVolume, setVolume } from "@/lib/volume";
-import { fmtCountdown } from "./model";
+import { fmtCountdown, parseAudioStartSec } from "./model";
 
 const REVIEW_SEC = 120;
 
@@ -11,16 +11,46 @@ type Props = {
   title: string;
   /** Timed exam: play once, no pause/seek, then a 2:00 review countdown. */
   strict: boolean;
+  /** Optional part timestamp in seconds (or via stimulusRef JSON {"startSec": ...}). */
+  audioStartSec?: number | null;
+  stimulusRef?: string | Record<string, unknown> | null;
   onEnded?: () => void;
   onReviewComplete?: () => void;
 };
 
 /**
+ * Seek an HTMLAudioElement-like object to the resolved start timestamp (if any).
+ * Exported as a pure helper for unit testing.
+ */
+export function seekAudioToPartStart(
+  audio: { currentTime: number } | null | undefined,
+  audioStartSec?: number | null,
+  stimulusRef?: string | Record<string, unknown> | null,
+): number | null {
+  const startSec = parseAudioStartSec(audioStartSec, stimulusRef);
+  if (startSec == null || !audio) return startSec;
+  try {
+    audio.currentTime = startSec;
+  } catch {
+    /* ignore if media not yet seekable */
+  }
+  return startSec;
+}
+
+/**
  * Listening audio engine. Strict mode mirrors the real test (play once,
  * volume only, review countdown, auto-advance hook); practice mode keeps
- * native controls with unlimited replay.
+ * native controls with unlimited replay. Supports single-audio part timestamps.
  */
-export default function ListeningEngine({ src, title, strict, onEnded, onReviewComplete }: Props) {
+export default function ListeningEngine({
+  src,
+  title,
+  strict,
+  audioStartSec,
+  stimulusRef,
+  onEnded,
+  onReviewComplete,
+}: Props) {
   const media = useBlobMedia(src);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [started, setStarted] = useState(false);
@@ -33,12 +63,22 @@ export default function ListeningEngine({ src, title, strict, onEnded, onReviewC
   const onReviewRef = useRef(onReviewComplete);
   onReviewRef.current = onReviewComplete;
 
+  const resolvedStartSec = parseAudioStartSec(audioStartSec, stimulusRef);
+
   useEffect(() => {
     setStarted(false);
     setEnded(false);
     setReviewLeft(null);
     doneRef.current = false;
   }, [src]);
+
+  // When switching parts on a shared single audio track (or when startSec changes),
+  // automatically seek to the part's start timestamp.
+  useEffect(() => {
+    if (resolvedStartSec != null && audioRef.current) {
+      seekAudioToPartStart(audioRef.current, resolvedStartSec);
+    }
+  }, [resolvedStartSec, title, media.url]);
 
   useEffect(() => {
     if (reviewLeft == null) return;
@@ -65,6 +105,9 @@ export default function ListeningEngine({ src, title, strict, onEnded, onReviewC
     setStarted(true);
     try {
       el.volume = getVolume() / 100;
+      if (resolvedStartSec != null) {
+        seekAudioToPartStart(el, resolvedStartSec);
+      }
       await el.play();
     } catch {
       setStarted(false);
@@ -75,6 +118,12 @@ export default function ListeningEngine({ src, title, strict, onEnded, onReviewC
     setEnded(true);
     onEndedRef.current?.();
     if (strict) setReviewLeft(REVIEW_SEC);
+  }
+
+  function handleLoadedMetadata() {
+    if (resolvedStartSec != null && audioRef.current) {
+      seekAudioToPartStart(audioRef.current, resolvedStartSec);
+    }
   }
 
   if (!src) {
@@ -102,9 +151,24 @@ export default function ListeningEngine({ src, title, strict, onEnded, onReviewC
   if (!strict) {
     return (
       <div className="exam-audio">
-        <p className="exam-audio-title">{title}</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="exam-audio-title">{title}</p>
+          {resolvedStartSec != null && (
+            <span className="text-[11px] font-mono opacity-70">
+              Part start: {fmtCountdown(resolvedStartSec * 1000)}
+            </span>
+          )}
+        </div>
         {/* eslint-disable-next-line jsx-a11y/media-has-caption -- captions track below */}
-        <audio controls src={media.url} preload="none" onEnded={handleEnded} className="exam-audio-el">
+        <audio
+          ref={audioRef}
+          controls
+          src={media.url}
+          preload="none"
+          onLoadedMetadata={handleLoadedMetadata}
+          onEnded={handleEnded}
+          className="exam-audio-el"
+        >
           <track kind="captions" />
         </audio>
       </div>
@@ -120,12 +184,20 @@ export default function ListeningEngine({ src, title, strict, onEnded, onReviewC
         src={media.url}
         preload="auto"
         controlsList="nodownload noplaybackrate"
+        onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleEnded}
         onContextMenu={(e) => e.preventDefault()}
       >
         <track kind="captions" />
       </audio>
-      <p className="exam-audio-title">{title}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="exam-audio-title">{title}</p>
+        {resolvedStartSec != null && (
+          <span className="text-[11px] font-mono opacity-70">
+            Part start: {fmtCountdown(resolvedStartSec * 1000)}
+          </span>
+        )}
+      </div>
       <div className="exam-audio-row">
         <button type="button" onClick={() => void playOnce()} disabled={started} className="exam-btn-primary">
           {started ? (ended ? "Played once" : "Playing… (once only)") : "▶ Play audio (once only)"}

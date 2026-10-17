@@ -505,6 +505,7 @@ export default function App() {
                   studentName={student?.name ?? null}
                   onNavigate={navigate}
                   onStart={handleStartExam}
+                  onStartMock={handleStartMock}
                 />
               )}
               {activeRoute === "exams" && (

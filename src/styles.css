@@ -451,19 +451,36 @@ textarea.field {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
-.exam-shell[data-exam-theme="dark"] {
-  --ex-bg: #0b0d08;
-  --ex-pane: #14170f;
-  --ex-pane-2: #1a1e13;
-  --ex-ink: #f2f2ec;
-  --ex-muted: #a3a396;
-  --ex-line: #303321;
+.exam-shell[data-exam-theme="dark"],
+.exam-shell[data-contrast-theme="dark"] {
+  --ex-bg: #09090b;
+  --ex-pane: #09090b;
+  --ex-pane-2: #18181b;
+  --ex-ink: #fef08a;
+  --ex-muted: #fafafa;
+  --ex-line: #3f3f46;
+  --ex-accent: #facc15;
+  --ex-accent-quiet: #fde047;
+  --ex-accent-ink: #09090b;
+  --ex-flag: #fbbf24;
+  --ex-danger: #f87171;
+  --ex-field: #121215;
+}
+
+.exam-shell[data-exam-theme="grey"],
+.exam-shell[data-contrast-theme="grey"] {
+  --ex-bg: #2d3139;
+  --ex-pane: #353a44;
+  --ex-pane-2: #3e4451;
+  --ex-ink: #f8fafc;
+  --ex-muted: #cbd5e1;
+  --ex-line: #4b5563;
   --ex-accent: #34d399;
   --ex-accent-quiet: #6ee7b7;
   --ex-accent-ink: #06251a;
-  --ex-flag: #ffb340;
+  --ex-flag: #fbbf24;
   --ex-danger: #f87171;
-  --ex-field: #0e110a;
+  --ex-field: #262a31;
 }
 
 /* ---- top bar ---- */

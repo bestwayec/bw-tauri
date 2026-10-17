@@ -28,7 +28,15 @@ export const SPLIT_STEP = 5;
  * Which shape the current part takes. A null width means the viewport cannot be
  * measured (tests, SSR): keep the CBT split rather than guessing narrow.
  */
-export function examLayout(hasPassage: boolean, viewportWidth: number | null): ExamLayout {
+export function examLayout(
+  hasPassage: boolean,
+  viewportWidth: number | null,
+  simulatorMode?: "cdi" | "dtm",
+): ExamLayout {
+  if (simulatorMode === "dtm") {
+    if (viewportWidth == null || viewportWidth >= 768) return "split";
+    return hasPassage ? "stacked" : "single";
+  }
   if (!hasPassage) return "single";
   if (viewportWidth == null) return "split";
   return viewportWidth >= EXAM_SPLIT_MIN_WIDTH ? "split" : "stacked";
