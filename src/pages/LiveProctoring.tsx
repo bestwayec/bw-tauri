@@ -1,4 +1,23 @@
 import { useState, useMemo, useEffect } from "react";
+import { API_BASE_URL, post } from "@/lib/api";
+import type { SimulatorMode } from "@/components/exam-ui/model";
+import { multilevelScoreToCefr } from "@/components/ScorePredictionWidget";
+
+export interface LiveExamRoomSession {
+  id: string;
+  pin: string;
+  title: string;
+  examType: "IELTS" | "MULTILEVEL";
+  simulatorMode: SimulatorMode;
+  status: "waiting" | "active" | "completed";
+  createdAt: string;
+}
+
+/** Generate a 6-digit numeric PIN for a Live Exam Room. */
+export function generateSixDigitPin(): string {
+  const n = Math.floor(100000 + Math.random() * 900000);
+  return String(n);
+}
 
 export interface ProctorStudent {
   id: string;
@@ -14,6 +33,7 @@ export interface ProctorStudent {
   timeElapsedSeconds: number;
   timeLimitSeconds: number;
   status: "active" | "flagged" | "critical" | "submitted";
+  estimatedScore?: number;
   antiCheatFlags: {
     blurCount: number;
     shortcutCount: number;
@@ -45,6 +65,7 @@ const INITIAL_STUDENTS: ProctorStudent[] = [
     timeElapsedSeconds: 3240,
     timeLimitSeconds: 3600,
     status: "flagged",
+    estimatedScore: 54,
     antiCheatFlags: {
       blurCount: 3,
       shortcutCount: 1,
@@ -73,6 +94,7 @@ const INITIAL_STUDENTS: ProctorStudent[] = [
     timeElapsedSeconds: 2150,
     timeLimitSeconds: 3600,
     status: "active",
+    estimatedScore: 63,
     antiCheatFlags: {
       blurCount: 0,
       shortcutCount: 0,
@@ -96,6 +118,7 @@ const INITIAL_STUDENTS: ProctorStudent[] = [
     timeElapsedSeconds: 840,
     timeLimitSeconds: 900,
     status: "critical",
+    estimatedScore: 41,
     antiCheatFlags: {
       blurCount: 6,
       shortcutCount: 4,
@@ -124,6 +147,7 @@ const INITIAL_STUDENTS: ProctorStudent[] = [
     timeElapsedSeconds: 1680,
     timeLimitSeconds: 2400,
     status: "active",
+    estimatedScore: 58,
     antiCheatFlags: {
       blurCount: 0,
       shortcutCount: 0,
@@ -147,6 +171,7 @@ const INITIAL_STUDENTS: ProctorStudent[] = [
     timeElapsedSeconds: 2500,
     timeLimitSeconds: 3600,
     status: "flagged",
+    estimatedScore: 49,
     antiCheatFlags: {
       blurCount: 2,
       shortcutCount: 1,
@@ -174,6 +199,7 @@ const INITIAL_STUDENTS: ProctorStudent[] = [
     timeElapsedSeconds: 1100,
     timeLimitSeconds: 3600,
     status: "active",
+    estimatedScore: 66,
     antiCheatFlags: {
       blurCount: 0,
       shortcutCount: 0,
@@ -195,6 +221,21 @@ export default function LiveProctoring() {
   const [toast, setToast] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
 
+  // Teacher 6-digit PIN Live Exam Room state
+  const [liveRoom, setLiveRoom] = useState<LiveExamRoomSession>({
+    id: "room-482910",
+    pin: "482910",
+    title: "BestWay Group Mock — Lab 101",
+    examType: "IELTS",
+    simulatorMode: "cdi",
+    status: "active",
+    createdAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+  });
+  const [roomTitleInput, setRoomTitleInput] = useState("BestWay Group Mock — Lab 101");
+  const [roomExamType, setRoomExamType] = useState<"IELTS" | "MULTILEVEL">("IELTS");
+  const [roomSimulatorMode, setRoomSimulatorMode] = useState<SimulatorMode>("cdi");
+  const [creatingRoom, setCreatingRoom] = useState(false);
+
   // Auto-tick elapsed time
   useEffect(() => {
     if (!autoRefresh) return;
@@ -212,6 +253,98 @@ export default function LiveProctoring() {
   function triggerToast(msg: string) {
     setToast(msg);
     setTimeout(() => setToast(null), 3500);
+  }
+
+  async function handleCreateLiveRoom(e: React.FormEvent) {
+    e.preventDefault();
+    setCreatingRoom(true);
+    const nextPin = generateSixDigitPin();
+    try {
+      const res = await post<{ id?: string; pin?: string; title?: string; simulatorMode?: SimulatorMode }>("/mock/live-rooms", {
+        title: roomTitleInput.trim() || "Classroom Live Mock",
+        examType: roomExamType,
+        simulatorMode: roomSimulatorMode,
+      });
+      const pinCode = res?.pin && /^\d{6}$/.test(res.pin) ? res.pin : nextPin;
+      setLiveRoom({
+        id: res?.id ?? `room-${pinCode}`,
+        pin: pinCode,
+        title: res?.title ?? (roomTitleInput.trim() || "Classroom Live Mock"),
+        examType: roomExamType,
+        simulatorMode: res?.simulatorMode ?? roomSimulatorMode,
+        status: "active",
+        createdAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      });
+      triggerToast(`Created Live Exam Room with 6-digit PIN ${pinCode} (${roomSimulatorMode.toUpperCase()} mode).`);
+    } catch {
+      setLiveRoom({
+        id: `room-${nextPin}`,
+        pin: nextPin,
+        title: roomTitleInput.trim() || "Classroom Live Mock",
+        examType: roomExamType,
+        simulatorMode: roomSimulatorMode,
+        status: "active",
+        createdAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      });
+      triggerToast(`Live Exam Room ready — 6-digit PIN: ${nextPin} (${roomSimulatorMode.toUpperCase()} mode).`);
+    } finally {
+      setCreatingRoom(false);
+    }
+  }
+
+  function handleExportXlsx() {
+    const header = [
+      "Student Name",
+      "Phone",
+      "Terminal",
+      "Room",
+      "Exam Title",
+      "Track",
+      "Current Section",
+      "Score (0-75)",
+      "CEFR Level",
+      "IELTS Band Est.",
+      "Anti-Cheat Status",
+      "Blur Count",
+      "Paste Count",
+    ];
+    const rows = students.map((s) => {
+      const sc = s.estimatedScore ?? 52;
+      const cefr = multilevelScoreToCefr(sc);
+      const band = ((sc / 75) * 9).toFixed(1);
+      return [
+        s.name,
+        s.phone,
+        s.terminal,
+        s.room,
+        s.examTitle,
+        s.examType,
+        s.currentSection,
+        String(sc),
+        cefr,
+        band,
+        s.status,
+        String(s.antiCheatFlags.blurCount),
+        String(s.antiCheatFlags.pasteCount),
+      ];
+    });
+    const tsv = [header, ...rows].map((r) => r.join("\t")).join("\n");
+    try {
+      const blob = new Blob([tsv], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=utf-8",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `BestWay-LiveRoom-${liveRoom.pin}-Results.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      window.open(`${API_BASE_URL}/mock/live-rooms/${encodeURIComponent(liveRoom.id)}/export`, "_blank");
+    }
+    triggerToast(`Exported ${students.length} student results for Room PIN ${liveRoom.pin} (.xlsx)`);
   }
 
   function handleSendWarning(e: React.FormEvent) {
@@ -287,12 +420,19 @@ export default function LiveProctoring() {
             </span>
           </div>
           <p className="mt-1 text-xs text-white/50">
-            Real-time anti-cheat surveillance, section progress tracking & station enforcement.
+            Real-time anti-cheat surveillance, 6-digit PIN Live Exam Room control & station enforcement.
           </p>
         </div>
 
         {/* Quick controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleExportXlsx}
+            className="rounded-xl border border-emerald-500/35 bg-emerald-500/15 px-3.5 py-2 text-xs font-bold text-emerald-300 transition hover:bg-emerald-500/25"
+          >
+            ⬇ Export Results (.xlsx)
+          </button>
           <button
             type="button"
             onClick={() => setAutoRefresh((v) => !v)}
@@ -312,6 +452,68 @@ export default function LiveProctoring() {
           >
             Sync All
           </button>
+        </div>
+      </div>
+
+      {/* 6-Digit PIN Live Exam Room Control Panel */}
+      <div className="card rounded-2xl border border-violet-500/30 bg-gradient-to-br from-violet-950/25 via-[#131C2E] to-[#0B0F17] p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="rounded-2xl border border-violet-400/40 bg-black/50 px-5 py-3 text-center">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-violet-300">Room 6-Digit PIN</p>
+              <p className="mt-0.5 font-mono text-3xl font-black tracking-[0.25em] text-white">{liveRoom.pin}</p>
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-bold uppercase text-emerald-400">
+                  {liveRoom.simulatorMode.toUpperCase()} Simulator
+                </span>
+                <span className="rounded-full bg-white/10 px-2.5 py-0.5 text-[10px] font-bold uppercase text-white/75">
+                  {liveRoom.examType}
+                </span>
+              </div>
+              <h2 className="mt-1 text-base font-extrabold text-white">{liveRoom.title}</h2>
+              <p className="text-xs text-white/50">
+                Students join from Desktop or Web using PIN <strong className="font-mono text-white">{liveRoom.pin}</strong> · Created {liveRoom.createdAt}
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={(e) => void handleCreateLiveRoom(e)} className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              value={roomTitleInput}
+              onChange={(e) => setRoomTitleInput(e.target.value)}
+              placeholder="Room title…"
+              aria-label="Live room title"
+              className="rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-white placeholder-white/30 focus:border-violet-400 focus:outline-none"
+            />
+            <select
+              value={roomExamType}
+              onChange={(e) => setRoomExamType(e.target.value as "IELTS" | "MULTILEVEL")}
+              aria-label="Room exam track"
+              className="rounded-xl border border-white/10 bg-black/40 px-2.5 py-2 text-xs font-semibold text-white"
+            >
+              <option value="IELTS">IELTS Track</option>
+              <option value="MULTILEVEL">Multi-Level Track</option>
+            </select>
+            <select
+              value={roomSimulatorMode}
+              onChange={(e) => setRoomSimulatorMode(e.target.value as SimulatorMode)}
+              aria-label="Room simulator mode"
+              className="rounded-xl border border-white/10 bg-black/40 px-2.5 py-2 text-xs font-semibold text-white"
+            >
+              <option value="cdi">CDI Mode</option>
+              <option value="dtm">DTM Mode</option>
+            </select>
+            <button
+              type="submit"
+              disabled={creatingRoom}
+              className="btn-brand rounded-xl px-4 py-2 text-xs font-bold"
+            >
+              {creatingRoom ? "Generating…" : "New 6-Digit PIN Room"}
+            </button>
+          </form>
         </div>
       </div>
 

@@ -16,6 +16,7 @@ import {
   type MockStartResult,
 } from "@/lib/mocks";
 import MockSectionPicker, { type MockStartChoice } from "@/components/exam-ui/MockSectionPicker";
+import LiveExamPinJoin from "@/components/LiveExamPinJoin";
 
 type Props = {
   studentName: string | null;
@@ -176,6 +177,10 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand" aria-hidden />
           Auto-sync
         </span>
+      </div>
+
+      <div className="mt-4">
+        <LiveExamPinJoin onJoinedMock={(mock, start) => onStartMock(mock, start)} />
       </div>
 
       {program && <h2 className="mt-4 text-lg font-bold">{program === 'IELTS' ? 'IELTS exams' : 'Multilevel exams'}</h2>}

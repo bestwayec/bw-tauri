@@ -14,7 +14,16 @@ import PassagePane, { type PassageMarks } from "./PassagePane";
 import QuestionGroup from "./QuestionGroup";
 import SubmitConfirmModal from "./SubmitConfirmModal";
 import TopBar, { type SaveState } from "./TopBar";
-import { isAnswered, mergeAudioDone, nextUnanswered, remainingMs, serverOffsetMs, type UIPart } from "./model";
+import {
+  isAnswered,
+  mergeAudioDone,
+  nextUnanswered,
+  remainingMs,
+  serverOffsetMs,
+  type ContrastTheme,
+  type SimulatorMode,
+  type UIPart,
+} from "./model";
 import { answerRuleHint, exceedsAnswerConstraint, type AnswerRule } from '@/lib/objective-answers';
 import type { CheatScope } from '@/lib/cheat';
 import { releaseKioskLockdown, useLockdown, type LockdownCheatEvent } from '@/hooks/useLockdown';
@@ -46,6 +55,8 @@ export interface ExamRunnerProps {
   sectionTitle: string;
   skill: string;
   timed: boolean;
+  /** Simulator layout & palette mode: 'cdi' (IELTS CDI) or 'dtm' (Multi-Level DTM). */
+  simulatorMode?: SimulatorMode;
   serverTime: string;
   /** Server ISO deadline for this section, or null when untimed. */
   deadlineIso: string | null;
@@ -190,7 +201,11 @@ export default function ExamRunner(p: ExamRunnerProps) {
   const [flags, setFlags] = useState<Record<string, boolean>>(() => ({}));
   const [currentQ, setCurrentQ] = useState(0);
   const [fontSize, setFontSize] = useState(17);
-  const [dark, setDark] = useState(false);
+  const [contrastTheme, setContrastTheme] = useState<ContrastTheme>("standard");
+  const dark = contrastTheme === "dark";
+  const [simulatorMode, setSimulatorMode] = useState<SimulatorMode>(
+    () => p.simulatorMode ?? (versioned ? "dtm" : "cdi"),
+  );
   const [helpOpen, setHelpOpen] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
   const [volume, setVolumeState] = useState(() => getVolume());
@@ -321,8 +336,8 @@ export default function ExamRunner(p: ExamRunnerProps) {
   const viewportWidth = useViewportWidth();
   // Reading gets the familiar two-pane CBT view on a wide window, and stacks the
   // passage above the questions when the window is too narrow for two readable
-  // columns. Listening (no passage) is always one column.
-  const layout = examLayout(!!part?.passageText, viewportWidth);
+  // columns. In DTM mode, Listening/Reading both use vertical split-screen.
+  const layout = examLayout(!!part?.passageText, viewportWidth, simulatorMode);
   const split = layout === "split";
 
   // ---- autosave (debounced per answer, bulk flush, offline queue) ----
@@ -568,7 +583,12 @@ export default function ExamRunner(p: ExamRunnerProps) {
   const cardQuestions = gapped ? part.questions.filter((q) => !gappedNums.has(q.number)) : part.questions;
 
   return (
-    <div className="exam-shell" data-exam-theme={dark ? "dark" : "light"}>
+    <div
+      className="exam-shell"
+      data-exam-theme={contrastTheme === "standard" ? "light" : contrastTheme}
+      data-contrast-theme={contrastTheme}
+      data-simulator-mode={simulatorMode}
+    >
       <TopBar
         back={p.onBack ? { label: "Sections", onClick: p.onBack } : null}
         candidateName={p.candidateName}
@@ -582,7 +602,13 @@ export default function ExamRunner(p: ExamRunnerProps) {
         fontSize={fontSize}
         onFontSize={(px) => setFontSize(Math.min(20, Math.max(14, px)))}
         dark={dark}
-        onToggleDark={() => setDark((d) => !d)}
+        onToggleDark={() => setContrastTheme((c) => (c === "dark" ? "standard" : "dark"))}
+        contrastTheme={contrastTheme}
+        onContrastThemeChange={setContrastTheme}
+        simulatorMode={simulatorMode}
+        onSimulatorModeChange={setSimulatorMode}
+        noteOpen={noteOpen}
+        onToggleNote={() => setNoteOpen((v) => !v)}
         saveState={saveState}
         onHelp={() => setHelpOpen(true)}
         onExit={p.onExit}
@@ -607,7 +633,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
                 </button>
               </div>
               <div className="exam-pane-scroll">
-                {part.passageText && (
+                {part.passageText ? (
                   <PassagePane
                     partKey={part.key}
                     passageText={part.passageText}
@@ -617,6 +643,23 @@ export default function ExamRunner(p: ExamRunnerProps) {
                     noteOpen={noteOpen}
                     onToggleNote={() => setNoteOpen((v) => !v)}
                   />
+                ) : (
+                  <div className="space-y-3">
+                    {part.instructions && (
+                      <p className="exam-group-instr" style={{ fontSize }}>
+                        {part.instructions}
+                      </p>
+                    )}
+                    <PassagePane
+                      partKey={part.key}
+                      passageText={part.instructions ?? `${part.label} stimulus & margin notes.`}
+                      fontSize={fontSize}
+                      storageKey={p.storageKey}
+                      onPersist={p.persistMarks}
+                      noteOpen={noteOpen}
+                      onToggleNote={() => setNoteOpen((v) => !v)}
+                    />
+                  </div>
                 )}
               </div>
             </div>
@@ -736,6 +779,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
         submitting={submitting}
         submitLabel={p.submitLabel}
         onSubmit={requestSubmit}
+        simulatorMode={simulatorMode}
       />
 
       <SubmitConfirmModal
@@ -802,6 +846,8 @@ export function PartQuestions(props: {
           src={part.audioUrl}
           title={part.title ?? part.label}
           strict={part.strictAudio}
+          {...(part.audioStartSec != null ? { audioStartSec: part.audioStartSec } : {})}
+          {...(part.stimulusRef != null ? { stimulusRef: part.stimulusRef } : {})}
         />
       )}
       {part.imageUrl && !part.questions.some((q) => q.kind === "map_label") && (

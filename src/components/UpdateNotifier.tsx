@@ -96,27 +96,44 @@ export default function UpdateNotifier({ update, onClose, deferInstall }: Props)
     // Prefer the signed in-place updater; keep manual open as fallback.
     try {
       setStatus("checking");
+      console.log("[updater] Checking for desktop updates...");
       const updater = await import("@tauri-apps/plugin-updater");
       const found = await withTimeout(updater.check(), UPDATER_CHECK_TIMEOUT_MS);
+      console.log("[updater] Updater check returned:", found);
       if (found) {
         setStatus("downloading");
+        console.log(`[updater] Initiating self-replace update to version ${found.version}...`);
+        let total = 0;
+        let downloaded = 0;
         await found.downloadAndInstall((e) => {
-          if (e.event === "Started") setProgress(0);
-          else if (e.event === "Progress") {
-            try {
-              const chunk = (e.data as { chunkLength?: number }).chunkLength ?? 0;
-              setProgress((p) => Math.min(99, (p ?? 0) + Math.max(1, Math.round(chunk / 1024))));
-            } catch {
-              /* ignore */
+          if (e.event === "Started") {
+            total = (e.data as { contentLength?: number })?.contentLength ?? 0;
+            setProgress(0);
+            console.log(`[updater] Download started (${total} bytes)`);
+          } else if (e.event === "Progress") {
+            const chunk = (e.data as { chunkLength?: number })?.chunkLength ?? 0;
+            downloaded += chunk;
+            if (total > 0) {
+              const pct = Math.min(99, Math.round((downloaded / total) * 100));
+              setProgress(pct);
+            } else {
+              setProgress((p) => Math.min(99, (p ?? 0) + 1));
             }
-          } else if (e.event === "Finished") setProgress(100);
+          } else if (e.event === "Finished") {
+            setProgress(100);
+            console.log("[updater] Download completed successfully");
+          }
         });
         setStatus("installing");
+        console.log("[updater] Installing update and relaunching app...");
         const proc = await import("@tauri-apps/plugin-process");
         await proc.relaunch();
         return;
+      } else {
+        console.log("[updater] No newer version detected by in-place updater, checking fallback...");
       }
-    } catch {
+    } catch (err) {
+      console.warn("[updater] In-place updater check or download failed:", err);
       // Not in Tauri runtime, updater disabled, check failed or timed out —
       // fall through to the manual download path below.
     }

@@ -11,8 +11,8 @@ android {
         applicationId "uz.bestwayec.app"
         minSdk 24
         targetSdk 34
-        versionCode 700
-        versionName "0.7.0"
+        versionCode 710
+        versionName "0.7.1"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 

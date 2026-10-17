@@ -19,6 +19,7 @@ beforeEach(() => {
 
 describe("bundled desktop version", () => {
   it("matches package.json so the app never compares itself against an older release", () => {
+    expect(APP_VERSION).toBe("0.8.0");
     expect(APP_VERSION).toBe(pkg.version);
     // The manual-installer channel must point at this exact release.
     expect(DESKTOP_INSTALLER_VERSION).toBe(pkg.version);

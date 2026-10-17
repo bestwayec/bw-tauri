@@ -9,9 +9,11 @@ import {
   type StartResult,
   type TestListItem,
 } from "@/lib/tests";
-import { listMockExams } from "@/lib/mocks";
+import { listMockExams, type MockExamListItem, type MockSkill, type MockStartResult } from "@/lib/mocks";
 import { ExamTracks, usePrograms } from '@/components/ExamTracks';
 import MultilevelHistory from '@/components/MultilevelHistory';
+import ScorePredictionWidget from '@/components/ScorePredictionWidget';
+import LiveExamPinJoin from '@/components/LiveExamPinJoin';
 import { belongsToProgram, programQueryKey } from '@/lib/programs';
 import { useSessionStore } from '@/lib/session-store';
 
@@ -19,6 +21,7 @@ type Props = {
   studentName: string | null;
   onNavigate: (route: Route) => void;
   onStart: (test: TestListItem, start: StartResult) => void;
+  onStartMock?: (mock: MockExamListItem, start: MockStartResult, section?: MockSkill) => void;
 };
 
 function greeting(name: string | null): string {
@@ -46,7 +49,7 @@ const OVERVIEW_QUERY_OPTS = {
   retryDelay: (attempt: number) => Math.min(1_000 * 2 ** attempt, 15_000),
 } as const;
 
-export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
+export default function Dashboard({ studentName, onNavigate, onStart, onStartMock }: Props) {
   const programs = usePrograms();
   const program = programs.data?.activeProgram;
   const userId = useSessionStore((state) => state.profile?.id);
@@ -186,7 +189,7 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
               {greeting(studentName)}
             </h1>
             <p className="mt-1 text-sm text-white/50">
-              Practice levels A1–C1 · Full Mock estimated evaluation: Below B1, B1, B2 or C1.
+              Practice levels A1–C1 · Full Mock estimated evaluation: A2, B1, B2 or C1.
             </p>
           </div>
           <button
@@ -198,6 +201,17 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
         </div>
 
         <ExamTracks />
+
+        <LiveExamPinJoin
+          onJoinedMock={onStartMock}
+          onNavigateExams={() => onNavigate("exams")}
+        />
+
+        <ScorePredictionWidget
+          program="MULTILEVEL"
+          attempts={attempts}
+          onPracticeWeakSkill={() => onNavigate("exams")}
+        />
 
         {/* Hero Full Mock Banner */}
         <div className="relative overflow-hidden rounded-2xl border border-brand/40 bg-gradient-to-br from-brand/15 via-[#162032] to-[#0B0F17] p-6 shadow-lg">
@@ -305,6 +319,18 @@ export default function Dashboard({ studentName, onNavigate, onStart }: Props) {
             Browse exams →
           </button>
         </div>
+      </div>
+
+      <div className="mt-5 space-y-4">
+        <LiveExamPinJoin
+          onJoinedMock={onStartMock}
+          onNavigateExams={() => onNavigate("exams")}
+        />
+        <ScorePredictionWidget
+          program="IELTS"
+          attempts={attempts}
+          onPracticeWeakSkill={() => onNavigate("exams")}
+        />
       </div>
 
       {loading ? (
