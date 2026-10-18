@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { get } from "@/lib/api";
+import { useAssessmentOverview } from "@/lib/assessment-overview";
 import type { AttemptSummary } from "@/lib/tests";
 import type { ExamProgram } from "@/lib/programs";
 
@@ -152,39 +153,62 @@ function normalizeServerPrediction(
   fallback: ScorePredictionPayload,
 ): ScorePredictionPayload {
   if (!raw || typeof raw !== "object") return fallback;
+  const rawIelts = (raw.ielts ?? {}) as Record<string, unknown>;
+  const rawMl = (raw.multilevel ?? {}) as Record<string, unknown>;
+
   const band =
-    typeof raw.predictedBand === "number"
-      ? raw.predictedBand
-      : typeof raw.predicted_band === "number"
-        ? raw.predicted_band
-        : fallback.predictedBand;
+    typeof rawIelts.predictedBand === "number"
+      ? rawIelts.predictedBand
+      : typeof raw.predictedBand === "number"
+        ? raw.predictedBand
+        : typeof raw.predicted_band === "number"
+          ? raw.predicted_band
+          : fallback.predictedBand;
+
   const mlScore =
-    typeof raw.predictedMultilevelScore === "number"
-      ? raw.predictedMultilevelScore
-      : typeof raw.predicted_multilevel_score === "number"
-        ? raw.predicted_multilevel_score
-        : typeof raw.multilevelScore === "number"
-          ? raw.multilevelScore
-          : bandToMultilevelScore(band);
-  const cefrLevel = multilevelScoreToCefr(mlScore);
+    typeof rawMl.predictedScore === "number"
+      ? rawMl.predictedScore
+      : typeof raw.predictedMultilevelScore === "number"
+        ? raw.predictedMultilevelScore
+        : typeof raw.predicted_multilevel_score === "number"
+          ? raw.predicted_multilevel_score
+          : typeof raw.multilevelScore === "number"
+            ? raw.multilevelScore
+            : bandToMultilevelScore(band);
+
+  const cefrLevel =
+    typeof rawMl.cefrLevel === "string" && ["A2", "B1", "B2", "C1"].includes(rawMl.cefrLevel)
+      ? (rawMl.cefrLevel as CefrPredictedLevel)
+      : multilevelScoreToCefr(mlScore);
+
   const targetBand =
-    typeof raw.targetBand === "number"
-      ? raw.targetBand
-      : typeof raw.target_band === "number"
-        ? raw.target_band
-        : fallback.targetBand;
+    typeof rawIelts.targetBand === "number"
+      ? rawIelts.targetBand
+      : typeof raw.targetBand === "number"
+        ? raw.targetBand
+        : typeof raw.target_band === "number"
+          ? raw.target_band
+          : fallback.targetBand;
+
   const targetMultilevelScore =
-    typeof raw.targetMultilevelScore === "number"
-      ? raw.targetMultilevelScore
-      : typeof raw.target_multilevel_score === "number"
-        ? raw.target_multilevel_score
-        : fallback.targetMultilevelScore;
+    typeof rawMl.targetScore === "number"
+      ? rawMl.targetScore
+      : typeof raw.targetMultilevelScore === "number"
+        ? raw.targetMultilevelScore
+        : typeof raw.target_multilevel_score === "number"
+          ? raw.target_multilevel_score
+          : fallback.targetMultilevelScore;
+
   const targetProgressPct =
-    typeof raw.targetProgressPct === "number"
-      ? raw.targetProgressPct
-      : typeof raw.target_progress_pct === "number"
-        ? raw.target_progress_pct
-        : Math.min(100, Math.max(5, Math.round((mlScore / targetMultilevelScore) * 100)));
+    typeof rawIelts.targetProgressPercent === "number"
+      ? rawIelts.targetProgressPercent
+      : typeof rawMl.targetProgressPercent === "number"
+        ? rawMl.targetProgressPercent
+        : typeof raw.targetProgressPct === "number"
+          ? raw.targetProgressPct
+          : typeof raw.target_progress_pct === "number"
+            ? raw.target_progress_pct
+            : Math.min(100, Math.max(5, Math.round((mlScore / targetMultilevelScore) * 100)));
 
   const rawWeak = Array.isArray(raw.weakModules)
     ? raw.weakModules
@@ -207,7 +231,14 @@ function normalizeServerPrediction(
           return {
             module: String(obj.module ?? obj.title ?? obj.name ?? "Reading Matching"),
             skill: (obj.skill as "reading" | "listening" | "writing" | "speaking") ?? "reading",
-            accuracyPct: typeof obj.accuracyPct === "number" ? obj.accuracyPct : typeof obj.accuracy === "number" ? obj.accuracy : 60,
+            accuracyPct:
+              typeof obj.accuracyPercent === "number"
+                ? obj.accuracyPercent
+                : typeof obj.accuracyPct === "number"
+                  ? obj.accuracyPct
+                  : typeof obj.accuracy === "number"
+                    ? obj.accuracy
+                    : 60,
             recommendation: String(obj.recommendation ?? obj.tip ?? "Practice targeted timed drills."),
           };
         })
@@ -240,6 +271,7 @@ interface Props {
 
 export default function ScorePredictionWidget({ program, attempts, onPracticeWeakSkill }: Props) {
   const fallback = computeFallbackPrediction(attempts, program);
+  const overviewQuery = useAssessmentOverview();
 
   const query = useQuery({
     queryKey: ["mock-prediction-me", program, attempts?.length ?? 0],
@@ -255,7 +287,10 @@ export default function ScorePredictionWidget({ program, attempts, onPracticeWea
     retry: 1,
   });
 
-  const data = query.data ?? fallback;
+  const livePrediction = overviewQuery.data?.prediction
+    ? normalizeServerPrediction(overviewQuery.data.prediction as unknown as Record<string, unknown>, fallback)
+    : query.data;
+  const data = livePrediction ?? fallback;
   const chartPoints =
     data.history.length > 0
       ? data.history

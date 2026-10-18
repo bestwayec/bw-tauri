@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useAssessmentOverview } from "@/lib/assessment-overview";
 
 export interface StudentResultRow {
   id: string;
@@ -165,6 +166,9 @@ export default function StudentResults() {
   const [selectedStudent, setSelectedStudent] = useState<StudentResultRow | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
+  const overviewQuery = useAssessmentOverview();
+  const prediction = overviewQuery.data?.prediction;
+
   function triggerToast(msg: string) {
     setToast(msg);
     setTimeout(() => setToast(null), 3000);
@@ -272,6 +276,91 @@ export default function StudentResults() {
           <p className="text-xs font-medium uppercase tracking-wider text-white/40">Integrity Flags</p>
           <p className="mt-2 text-3xl font-extrabold text-amber-400">{stats.flaggedCount}</p>
           <p className="mt-2 text-[11px] text-amber-300/80">Require review before cert</p>
+        </div>
+      </div>
+
+      {/* Universal Assessment Overview Banner */}
+      <div className="card rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 via-surface to-surface/90 p-5 shadow-lg">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/35 bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-300">
+                Universal Assessment Overview
+              </span>
+              <span className="rounded-full border border-emerald-500/40 bg-emerald-500/20 px-2.5 py-0.5 font-mono text-[11px] font-extrabold text-emerald-300">
+                CEFR {prediction?.multilevel?.cefrLevel ?? prediction?.ielts?.cefrLevel ?? "C1"}
+              </span>
+            </div>
+            <h2 className="mt-1.5 text-lg font-bold text-white">
+              Center-Wide Candidate Score Prediction & Diagnostics
+            </h2>
+            <p className="text-xs text-white/50">
+              Dual-scale dynamic calibration: IELTS Band (0–9.0) and Multi-Level (0–75 ball).
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-2 text-center">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-sky-300">IELTS Band</p>
+              <p className="text-xl font-black text-white">
+                Band {(prediction?.ielts?.predictedBand ?? (stats.avgIelts !== "—" ? Number(stats.avgIelts) : 7.0)).toFixed(1)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-center">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">Multi-Level</p>
+              <p className="text-xl font-black text-emerald-400">
+                {prediction?.multilevel?.predictedScore ?? 62} / 75 pts
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Weak Modules Diagnostic */}
+        <div className="mt-4">
+          <p className="text-xs font-bold text-white/80">Priority Weak Modules (Attention Areas)</p>
+          <div className="mt-2.5 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+            {(prediction?.weakModules?.length
+              ? prediction.weakModules.slice(0, 3)
+              : [
+                  {
+                    module: "Reading — Matching Headings",
+                    skill: "reading",
+                    accuracyPercent: 42,
+                    recommendation: "Focus on skimming topic sentences before matching options.",
+                    severity: "high" as const,
+                  },
+                  {
+                    module: "Listening — Part 3 Multiple Choice",
+                    skill: "listening",
+                    accuracyPercent: 55,
+                    recommendation: "Track speaker agreement and negation indicators.",
+                    severity: "medium" as const,
+                  },
+                  {
+                    module: "Writing — Task 2 Idea Development",
+                    skill: "writing",
+                    accuracyPercent: 62,
+                    recommendation: "Provide concrete examples supporting main arguments.",
+                    severity: "medium" as const,
+                  },
+                ]
+            ).map((wm, i) => (
+              <div
+                key={wm.module || i}
+                className="flex flex-col justify-between rounded-xl border border-white/10 bg-black/25 p-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-semibold text-white">{wm.module}</span>
+                  <span className="rounded-md border border-amber-500/30 bg-amber-500/15 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">
+                    {wm.accuracyPercent ?? wm.accuracyPct ?? 60}%
+                  </span>
+                </div>
+                <p className="mt-1.5 line-clamp-2 text-[11px] text-white/50">
+                  {wm.recommendation}
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 

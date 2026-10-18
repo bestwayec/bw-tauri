@@ -40,7 +40,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val BASE_URL = "https://bestwayec.uz/?platform=mobile_app"
-        private const val USER_AGENT_SUFFIX = " BestWayApp/0.7.0 BestWay-Android/0.7.0 MobileApp"
+        private const val USER_AGENT_SUFFIX = " BestWayApp/0.8.2 BestWay-Android/0.8.2 MobileApp"
         private const val REQUEST_RECORD_AUDIO = 1001
     }
 
@@ -49,7 +49,7 @@ class MainActivity : AppCompatActivity() {
         fun isMobileApp(): Boolean = true
 
         @android.webkit.JavascriptInterface
-        fun getVersion(): String = "0.7.0"
+        fun getVersion(): String = "0.8.2"
     }
 
     private lateinit var swipeRefresh: SwipeRefreshLayout
@@ -124,7 +124,42 @@ class MainActivity : AppCompatActivity() {
         requestAudioPermission()
 
         if (savedInstanceState == null) {
-            webView.loadUrl(BASE_URL)
+            val deepLinkUri = intent?.data
+            val scheme = deepLinkUri?.scheme?.lowercase()
+            if (deepLinkUri != null && (scheme == "bestway-exam" || scheme == "bestway")) {
+                handleDeepLink(intent)
+            } else {
+                webView.loadUrl(BASE_URL)
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleDeepLink(intent)
+    }
+
+    private fun handleDeepLink(intent: Intent?) {
+        val data = intent?.data ?: return
+        val scheme = data.scheme?.lowercase() ?: return
+        if (scheme == "bestway-exam" || scheme == "bestway") {
+            val path = data.path ?: ""
+            if (path == "/auth/callback" || path.endsWith("/auth/callback")) {
+                val code = data.getQueryParameter("code")
+                val token = data.getQueryParameter("token")
+                val targetParam = when {
+                    !code.isNullOrEmpty() -> "auth_code=$code"
+                    !token.isNullOrEmpty() -> "token=$token"
+                    else -> null
+                }
+                val redirectUrl = if (targetParam != null) {
+                    "https://bestwayec.uz/?$targetParam"
+                } else {
+                    "https://bestwayec.uz/?platform=mobile_app"
+                }
+                webView.loadUrl(redirectUrl)
+            }
         }
     }
 
@@ -328,6 +363,22 @@ class MainActivity : AppCompatActivity() {
         if (url == null) return false
         val uri = Uri.parse(url)
         val scheme = uri.scheme?.lowercase() ?: ""
+
+        if (url.contains("accounts.google.com") || url.contains("oauth2.googleapis.com")) {
+            return try {
+                val intent = Intent(Intent.ACTION_VIEW, uri)
+                startActivity(intent)
+                true
+            } catch (e: Exception) {
+                false
+            }
+        }
+
+        if (scheme == "bestway-exam" || scheme == "bestway") {
+            handleDeepLink(Intent(Intent.ACTION_VIEW, uri))
+            return true
+        }
+
         if (scheme == "tel" || scheme == "mailto" || scheme == "tg" ||
             url.startsWith("https://t.me/") || url.startsWith("http://t.me/") ||
             (scheme != "http" && scheme != "https")

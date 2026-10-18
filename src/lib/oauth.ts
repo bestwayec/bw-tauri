@@ -22,7 +22,12 @@ import { ensureDeviceId } from "./session";
 import { isSafeHttpUrl, secureGetItemAsync, secureRemoveItemAsync, secureSetItemAsync } from "./secure-storage";
 
 export const DESKTOP_SCHEME = "bestway-exam";
+export const ALLOWED_SCHEMES = ["bestway-exam", "bestway"] as const;
 export const DESKTOP_CALLBACK = `${DESKTOP_SCHEME}://auth/callback`;
+export const ALLOWED_CALLBACKS = [
+  "bestway-exam://auth/callback",
+  "bestway://auth/callback",
+] as const;
 
 /** Web origin — NEVER derived from the API URL (api.bestwayec.uz vs bestwayec.uz differ in prod).
  * Production default is https://bestwayec.uz (override with VITE_WEB_URL for local dev). */
@@ -163,18 +168,20 @@ export async function clearBrowserLoginState(): Promise<void> {
 }
 
 export async function buildAuthorizeUrl(s: BrowserLoginState): Promise<string> {
-  const q = new URLSearchParams({
+  const challenge = await codeChallenge(s.verifier);
+  const desktopParams = new URLSearchParams({
     device: s.deviceId,
     state: s.state,
-    code_challenge: await codeChallenge(s.verifier),
+    code_challenge: challenge,
     code_challenge_method: "S256",
     redirect: DESKTOP_CALLBACK,
   });
+  const nextPath = `/oauth/desktop?${desktopParams.toString()}`;
   const base = webBaseUrl();
   if (!isSafeHttpUrl(`${base}/`)) {
     throw new Error("Web URL is not safe (must be https:// or http://localhost)");
   }
-  return `${base}/oauth/desktop?${q.toString()}`;
+  return `${base}/login?next=${encodeURIComponent(nextPath)}`;
 }
 
 function isTauriRuntime(): boolean {
@@ -305,26 +312,29 @@ export function parseAuthCallbackUrl(url: string): AuthCallbackParams {
 
 /**
  * True only for our OAuth callback, not any URL with our scheme.
- * Accepts `bestway-exam://auth/callback?...` and the opaque
- * `bestway-exam:auth/callback?...` shape some platforms deliver.
+ * Accepts `bestway-exam://auth/callback?...` or `bestway://auth/callback?...`
+ * and the opaque `bestway-exam:auth/callback?...` / `bestway:auth/callback?...` shapes.
  */
 export function isDesktopCallbackUrl(url: string): boolean {
   try {
     const normalized = url.replace(/^([a-z][a-z0-9+.-]*):(?!\/\/)/i, "$1://");
     const u = new URL(normalized);
+    const protocol = u.protocol.replace(/:$/, "").toLowerCase();
+    const isAllowedScheme = protocol === "bestway-exam" || protocol === "bestway";
     return (
-      u.protocol.replace(/:$/, "").toLowerCase() === DESKTOP_SCHEME.toLowerCase() &&
+      isAllowedScheme &&
       `${u.host}${u.pathname}`.replace(/\/+$/, "").toLowerCase() === "auth/callback"
     );
   } catch {
-    return url.trim().toLowerCase().startsWith(`${DESKTOP_SCHEME.toLowerCase()}:`);
+    const lower = url.trim().toLowerCase();
+    return lower.startsWith("bestway-exam:") || lower.startsWith("bestway:");
   }
 }
 
 /**
  * Manual-paste helper: accepts either the FULL callback URL
- * (`bestway-exam://auth/callback?code=..&state=..`) or a RAW code
- * (what the web "copy code" button puts on the clipboard).
+ * (`bestway-exam://auth/callback?code=..&state=..` or `bestway://auth/callback?code=..&state=..`)
+ * or a RAW code (what the web "copy code" button puts on the clipboard).
  * Raw codes are combined with the stored `state` for CSRF protection.
  */
 export function parseManualCallbackInput(
@@ -333,7 +343,9 @@ export function parseManualCallbackInput(
 ): AuthCallbackParams {
   const trimmed = input.trim();
   if (!trimmed) return { error: "Paste the full callback URL from the browser first." };
-  if (!trimmed.includes("://") && !trimmed.toLowerCase().startsWith(`${DESKTOP_SCHEME}:`)) {
+  const lower = trimmed.toLowerCase();
+  const isScheme = lower.startsWith("bestway-exam:") || lower.startsWith("bestway:");
+  if (!trimmed.includes("://") && !isScheme) {
     // Raw code paste — web shows code-only fallback.
     const code = trimmed.split(/\s+/)[0];
     if (!code) return { error: "No code in callback URL." };

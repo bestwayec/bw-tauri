@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { API_BASE_URL, clearSession, isApiMisconfigured, login, normalizePhone } from "@/lib/api";
 import {
-  buildAuthorizeUrl,
   clearBrowserLoginState,
   listenDeepLink,
   listenSingleInstance,
-  newBrowserLoginState,
-  openInBrowser,
   parseAuthCallbackUrl,
+  parseManualCallbackInput,
+  startBrowserLogin,
   exchangeCode,
   readBrowserLoginState,
   readInitialDeepLink,
@@ -38,6 +37,7 @@ export default function Login({ onLogin }: Props) {
   // Presentation-only view state: OAuth-first, manual form hidden until asked.
   const [mode, setMode] = useState<"oauth" | "manual">("oauth");
   const [showPw, setShowPw] = useState(false);
+  const [manualCode, setManualCode] = useState("");
 
   const pendingRef = useRef<BrowserLoginState | null>(null);
   const onLoginRef = useRef(onLogin);
@@ -172,28 +172,72 @@ export default function Login({ onLogin }: Props) {
   async function handleBrowser() {
     setBusy("browser");
     setError(null);
-    let s: BrowserLoginState;
-    let url: string;
     try {
-      s = await newBrowserLoginState();
-      url = await buildAuthorizeUrl(s);
-    } catch {
-      setError("Could not start browser login. Check connection and try again.");
-      setBusy("idle");
-      return;
-    }
-    // Sync ref immediately — a fast deep link may arrive before re-render.
-    pendingRef.current = s;
-    setPending(s);
-    try {
-      await openInBrowser(url);
-      // busy stays "browser" until the callback (or cancel) resolves it.
+      const { state: s } = await startBrowserLogin();
+      pendingRef.current = s;
+      setPending(s);
     } catch (e) {
       void clearBrowserLoginState();
       pendingRef.current = null;
       setPending(null);
       const reason = e instanceof Error && e.message ? ` (${e.message})` : "";
       setError(`Could not open the browser. Please try again.${reason}`);
+      setBusy("idle");
+    }
+  }
+
+  async function handleManualCode(e?: React.FormEvent) {
+    if (e) e.preventDefault();
+    const trimmed = manualCode.trim();
+    if (!trimmed) {
+      setError("Saytdagi 6 xonali kodni kiriting.");
+      return;
+    }
+    const s = pendingRef.current ?? (await readBrowserLoginState());
+    const p = parseManualCallbackInput(trimmed, s);
+    if (p.error && !p.code) {
+      setError(p.error);
+      return;
+    }
+    if (!s) {
+      setError("Login session expired. Start browser login again.");
+      return;
+    }
+    if (!p.code) {
+      setError(p.error ?? "No code in callback input.");
+      return;
+    }
+    setBusy("exchange");
+    setError(null);
+    try {
+      const session = await exchangeCode(p.code, s.verifier, s.deviceId);
+      await clearBrowserLoginState();
+      const role = String((session.user as { role?: unknown } | undefined)?.role ?? "");
+      const ALLOWED_ROLES = ["student", "teacher", "admin", "super_admin"];
+      if (!ALLOWED_ROLES.includes(role)) {
+        await clearSession();
+        setError(`Access denied: unauthorized role (${role || "none"}).`);
+        setBusy("idle");
+        return;
+      }
+      const id = (session.user?.id as string | undefined) ?? null;
+      if (!id) {
+        await clearSession();
+        setError("Sign-in failed. Please try again.");
+        setBusy("idle");
+        return;
+      }
+      const name =
+        typeof (session.user as unknown as { name?: unknown })?.name === "string"
+          ? ((session.user as unknown as { name: string }).name as string)
+          : null;
+      const phone =
+        typeof (session.user as unknown as { phone?: unknown })?.phone === "string"
+          ? ((session.user as unknown as { phone: string }).phone as string)
+          : null;
+      onLoginRef.current({ id, name, phone, role });
+    } catch (err) {
+      setError(friendlyExchangeError(err));
       setBusy("idle");
     }
   }
@@ -320,6 +364,31 @@ export default function Login({ onLogin }: Props) {
 
                 {error && <InlineError message={error} />}
 
+                {/* Manual Code Entry Fallback */}
+                <form onSubmit={handleManualCode} className="mt-5 rounded-2xl border border-white/10 bg-black/30 p-4 text-left">
+                  <label htmlFor="manual-code-active" className="block text-xs font-semibold text-white/80">
+                    Deep link ochilmadimi? Saytdagi 6 xonali kodni kiriting:
+                  </label>
+                  <div className="mt-2.5 flex gap-2">
+                    <input
+                      id="manual-code-active"
+                      type="text"
+                      value={manualCode}
+                      onChange={(e) => setManualCode(e.target.value)}
+                      placeholder="6 xonali kod yoki havola"
+                      className="field h-11 flex-1 rounded-xl px-3 font-mono text-sm tracking-wide uppercase text-white"
+                      disabled={busy === "exchange"}
+                    />
+                    <button
+                      type="submit"
+                      disabled={busy === "exchange" || !manualCode.trim()}
+                      className="btn-brand h-11 rounded-xl px-4 text-xs font-bold shrink-0 disabled:opacity-50"
+                    >
+                      {busy === "exchange" ? "Tekshirilmoqda..." : "Kiritish"}
+                    </button>
+                  </div>
+                </form>
+
                 <button
                   type="button"
                   onClick={cancelBrowser}
@@ -329,25 +398,73 @@ export default function Login({ onLogin }: Props) {
                 </button>
               </div>
             ) : (
-              <div className="mt-6">
+              <div className="mt-6 space-y-3">
+                {/* 1-Click Login: Sign in with Google */}
                 <button
                   type="button"
                   onClick={() => void handleBrowser()}
                   disabled={busy !== "idle"}
-                  className="btn-brand flex h-[54px] w-full items-center justify-center gap-2 rounded-xl px-4 text-[15px] font-semibold disabled:opacity-60"
+                  className="flex h-[52px] w-full items-center justify-center gap-3 rounded-xl border border-white/15 bg-white/5 px-4 text-[15px] font-semibold text-white shadow-sm transition hover:bg-white/10 hover:border-white/25 active:scale-[0.99] disabled:opacity-60"
                 >
-                  <Icon size={17}>
-                    <circle cx="12" cy="12" r="10" />
-                    <path d="M2 12h20" />
-                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-                  </Icon>
-                  Continue in browser
-                  <Icon size={16}>
-                    <path d="M5 12h14" />
-                    <path d="m12 5 7 7-7 7" />
-                  </Icon>
+                  <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24">
+                    <path
+                      fill="#4285F4"
+                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                    />
+                  </svg>
+                  <span>Sign in with Google</span>
                 </button>
+
+                {/* 1-Click Login: Continue with Telegram */}
+                <button
+                  type="button"
+                  onClick={() => void handleBrowser()}
+                  disabled={busy !== "idle"}
+                  className="flex h-[52px] w-full items-center justify-center gap-3 rounded-xl border border-[#229ED9]/40 bg-[#229ED9]/15 px-4 text-[15px] font-semibold text-[#38bdf8] shadow-sm transition hover:bg-[#229ED9]/25 hover:border-[#229ED9]/60 active:scale-[0.99] disabled:opacity-60"
+                >
+                  <svg className="h-5 w-5 shrink-0 fill-[#229ED9]" viewBox="0 0 24 24">
+                    <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.121l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.535-.194 1.006.128.832.957z" />
+                  </svg>
+                  <span>Continue with Telegram</span>
+                </button>
+
                 {error && <InlineError message={error} />}
+
+                {/* Manual Code Fallback */}
+                <form onSubmit={handleManualCode} className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-3.5 text-left">
+                  <label htmlFor="manual-code-idle" className="block text-[11px] font-medium text-white/70">
+                    Deep link ochilmadimi? Saytdagi 6 xonali kodni kiriting:
+                  </label>
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      id="manual-code-idle"
+                      type="text"
+                      value={manualCode}
+                      onChange={(e) => setManualCode(e.target.value)}
+                      placeholder="6 xonali kod"
+                      className="field h-9 flex-1 rounded-xl px-3 font-mono text-xs tracking-wider uppercase text-white"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!manualCode.trim()}
+                      className="rounded-xl border border-white/15 bg-white/10 px-3.5 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-40"
+                    >
+                      Kiritish
+                    </button>
+                  </div>
+                </form>
               </div>
             )}
 

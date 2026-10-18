@@ -57,11 +57,13 @@ export function getAccessTokenCached(): string | null {
   return getSessionAccessToken();
 }
 
-/**
- * Sync in-memory read for hot paths. The refresh token is Rust-owned and
- * never exposed to JS — this always returns null. Kept for compatibility.
- */
+/** Sync in-memory read for hot paths. Returns stored refreshToken from localStorage if present. */
 export function getRefreshTokenCached(): string | null {
+  try {
+    if (typeof localStorage !== "undefined") {
+      return localStorage.getItem("bestway.refreshToken");
+    }
+  } catch {}
   return null;
 }
 
@@ -217,11 +219,29 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     // The store wipes ONLY on definitive verdicts; transient failures keep
     // the session and fall through to the original error below.
     if ((res.status === 401 || err.code === "SESSION_EXPIRED") && !_retried && !isAuthEndpoint) {
+      const storedRefreshToken = getRefreshTokenCached();
+      if (storedRefreshToken) {
+        try {
+          const refreshRes = await post<{ accessToken: string; refreshToken?: string }>(
+            "/auth/refresh",
+            { refreshToken: storedRefreshToken },
+            { token: null, _retried: true },
+          );
+          if (refreshRes?.accessToken) {
+            await setSession(refreshRes.accessToken, refreshRes.refreshToken ?? storedRefreshToken);
+            return request<T>(path, { ...options, _retried: true, token: refreshRes.accessToken });
+          }
+        } catch {
+          await clearSession();
+          throw err;
+        }
+      }
       try {
-        await refresh();
-        return request<T>(path, { ...options, _retried: true });
+        const freshToken = await refresh();
+        return request<T>(path, { ...options, _retried: true, token: freshToken });
       } catch {
-        // Refresh failed — fall through to the original 401 below.
+        await clearSession();
+        throw err;
       }
     }
     throw err;
