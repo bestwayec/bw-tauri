@@ -16,6 +16,7 @@ export const OFFLINE_SYNC_INTERVAL_MS = 10_000;
 export type OfflineSyncState = 'synced' | 'pending' | 'offline';
 
 const EXAM_NAMESPACE = 'exam';
+const TIMER_NAMESPACE = 'timer';
 const answersNamespace = (attemptId: string) => `answers.${attemptId}`;
 
 function isOnline(): boolean {
@@ -116,9 +117,47 @@ export async function resolvePendingAnswers(
   return removed;
 }
 
+/** Cache the remaining timer seconds locally for an attempt. */
+export async function cacheTimerSeconds(attemptId: string, seconds: number): Promise<boolean> {
+  try {
+    return await offlinePut(TIMER_NAMESPACE, attemptId, JSON.stringify({ attemptId, seconds, at: Date.now() }));
+  } catch {
+    return false;
+  }
+}
+
+/** Read the locally cached timer seconds, or null if none stored. */
+export async function readCachedTimerSeconds(attemptId: string): Promise<number | null> {
+  try {
+    const raw = await offlineGet(TIMER_NAMESPACE, attemptId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<{ seconds: number }>;
+    return typeof parsed?.seconds === 'number' && Number.isFinite(parsed.seconds) ? parsed.seconds : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Flush all pending offline answers for this attempt in bulk.
+ * Returns the count of answers successfully synchronized.
+ */
+export async function flushOfflineSyncQueue(
+  attemptId: string,
+  sendBulk: (answers: Array<{ questionId: string; response: string }>) => Promise<void>,
+): Promise<number> {
+  const pending = await readPendingAnswers(attemptId);
+  if (pending.length === 0) return 0;
+  const payload = pending.map((item) => ({ questionId: item.questionId, response: item.response }));
+  await sendBulk(payload);
+  await resolvePendingAnswers(attemptId, payload.map((p) => p.questionId));
+  return payload.length;
+}
+
 /** Forget everything cached for a finished attempt. */
 export async function clearAttemptCache(attemptId: string): Promise<void> {
   await offlineDelete(EXAM_NAMESPACE, attemptId).catch(() => false);
+  await offlineDelete(TIMER_NAMESPACE, attemptId).catch(() => false);
   await offlinePurge(answersNamespace(attemptId)).catch(() => undefined);
 }
 

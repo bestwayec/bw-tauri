@@ -29,7 +29,9 @@ import type { CheatScope } from '@/lib/cheat';
 import { releaseKioskLockdown, useLockdown, type LockdownCheatEvent } from '@/hooks/useLockdown';
 import {
   cacheAnswer,
+  cacheTimerSeconds,
   clearAttemptCache,
+  flushOfflineSyncQueue,
   readPendingAnswers,
   resolvePendingAnswers,
   startOfflineSync,
@@ -167,6 +169,75 @@ export default function ExamRunner(p: ExamRunnerProps) {
     active: (p.proctoring ?? true) && !!p.attemptId,
     onEvent: p.onSecurityEvent,
   });
+
+  // Anti-cheat fullscreen, blur & mouse-leave guard
+  const [blurCount, setBlurCount] = useState(0);
+  const [blurWarningOpen, setBlurWarningOpen] = useState(false);
+  const blurCountRef = useRef(0);
+  const lastBlurAtRef = useRef(0);
+
+  const triggerBlurViolation = useCallback(() => {
+    const now = Date.now();
+    if (now - lastBlurAtRef.current < 1500) return;
+    lastBlurAtRef.current = now;
+    blurCountRef.current += 1;
+    const currentCount = blurCountRef.current;
+    setBlurCount(currentCount);
+    setBlurWarningOpen(true);
+
+    if (p.attemptId) {
+      post(`/mock/attempts/${encodeURIComponent(p.attemptId)}/telemetry`, {
+        event: "window_blur",
+        blurCount: currentCount,
+      }).catch(() => undefined);
+    }
+  }, [p.attemptId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      if (typeof document !== "undefined" && !document.fullscreenElement) {
+        document.documentElement.requestFullscreen?.().catch(() => undefined);
+      }
+    } catch {
+      /* ignore */
+    }
+
+    const onBlur = () => {
+      triggerBlurViolation();
+    };
+
+    const onMouseLeave = (e: MouseEvent) => {
+      if (!e.relatedTarget && e.clientY <= 0) {
+        triggerBlurViolation();
+      }
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const key = e.key;
+      if (
+        key === "F12" ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && ["I", "J", "C"].includes(key.toUpperCase())) ||
+        ((e.ctrlKey || e.metaKey) && (key === "u" || key === "U"))
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        triggerBlurViolation();
+      }
+    };
+
+    window.addEventListener("blur", onBlur);
+    document.documentElement.addEventListener("mouseleave", onMouseLeave);
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+
+    return () => {
+      window.removeEventListener("blur", onBlur);
+      document.documentElement.removeEventListener("mouseleave", onMouseLeave);
+      window.removeEventListener("keydown", onKeyDown, { capture: true });
+    };
+  }, [triggerBlurViolation]);
+
 
   const versioned = p.parts.some((part) => part.questions.some((q) => q.guidance));
   const writableIds = new Set(p.parts.flatMap((part) => part.questions.map((q) => q.id)));
@@ -376,6 +447,15 @@ export default function ExamRunner(p: ExamRunnerProps) {
     try { await operation; } finally { saveInFlight.current = null; }
   }, [p]);
 
+  useEffect(() => {
+    const handleOnline = () => {
+      void flushOfflineSyncQueue(p.attemptId, p.saveMany).catch(() => undefined);
+      void flush().catch(() => undefined);
+    };
+    window.addEventListener("online", handleOnline);
+    return () => window.removeEventListener("online", handleOnline);
+  }, [p.attemptId, p.saveMany, flush]);
+
   function setAnswer(qid: string, value: string, immediate = false) {
     answersRef.current = { ...answersRef.current, [qid]: value };
     dirty.current.add(qid);
@@ -469,6 +549,9 @@ export default function ExamRunner(p: ExamRunnerProps) {
     const id = window.setInterval(() => {
       const r = remainingMs(p.deadlineIso, offsetMs);
       setRemaining(r);
+      if (r != null) {
+        void cacheTimerSeconds(p.attemptId, Math.max(0, Math.floor(r / 1000))).catch(() => undefined);
+      }
       if (r != null && r <= 0) {
         if (!versioned) window.clearInterval(id);
         if (Date.now() < nextRetry) return;
@@ -478,7 +561,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
       }
     }, 1000);
     return () => window.clearInterval(id);
-  }, [p.deadlineIso, offsetMs, doSubmit, versioned]);
+  }, [p.deadlineIso, offsetMs, doSubmit, versioned, p.attemptId]);
 
   // ---- navigation ----
   function gotoPart(i: number, qGlobal?: number) {
@@ -585,6 +668,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
   return (
     <div
       className="exam-shell"
+      onContextMenu={(e) => e.preventDefault()}
       data-exam-theme={contrastTheme === "standard" ? "light" : contrastTheme}
       data-contrast-theme={contrastTheme}
       data-simulator-mode={simulatorMode}
@@ -809,6 +893,42 @@ export default function ExamRunner(p: ExamRunnerProps) {
             </ul>
             <button type="button" onClick={() => setHelpOpen(false)} className="exam-btn-primary">
               Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {blurWarningOpen && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          role="alertdialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md rounded-2xl border border-red-500/40 bg-[#0B0F17] p-6 shadow-2xl text-center text-white">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-red-500/15 text-red-400 mb-4">
+              <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <h3 className="text-xl font-bold text-white mb-2">
+              Diqqat! Imtihon oynasidan chiqish taqiqlanadi! (Hodisa qayd etildi)
+            </h3>
+            <p className="text-sm text-white/70 mb-4">
+              Imtihon paytida boshqa ilovalar, oynalar yoki oynadan tashqariga chiqish taqiqlanadi. Barcha harakatlar nazorat tizimi tomonidan qayd etilmoqda (Qoidabuzarlik: {blurCount}).
+            </p>
+            <button
+              type="button"
+              className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2.5 px-4 shadow-lg transition-colors cursor-pointer"
+              onClick={() => {
+                setBlurWarningOpen(false);
+                try {
+                  document.documentElement.requestFullscreen?.().catch(() => undefined);
+                } catch {
+                  /* ignore */
+                }
+              }}
+            >
+              Tushundim, imtihonga qaytish
             </button>
           </div>
         </div>

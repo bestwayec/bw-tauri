@@ -23,6 +23,7 @@ const StudentResults = lazy(() => import("@/pages/StudentResults"));
 const BootSplash = lazy(() => import("@/components/BootSplash"));
 const Particles = lazy(() => import("@/components/Particles"));
 import Sidebar, { MobileNavigation } from "@/components/Sidebar";
+import TitleBar from "@/components/TitleBar";
 import UpdateNotifier from "@/components/UpdateNotifier";
 import ExitConfirmModal from "@/components/ExitConfirmModal";
 import ReauthModal from "@/components/ReauthModal";
@@ -384,8 +385,10 @@ export default function App() {
   if (activeRoute === "login") {
     return (
       <>
-        <div className="relative h-screen overflow-y-auto bg-bg text-white">
-          {!reduceMotion && (
+        <div className="flex flex-col h-screen overflow-hidden bg-bg text-white">
+          <TitleBar examActive={false} />
+          <div className="relative flex-1 overflow-y-auto">
+            {!reduceMotion && (
             <div
               aria-hidden="true"
               className="pointer-events-none absolute inset-0 opacity-85 [mask-image:radial-gradient(ellipse_85%_75%_at_50%_45%,black_30%,transparent_100%)]"
@@ -411,6 +414,7 @@ export default function App() {
               </Suspense>
             </div>
           </main>
+          </div>
         </div>
         {showSplash && (
           <Suspense fallback={null}>
@@ -424,7 +428,9 @@ export default function App() {
 
   return (
     <>
-    <div className="app-bg app-grid flex h-screen overflow-hidden text-white">
+    <div className="flex flex-col h-screen overflow-hidden">
+      <TitleBar examActive={examActive} />
+      <div className="app-bg app-grid flex flex-1 min-h-0 overflow-hidden text-white">
       {showChrome && (
         <Sidebar
           route={activeRoute}
@@ -566,6 +572,7 @@ export default function App() {
           </ClickSpark>
         )}
       </div>
+    </div>
     </div>
     {update && <UpdateNotifier update={update} onClose={() => setUpdate(null)} deferInstall={examActive} />}
     {showSplash && (

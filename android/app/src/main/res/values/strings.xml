@@ -6,7 +6,7 @@
     <string name="exit_title">Chiqish</string>
     <string name="exit_msg">Ilovadan chiqmoqchimisiz?</string>
     <string name="exit_exam_title">Imtihondan chiqish</string>
-    <string name="exit_exam_msg">Diqqat! Imtihon davom etmoqda. Sahifadan chiqsangiz, imtihon natijalari saqlanmasligi mumkin. Rostdan ham chiqmoqchimisiz?</string>
+    <string name="exit_exam_msg">Imtihon davom etmoqda. Orqaga qaytish imtihonni bekor qilmaydi. Rostdan ham chiqmoqchimisiz?</string>
     <string name="yes">Ha</string>
     <string name="no">Yo\'q</string>
 </resources>

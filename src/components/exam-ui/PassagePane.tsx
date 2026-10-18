@@ -7,8 +7,11 @@ export interface StickyMarginNote {
   createdAt: string;
 }
 
+export type HighlightColor = "yellow" | "green" | "pink";
+
 export interface PassageMarks {
   highlights: string[];
+  highlightColors?: Record<string, HighlightColor>;
   underlines?: string[];
   stickyNotes?: StickyMarginNote[];
   note: string;
@@ -29,10 +32,11 @@ type Props = {
 export function readMarks(storageKey: string, partKey: string): PassageMarks {
   try {
     const raw = localStorage.getItem(`${storageKey}.${partKey}`);
-    if (!raw) return { highlights: [], underlines: [], stickyNotes: [], note: "" };
+    if (!raw) return { highlights: [], highlightColors: {}, underlines: [], stickyNotes: [], note: "" };
     const p = JSON.parse(raw) as Partial<PassageMarks>;
     return {
       highlights: Array.isArray(p.highlights) ? p.highlights.filter((h) => typeof h === "string") : [],
+      highlightColors: p.highlightColors && typeof p.highlightColors === "object" ? p.highlightColors : {},
       underlines: Array.isArray(p.underlines) ? p.underlines.filter((u) => typeof u === "string") : [],
       stickyNotes: Array.isArray(p.stickyNotes)
         ? p.stickyNotes.filter(
@@ -43,38 +47,57 @@ export function readMarks(storageKey: string, partKey: string): PassageMarks {
       note: typeof p.note === "string" ? p.note : "",
     };
   } catch {
-    return { highlights: [], underlines: [], stickyNotes: [], note: "" };
+    return { highlights: [], highlightColors: {}, underlines: [], stickyNotes: [], note: "" };
   }
 }
 
-interface TextSegment {
+export interface TextSegment {
   text: string;
   mark: boolean;
+  highlightColor?: HighlightColor;
   underline: boolean;
 }
 
-/** Split text on highlight and underline phrases cleanly. */
-export function splitMarks(text: string, phrases: string[], underlines: string[] = []): TextSegment[] {
+/** Split text on highlight and underline phrases cleanly, with color attribution. */
+export function splitMarks(
+  text: string,
+  phrases: string[],
+  underlines: string[] = [],
+  colorMap?: Record<string, HighlightColor>,
+): TextSegment[] {
   if (!text) return [];
   const len = text.length;
+  // 0: none, 1: yellow, 2: green, 3: pink
   const isMark = new Uint8Array(len);
   const isUnderline = new Uint8Array(len);
 
-  const applyRanges = (list: string[], target: Uint8Array) => {
+  const colorCodes: Record<HighlightColor, number> = {
+    yellow: 1,
+    green: 2,
+    pink: 3,
+  };
+  const codeToColor: Record<number, HighlightColor> = {
+    1: "yellow",
+    2: "green",
+    3: "pink",
+  };
+
+  const applyRanges = (list: string[], target: Uint8Array, useColors = false) => {
     for (const phrase of list) {
       if (!phrase || phrase.length < 2) continue;
+      const code = useColors ? (colorMap?.[phrase] ? colorCodes[colorMap[phrase]] : 1) : 1;
       let startIdx = 0;
       while (startIdx < len) {
         const at = text.indexOf(phrase, startIdx);
         if (at === -1) break;
-        for (let i = at; i < at + phrase.length; i++) target[i] = 1;
+        for (let i = at; i < at + phrase.length; i++) target[i] = code;
         startIdx = at + 1;
       }
     }
   };
 
-  applyRanges(phrases, isMark);
-  applyRanges(underlines, isUnderline);
+  applyRanges(phrases, isMark, true);
+  applyRanges(underlines, isUnderline, false);
 
   const out: TextSegment[] = [];
   let cur = 0;
@@ -83,7 +106,8 @@ export function splitMarks(text: string, phrases: string[], underlines: string[]
     if (!same || i === len) {
       out.push({
         text: text.slice(cur, i),
-        mark: isMark[cur] === 1,
+        mark: isMark[cur] > 0,
+        highlightColor: isMark[cur] > 0 ? codeToColor[isMark[cur]] ?? "yellow" : undefined,
         underline: isUnderline[cur] === 1,
       });
       cur = i;
@@ -163,10 +187,14 @@ export default function PassagePane(p: Props) {
     }, 10);
   }
 
-  function doHighlight() {
+  function doHighlight(color: HighlightColor = "yellow") {
     if (!menu) return;
+    const curColors = { ...(marks.highlightColors ?? {}) };
+    curColors[menu.text] = color;
     if (!marks.highlights.includes(menu.text)) {
-      commit({ ...marks, highlights: [...marks.highlights, menu.text] });
+      commit({ ...marks, highlights: [...marks.highlights, menu.text], highlightColors: curColors });
+    } else {
+      commit({ ...marks, highlightColors: curColors });
     }
     window.getSelection()?.removeAllRanges();
     setMenu(null);
@@ -183,12 +211,17 @@ export default function PassagePane(p: Props) {
   }
 
   /** Add a phrase once — repeated Alt+H/Alt+U must never stack duplicates. */
-  function addPhrase(kind: "highlight" | "underline", text: string) {
+  function addPhrase(kind: "highlight" | "underline", text: string, color: HighlightColor = "yellow") {
     const pair = text.trim();
     if (pair.length < 2) return;
     if (kind === "highlight") {
-      if (marks.highlights.includes(pair)) return;
-      commit({ ...marks, highlights: [...marks.highlights, pair] });
+      const curColors = { ...(marks.highlightColors ?? {}) };
+      curColors[pair] = color;
+      if (marks.highlights.includes(pair)) {
+        commit({ ...marks, highlightColors: curColors });
+        return;
+      }
+      commit({ ...marks, highlights: [...marks.highlights, pair], highlightColors: curColors });
     } else {
       const cur = marks.underlines ?? [];
       if (cur.includes(pair)) return;
@@ -200,9 +233,12 @@ export default function PassagePane(p: Props) {
     if (!menu) return;
     const hitH = marks.highlights.filter((h) => h.includes(menu.text) || menu.text.includes(h));
     const nextH = hitH.length > 0 ? marks.highlights.filter((h) => !hitH.includes(h)) : marks.highlights;
+    const nextColors = { ...(marks.highlightColors ?? {}) };
+    for (const h of hitH) delete nextColors[h];
+    delete nextColors[menu.text];
     const hitU = (marks.underlines ?? []).filter((u) => u.includes(menu.text) || menu.text.includes(u));
     const nextU = hitU.length > 0 ? (marks.underlines ?? []).filter((u) => !hitU.includes(u)) : (marks.underlines ?? []);
-    commit({ ...marks, highlights: nextH, underlines: nextU });
+    commit({ ...marks, highlights: nextH, highlightColors: nextColors, underlines: nextU });
     window.getSelection()?.removeAllRanges();
     setMenu(null);
   }
@@ -289,7 +325,7 @@ export default function PassagePane(p: Props) {
               {String.fromCharCode(65 + i)}
             </span>
             <p>
-              {splitMarks(para, marks.highlights, marks.underlines ?? []).map((s, j) => {
+              {splitMarks(para, marks.highlights, marks.underlines ?? [], marks.highlightColors).map((s, j) => {
                 let node: React.ReactNode = <span>{s.text}</span>;
                 if (s.underline) {
                   node = (
@@ -306,7 +342,17 @@ export default function PassagePane(p: Props) {
                   );
                 }
                 if (s.mark) {
-                  node = <mark className="exam-mark">{node}</mark>;
+                  const color = s.highlightColor ?? "yellow";
+                  const bg = color === "green" ? "#bbf7d0" : color === "pink" ? "#fbcfe8" : "#fef08a";
+                  const textCol = color === "green" ? "#14532d" : color === "pink" ? "#831843" : "#713f12";
+                  node = (
+                    <mark
+                      className={`exam-mark exam-mark-${color}`}
+                      style={{ backgroundColor: bg, color: textCol, borderRadius: 2, padding: "0 2px" }}
+                    >
+                      {node}
+                    </mark>
+                  );
                 }
                 return <span key={j}>{node}</span>;
               })}
@@ -315,23 +361,51 @@ export default function PassagePane(p: Props) {
         ))}
         {menu && (
           <div
-            className="exam-selmenu"
+            className="exam-selmenu flex items-center gap-1.5 p-1 rounded-lg bg-[#0B0F17]/95 border border-white/10 shadow-2xl backdrop-blur-md"
             style={{ left: Math.max(8, menu.x), top: Math.max(8, menu.y) }}
             role="menu"
             aria-label="Text tools"
             onMouseDown={(e) => e.preventDefault()}
           >
-            <button type="button" role="menuitem" onClick={doHighlight} className="exam-selbtn" title="Alt+H">
-              Highlight
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => doHighlight("yellow")}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold bg-[#fef08a] text-[#713f12] hover:brightness-105 transition-all shadow-sm"
+              title="Highlight Yellow (#fef08a)"
+            >
+              <span className="w-2 h-2 rounded-full bg-amber-400" />
+              Yellow
             </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => doHighlight("green")}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold bg-[#bbf7d0] text-[#14532d] hover:brightness-105 transition-all shadow-sm"
+              title="Highlight Green (#bbf7d0)"
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              Green
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => doHighlight("pink")}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold bg-[#fbcfe8] text-[#831843] hover:brightness-105 transition-all shadow-sm"
+              title="Highlight Pink (#fbcfe8)"
+            >
+              <span className="w-2 h-2 rounded-full bg-pink-400" />
+              Pink
+            </button>
+            <div className="w-[1px] h-4 bg-white/20 mx-0.5" />
             <button type="button" role="menuitem" onClick={doUnderline} className="exam-selbtn" title="Alt+U">
               Underline
             </button>
             <button type="button" role="menuitem" onClick={doClear} className="exam-selbtn">
               Clear
             </button>
-            <button type="button" role="menuitem" onClick={doQuote} className="exam-selbtn">
-              Add note
+            <button type="button" role="menuitem" onClick={doQuote} className="exam-selbtn font-medium text-emerald-400">
+              + Note
             </button>
           </div>
         )}

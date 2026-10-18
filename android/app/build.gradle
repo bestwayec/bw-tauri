@@ -11,8 +11,8 @@ android {
         applicationId "uz.bestwayec.app"
         minSdk 24
         targetSdk 34
-        versionCode 820
-        versionName "0.8.2"
+        versionCode 830
+        versionName "0.8.3"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
@@ -53,4 +53,5 @@ dependencies {
     implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
     implementation 'androidx.webkit:webkit:1.10.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    implementation 'androidx.browser:browser:1.8.0'
 }

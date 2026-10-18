@@ -75,6 +75,16 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
   // from the server. If the server hands us a section with nothing to answer,
   // the cached copy stands in instead of an empty exam.
   useEffect(() => {
+    try {
+      if (typeof document !== "undefined" && !document.fullscreenElement) {
+        document.documentElement.requestFullscreen?.().catch(() => undefined);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
     void cacheExamPayload(attemptId, { start, section }).catch(() => undefined);
   }, [attemptId, start, section]);
   useEffect(() => {

@@ -33,6 +33,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import android.graphics.Color
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import androidx.browser.customtabs.CustomTabsIntent
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
@@ -40,7 +41,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val BASE_URL = "https://bestwayec.uz/?platform=mobile_app"
-        private const val USER_AGENT_SUFFIX = " BestWayApp/0.8.2 BestWay-Android/0.8.2 MobileApp"
+        private const val USER_AGENT_SUFFIX = " BestWayApp/0.8.3 BestWay-Android/0.8.3 MobileApp"
         private const val REQUEST_RECORD_AUDIO = 1001
     }
 
@@ -49,7 +50,7 @@ class MainActivity : AppCompatActivity() {
         fun isMobileApp(): Boolean = true
 
         @android.webkit.JavascriptInterface
-        fun getVersion(): String = "0.8.2"
+        fun getVersion(): String = "0.8.3"
     }
 
     private lateinit var swipeRefresh: SwipeRefreshLayout
@@ -144,20 +145,27 @@ class MainActivity : AppCompatActivity() {
         val data = intent?.data ?: return
         val scheme = data.scheme?.lowercase() ?: return
         if (scheme == "bestway-exam" || scheme == "bestway") {
+            val host = data.host?.lowercase() ?: ""
             val path = data.path ?: ""
-            if (path == "/auth/callback" || path.endsWith("/auth/callback")) {
+            val fullUrl = data.toString()
+            if ((host == "auth" && (path == "/callback" || path.isEmpty())) ||
+                path == "/auth/callback" ||
+                path.endsWith("/auth/callback") ||
+                fullUrl.contains("/auth/callback")
+            ) {
                 val code = data.getQueryParameter("code")
-                val token = data.getQueryParameter("token")
-                val targetParam = when {
-                    !code.isNullOrEmpty() -> "auth_code=$code"
-                    !token.isNullOrEmpty() -> "token=$token"
-                    else -> null
-                }
-                val redirectUrl = if (targetParam != null) {
-                    "https://bestwayec.uz/?$targetParam"
+                val token = data.getQueryParameter("token") ?: data.getQueryParameter("access_token")
+                val refreshToken = data.getQueryParameter("refresh_token")
+                val targetParams = mutableListOf<String>()
+                if (!code.isNullOrEmpty()) targetParams.add("auth_code=$code")
+                if (!token.isNullOrEmpty()) targetParams.add("token=$token")
+                if (!refreshToken.isNullOrEmpty()) targetParams.add("refresh_token=$refreshToken")
+                val queryString = if (targetParams.isNotEmpty()) {
+                    targetParams.joinToString("&")
                 } else {
-                    "https://bestwayec.uz/?platform=mobile_app"
+                    "platform=mobile_app"
                 }
+                val redirectUrl = "https://bestwayec.uz/?$queryString"
                 webView.loadUrl(redirectUrl)
             }
         }
@@ -359,19 +367,31 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun openCustomTabOrBrowser(uri: Uri): Boolean {
+        return try {
+            val customTabsIntent = CustomTabsIntent.Builder()
+                .setShowTitle(true)
+                .build()
+            customTabsIntent.launchUrl(this, uri)
+            true
+        } catch (e: Exception) {
+            try {
+                val intent = Intent(Intent.ACTION_VIEW, uri)
+                startActivity(intent)
+                true
+            } catch (ex: Exception) {
+                false
+            }
+        }
+    }
+
     private fun handleUrl(url: String?): Boolean {
         if (url == null) return false
         val uri = Uri.parse(url)
         val scheme = uri.scheme?.lowercase() ?: ""
 
         if (url.contains("accounts.google.com") || url.contains("oauth2.googleapis.com")) {
-            return try {
-                val intent = Intent(Intent.ACTION_VIEW, uri)
-                startActivity(intent)
-                true
-            } catch (e: Exception) {
-                false
-            }
+            return openCustomTabOrBrowser(uri)
         }
 
         if (scheme == "bestway-exam" || scheme == "bestway") {
@@ -502,6 +522,9 @@ class MainActivity : AppCompatActivity() {
         }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.MODIFY_AUDIO_SETTINGS) != PackageManager.PERMISSION_GRANTED) {
             permissions.add(Manifest.permission.MODIFY_AUDIO_SETTINGS)
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            permissions.add(Manifest.permission.CAMERA)
         }
         if (permissions.isNotEmpty()) {
             ActivityCompat.requestPermissions(

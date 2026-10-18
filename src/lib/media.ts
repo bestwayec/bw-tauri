@@ -60,35 +60,77 @@ export interface BlobMediaState {
 }
 
 /**
- * Load a remote media URL into a Blob URL. Re-fetches when `sourceUrl`
- * changes and revokes the object URL on cleanup. `blob:`/`data:` inputs
- * pass through untouched (no auth fetch needed).
+ * Global in-memory Blob cache (sourceUrl -> objectUrl).
+ * Once an audio URL is fetched as a Blob, the object URL is cached so subsequent
+ * renders or part switches reuse the cached Blob URL with 0ms network latency!
+ */
+export const mediaBlobCache = new Map<string, string>();
+
+/** Helper to retrieve or preload a cached Blob URL. */
+export async function getOrFetchCachedBlobUrl(url: string, signal?: AbortSignal): Promise<string> {
+  const cached = mediaBlobCache.get(url);
+  if (cached) return cached;
+  const blob = await fetchAuthenticatedMedia(url, signal);
+  const objectUrl = URL.createObjectURL(blob);
+  mediaBlobCache.set(url, objectUrl);
+  return objectUrl;
+}
+
+/** Clear all cached Blob URLs and revoke object URLs. */
+export function clearMediaBlobCache(): void {
+  for (const objectUrl of mediaBlobCache.values()) {
+    try {
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      /* ignore */
+    }
+  }
+  mediaBlobCache.clear();
+}
+
+/**
+ * Load a remote media URL into a Blob URL with in-memory caching.
+ * Re-fetches only when uncached; `blob:`/`data:` inputs pass through untouched.
  */
 export function useBlobMedia(sourceUrl: string | null): BlobMediaState {
-  const [url, setUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const cached = sourceUrl ? mediaBlobCache.get(sourceUrl) ?? null : null;
+  const [url, setUrl] = useState<string | null>(cached);
+  const [loading, setLoading] = useState<boolean>(!cached && Boolean(sourceUrl) && !/^(blob|data):/i.test(sourceUrl ?? ""));
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setUrl(null);
-    setError(null);
     if (!sourceUrl) {
+      setUrl(null);
+      setError(null);
       setLoading(false);
       return;
     }
     if (/^(blob|data):/i.test(sourceUrl)) {
       setUrl(sourceUrl);
+      setError(null);
       setLoading(false);
       return;
     }
+
+    const hit = mediaBlobCache.get(sourceUrl);
+    if (hit) {
+      setUrl(hit);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
+    setUrl(null);
+    setError(null);
+    setLoading(true);
+
     let dead = false;
     const ctrl = new AbortController();
-    let objectUrl: string | null = null;
-    setLoading(true);
     fetchAuthenticatedMedia(sourceUrl, ctrl.signal)
       .then((blob) => {
         if (dead) return;
-        objectUrl = URL.createObjectURL(blob);
+        const objectUrl = URL.createObjectURL(blob);
+        mediaBlobCache.set(sourceUrl, objectUrl);
         setUrl(objectUrl);
         setLoading(false);
       })
@@ -103,10 +145,10 @@ export function useBlobMedia(sourceUrl: string | null): BlobMediaState {
         );
         setLoading(false);
       });
+
     return () => {
       dead = true;
       ctrl.abort();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [sourceUrl]);
 

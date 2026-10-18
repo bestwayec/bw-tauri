@@ -95,8 +95,16 @@ export default function TopBar(p: Props) {
         >
           {p.remainingMs == null ? "No limit" : p.timeUp ? "Time up" : fmtCountdown(p.remainingMs)}
         </span>
-        <span className={`exam-savestate exam-savestate-${p.saveState}`} role="status">
-          {p.saveState === "saved" ? "Saved" : p.saveState === "saving" ? "Saving…" : "Offline"}
+        <span
+          className={`exam-savestate exam-savestate-${p.saveState}`}
+          role="status"
+          title={p.saveState === "offline" ? "Offline — javoblar lokal saqlanmoqda" : undefined}
+        >
+          {p.saveState === "saved"
+            ? "Saved"
+            : p.saveState === "saving"
+              ? "Saving…"
+              : "Offline — javoblar lokal saqlanmoqda"}
         </span>
       </div>
 

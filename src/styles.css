@@ -690,13 +690,26 @@ textarea.field {
 }
 .exam-mark {
   border-radius: 3px;
-  background: #ffe45e;
-  color: #111;
+  background: #fef08a;
+  color: #713f12;
   padding: 0 2px;
 }
-.exam-shell[data-exam-theme="dark"] .exam-mark {
-  background: rgba(137, 243, 54, 0.35);
-  color: #fff;
+.exam-mark-yellow {
+  background: #fef08a !important;
+  color: #713f12 !important;
+}
+.exam-mark-green {
+  background: #bbf7d0 !important;
+  color: #14532d !important;
+}
+.exam-mark-pink {
+  background: #fbcfe8 !important;
+  color: #831843 !important;
+}
+.exam-shell[data-exam-theme="dark"] .exam-mark,
+.exam-shell[data-contrast-theme="dark"] .exam-mark {
+  border-radius: 3px;
+  padding: 0 2px;
 }
 .exam-selmenu {
   position: absolute;

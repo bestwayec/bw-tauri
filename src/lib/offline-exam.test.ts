@@ -85,14 +85,39 @@ describe('offline exam cache', () => {
     expect(await offline.readPendingAnswers('nothing-here')).toEqual([]);
   });
 
-  it('clears both the cached exam and mirrored answers for one attempt', async () => {
+  it('caches remaining timer seconds and reads them back', async () => {
+    const offline = await freshModule();
+    expect(await offline.cacheTimerSeconds('matt-1', 1845)).toBe(true);
+    expect(await offline.readCachedTimerSeconds('matt-1')).toBe(1845);
+    expect(await offline.readCachedTimerSeconds('unknown-attempt')).toBeNull();
+  });
+
+  it('flushes pending offline answers in bulk and drops them from queue', async () => {
+    const offline = await freshModule();
+    await offline.cacheAnswer('matt-1', 'q-1', 'Answer A');
+    await offline.cacheAnswer('matt-1', 'q-2', 'Answer B');
+    expect(await offline.pendingAnswerCount('matt-1')).toBe(2);
+
+    const received: Array<{ questionId: string; response: string }> = [];
+    const count = await offline.flushOfflineSyncQueue('matt-1', async (payload: Array<{ questionId: string; response: string }>) => {
+      received.push(...payload);
+    });
+
+    expect(count).toBe(2);
+    expect(received.map((r) => r.questionId).sort()).toEqual(['q-1', 'q-2']);
+    expect(await offline.pendingAnswerCount('matt-1')).toBe(0);
+  });
+
+  it('clears cached exam, mirrored answers, and timer for one attempt', async () => {
     const offline = await freshModule();
     await offline.cacheExamPayload('matt-1', startPayload);
     await offline.cacheAnswer('matt-1', 'q-1', 'answer');
+    await offline.cacheTimerSeconds('matt-1', 1200);
     await offline.cacheExamPayload('matt-2', startPayload);
     await offline.clearAttemptCache('matt-1');
     expect(await offline.readCachedExam('matt-1')).toBeNull();
     expect(await offline.pendingAnswerCount('matt-1')).toBe(0);
+    expect(await offline.readCachedTimerSeconds('matt-1')).toBeNull();
     expect(await offline.readCachedExam('matt-2')).not.toBeNull();
   });
 });
