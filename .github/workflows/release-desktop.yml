@@ -15,6 +15,7 @@ on:
   push:
     tags:
       - "bestway-app-v*"
+      - "v*"
   workflow_dispatch:
     inputs:
       release_tag:
@@ -73,8 +74,8 @@ jobs:
           import { findReleaseByTag, releasePlan, RELEASE_PLATFORMS } from './tools/release-platforms.mjs';
           const tag = process.env.RELEASE_TAG;
           const number = '(0|[1-9][0-9]*)';
-          const pattern = new RegExp(`^bestway-app-v${number}\\.${number}\\.${number}(-(rc|beta|alpha)\\.${number})?$`);
-          if (!pattern.test(tag) || /[\r\n]/.test(tag)) throw new Error('Expected an existing bestway-app-vX.Y.Z tag, optionally with -rc.N, -beta.N or -alpha.N');
+          const pattern = new RegExp(`^(?:bestway-app-)?v${number}\\.${number}\\.${number}(-(rc|beta|alpha)\\.${number})?$`);
+          if (!pattern.test(tag) || /[\r\n]/.test(tag)) throw new Error('Expected an existing (bestway-app-)vX.Y.Z tag, optionally with -rc.N, -beta.N or -alpha.N');
           const base = `${process.env.GITHUB_API_URL}/repos/${process.env.GITHUB_REPOSITORY}`;
           async function api(path, optional = false) {
             const response = await fetch(`${base}${path}`, {
