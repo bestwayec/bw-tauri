@@ -46,7 +46,7 @@ jobs:
           echo "${ANDROID_HOME}/platform-tools" >> $GITHUB_PATH
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: "8.6"
 
