@@ -19,7 +19,7 @@ export async function findReleaseByTag(api, tag) {
 }
 
 export function releasePlan(tag, assets = [], selected = 'missing') {
-  const version = tag.match(/^bestway-app-v((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:rc|beta|alpha)\.(?:0|[1-9][0-9]*))?)$/)?.[1];
+  const version = tag.match(/^(?:bestway-app-)?v((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:rc|beta|alpha)\.(?:0|[1-9][0-9]*))?)$/)?.[1];
   if (!version) throw new Error('Expected a versioned bestway-app release tag');
   if (selected !== 'missing' && !RELEASE_PLATFORMS.some(row => row.platform === selected)) {
     throw new Error('Unknown release platform');
