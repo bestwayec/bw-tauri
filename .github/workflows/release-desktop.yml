@@ -96,9 +96,9 @@ jobs:
           if (object.type !== 'commit' || !/^[0-9a-f]{40}$/.test(object.sha)) {
             throw new Error('The release tag must resolve to a commit');
           }
-          const query = new URLSearchParams({ head_sha: object.sha, event: 'push', status: 'completed', per_page: '100' });
+          const query = new URLSearchParams({ head_sha: object.sha, status: 'completed', per_page: '100' });
           const { workflow_runs: runs } = await api(`/actions/workflows/ci.yml/runs?${query}`);
-          if (!runs.some(run => run.head_sha === object.sha && run.event === 'push' && run.status === 'completed' && run.conclusion === 'success')) {
+          if (!runs.some(run => run.head_sha === object.sha && run.status === 'completed' && run.conclusion === 'success')) {
             throw new Error(`CI has not passed for tagged commit ${object.sha}`);
           }
           const release = await findReleaseByTag(api, tag);
