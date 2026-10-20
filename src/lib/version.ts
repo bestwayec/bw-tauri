@@ -9,16 +9,16 @@ import { isSafeHttpUrl } from "./secure-storage";
  * show a bogus "New version available" toast, so it is asserted against
  * package.json in version.test.ts.
  */
-export const APP_VERSION = "0.8.4";
+export const APP_VERSION = "0.8.5";
 
 /**
  * Current release of the manual-installer channel. The signed in-place updater
  * is not advertised for every build, so the toast can fall back to the
  * published installer of exactly this version — never of another one.
  */
-export const DESKTOP_INSTALLER_VERSION = "0.8.4";
+export const DESKTOP_INSTALLER_VERSION = "0.8.5";
 export const DESKTOP_INSTALLER_URL =
-  "https://bestwayec.uz/media/downloads/Bestway.App_0.8.4_x64-setup.exe";
+  "https://bestwayec.uz/media/downloads/Bestway.App_0.8.5_x64-setup.exe";
 
 export interface DesktopRelease {
   version: string;
