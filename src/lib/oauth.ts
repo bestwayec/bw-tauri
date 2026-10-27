@@ -22,11 +22,14 @@ import { ensureDeviceId } from "./session";
 import { isSafeHttpUrl, secureGetItemAsync, secureRemoveItemAsync, secureSetItemAsync } from "./secure-storage";
 
 export const DESKTOP_SCHEME = "bestway-exam";
-export const ALLOWED_SCHEMES = ["bestway-exam", "bestway"] as const;
+export const ALLOWED_SCHEMES = ["bestway-exam", "bestway", "bestwayapp"] as const;
 export const DESKTOP_CALLBACK = `${DESKTOP_SCHEME}://auth/callback`;
 export const ALLOWED_CALLBACKS = [
   "bestway-exam://auth/callback",
   "bestway://auth/callback",
+  "bestwayapp://auth",
+  "bestwayapp://auth/callback",
+  "bestway://auth",
 ] as const;
 
 /** Web origin — NEVER derived from the API URL (api.bestwayec.uz vs bestwayec.uz differ in prod).
@@ -284,6 +287,8 @@ export interface AuthCallbackParams {
   code?: string;
   state?: string;
   error?: string;
+  token?: string;
+  refresh?: string;
 }
 
 /**
@@ -302,8 +307,10 @@ export function parseAuthCallbackUrl(url: string): AuthCallbackParams {
       code: pick("code"),
       state: pick("state"),
       error: pick("error"),
+      token: pick("token") ?? pick("access_token"),
+      refresh: pick("refresh") ?? pick("refresh_token"),
     };
-    if (!out.code && !out.error) return { error: "Unrecognized callback URL" };
+    if (!out.code && !out.error && !out.token) return { error: "Unrecognized callback URL" };
     return out;
   } catch {
     return { error: "Unrecognized callback URL" };
@@ -320,14 +327,15 @@ export function isDesktopCallbackUrl(url: string): boolean {
     const normalized = url.replace(/^([a-z][a-z0-9+.-]*):(?!\/\/)/i, "$1://");
     const u = new URL(normalized);
     const protocol = u.protocol.replace(/:$/, "").toLowerCase();
-    const isAllowedScheme = protocol === "bestway-exam" || protocol === "bestway";
+    const isAllowedScheme = protocol === "bestway-exam" || protocol === "bestway" || protocol === "bestwayapp";
+    const path = `${u.host}${u.pathname}`.replace(/\/+$/, "").toLowerCase();
     return (
       isAllowedScheme &&
-      `${u.host}${u.pathname}`.replace(/\/+$/, "").toLowerCase() === "auth/callback"
+      (path === "auth/callback" || path === "auth" || path === "callback")
     );
   } catch {
     const lower = url.trim().toLowerCase();
-    return lower.startsWith("bestway-exam:") || lower.startsWith("bestway:");
+    return lower.startsWith("bestway-exam:") || lower.startsWith("bestway:") || lower.startsWith("bestwayapp:");
   }
 }
 

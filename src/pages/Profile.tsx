@@ -27,7 +27,7 @@ function Toggle({
       aria-label={label}
       onClick={() => onChange(!checked)}
       className={`relative h-6 w-11 shrink-0 rounded-full transition ${
-        checked ? "bg-[#89F336]" : "bg-white/15"
+        checked ? "bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.35)]" : "bg-white/15"
       }`}
     >
       <span

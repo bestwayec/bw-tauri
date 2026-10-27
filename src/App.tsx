@@ -106,7 +106,7 @@ function OnlineDot() {
   return (
     <span className="flex items-center gap-1.5 text-[11px] text-white/45">
       <span
-        className={`h-1.5 w-1.5 rounded-full ${online ? "bg-brand shadow-[0_0_8px_#89F336]" : "bg-red-400"}`}
+        className={`h-1.5 w-1.5 rounded-full ${online ? "bg-emerald-400 shadow-[0_0_8px_#10B981]" : "bg-red-400"}`}
       />
       {online ? "Online" : "Offline"}
     </span>
@@ -398,7 +398,7 @@ export default function App() {
                   particleCount={220}
                   particleSpread={10}
                   speed={0.15}
-                  particleColors={["#89F336", "#FFED29", "#FF991C"]}
+                  particleColors={["#10B981", "#34D399", "#059669"]}
                   alphaParticles
                   particleBaseSize={150}
                   sizeRandomness={0.8}
@@ -497,7 +497,7 @@ export default function App() {
             </main>
           </div>
         ) : (
-          <ClickSpark sparkColor="#89F336" sparkSize={10} sparkRadius={22} sparkCount={8} duration={420} className="flex min-h-0 flex-1 flex-col">
+          <ClickSpark sparkColor="#10B981" sparkSize={10} sparkRadius={22} sparkCount={8} duration={420} className="flex min-h-0 flex-1 flex-col">
           <main className="min-h-0 flex-1 overflow-y-auto px-6 pb-8 pt-6 2xl:px-10">
             <motion.div
               key={activeRoute + (activeRoute === "result" ? historyKey : "")}

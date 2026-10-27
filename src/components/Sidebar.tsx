@@ -255,8 +255,8 @@ function WingedEmblem({ className = "h-10 w-10" }: { className?: string }) {
     <svg viewBox="0 0 48 48" role="img" aria-label="BestWay" className={`shrink-0 select-none ${className}`} xmlns="http://www.w3.org/2000/svg">
       <defs>
         <linearGradient id="bw_sb_grad" x1="4" y1="2" x2="44" y2="46" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#10B981" />
-          <stop offset="55%" stopColor="#89F336" />
+          <stop offset="0%" stopColor="#34D399" />
+          <stop offset="55%" stopColor="#10B981" />
           <stop offset="100%" stopColor="#059669" />
         </linearGradient>
         <linearGradient id="bw_sb_wing" x1="0" y1="0" x2="1" y2="1">

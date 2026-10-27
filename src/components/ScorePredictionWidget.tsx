@@ -360,7 +360,7 @@ export default function ScorePredictionWidget({ program, attempts, onPracticeWea
         </div>
         <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-white/10">
           <div
-            className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-[#89F336] transition-all duration-500"
+            className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-500"
             style={{ width: `${data.targetProgressPct}%` }}
           />
         </div>

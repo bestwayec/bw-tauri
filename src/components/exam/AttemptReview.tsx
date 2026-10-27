@@ -145,7 +145,7 @@ export default function AttemptReview({ attemptId, showIeltsEstimate = true }: {
             aria-pressed={filter === f}
             className={`rounded-lg px-2.5 py-1 text-[11px] font-bold ring-1 transition ${
               filter === f
-                ? "bg-[#89F336]/15 text-[#89F336] ring-[#89F336]/40"
+                ? "bg-emerald-500/15 text-emerald-400 ring-emerald-500/30"
                 : "bg-white/[0.04] text-white/50 ring-white/10 hover:text-white"
             }`}
           >

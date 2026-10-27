@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { API_BASE_URL, clearSession, isApiMisconfigured, login, normalizePhone } from "@/lib/api";
+import { API_BASE_URL, clearSession, get, isApiMisconfigured, login, normalizePhone, setSession, type MeResponse } from "@/lib/api";
 import {
   clearBrowserLoginState,
   listenDeepLink,
@@ -51,6 +51,41 @@ export default function Login({ onLogin }: Props) {
 
   async function handleCallback(url: string, s: BrowserLoginState | null) {
     const p = parseAuthCallbackUrl(url);
+    if (p.token) {
+      setBusy("exchange");
+      setError(null);
+      try {
+        await clearBrowserLoginState();
+        await setSession(p.token, p.refresh ?? null);
+        const meRes = await get<MeResponse>("/auth/me", { token: p.token });
+        const user = meRes?.user;
+        const role = String(user?.role ?? "");
+        const ALLOWED_ROLES = ["student", "teacher", "admin", "super_admin"];
+        if (!ALLOWED_ROLES.includes(role)) {
+          await clearSession();
+          setError(`Access denied: unauthorized role (${role || "none"}).`);
+          setBusy("idle");
+          return;
+        }
+        if (!user?.id) {
+          await clearSession();
+          setError("Sign-in failed. Please try again.");
+          setBusy("idle");
+          return;
+        }
+        onLoginRef.current({
+          id: user.id,
+          name: typeof user.name === "string" ? user.name : null,
+          phone: typeof user.phone === "string" ? user.phone : null,
+          role,
+        });
+        return;
+      } catch (e) {
+        setError(friendlyExchangeError(e));
+        setBusy("idle");
+        return;
+      }
+    }
     if (p.error && !p.code) {
       setError(p.error);
       setBusy("idle");

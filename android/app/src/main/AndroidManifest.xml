@@ -40,6 +40,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="bestway-exam" />
                 <data android:scheme="bestway" />
+                <data android:scheme="bestwayapp" />
             </intent-filter>
         </activity>
     </application>

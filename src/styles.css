@@ -72,15 +72,15 @@ body,
   --brand-subtle: rgba(16, 185, 129, 0.15);
   --brand-subtle-fg: #6EE7B7;
 
-  --accent: #89F336;
-  --accent-fg: #101704;
-  --accent-subtle: rgba(137, 243, 54, 0.15);
+  --accent: #10B981;
+  --accent-fg: #FFFFFF;
+  --accent-subtle: rgba(16, 185, 129, 0.15);
 
   --orange: #F59E0B;
   --orange-fg: #451A03;
   --orange-subtle: rgba(245, 158, 11, 0.15);
 
-  --highlight: #89F336;
+  --highlight: #34D399;
 
   --success: #10B981;
   --success-bg: rgba(16, 185, 129, 0.15);
@@ -1325,8 +1325,8 @@ textarea.field {
 
 .bw-boot {
   --bw-stage: 336px;
-  --bw-green: #89f336;
-  --bw-green-soft: rgba(137, 243, 54, 0.55);
+  --bw-green: #10b981;
+  --bw-green-soft: rgba(16, 185, 129, 0.55);
   --bw-accent: #ffed29;
   --bw-orange: #ff991c;
   position: fixed;
