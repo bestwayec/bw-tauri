@@ -19,7 +19,7 @@ beforeEach(() => {
 
 describe("bundled desktop version", () => {
   it("matches package.json so the app never compares itself against an older release", () => {
-    expect(APP_VERSION).toBe("0.8.5");
+    expect(APP_VERSION).toBe("1.0.6");
     expect(APP_VERSION).toBe(pkg.version);
     // The manual-installer channel must point at this exact release.
     expect(DESKTOP_INSTALLER_VERSION).toBe(pkg.version);
@@ -57,10 +57,10 @@ describe("installerUrlFor", () => {
   });
 
   it("refuses unsafe download URLs and never substitutes another release", () => {
-    expect(installerUrlFor("0.9.9", "javascript:alert(1)")).toBeNull();
-    expect(installerUrlFor("0.9.9", "http://evil.test/pkg.exe")).toBeNull();
-    expect(installerUrlFor("0.9.9", "file:///etc/passwd")).toBeNull();
-    expect(installerUrlFor("0.9.9", null)).toBeNull();
+    expect(installerUrlFor("1.1.0", "javascript:alert(1)")).toBeNull();
+    expect(installerUrlFor("1.1.0", "http://evil.test/pkg.exe")).toBeNull();
+    expect(installerUrlFor("1.1.0", "file:///etc/passwd")).toBeNull();
+    expect(installerUrlFor("1.1.0", null)).toBeNull();
   });
 
   it("falls back to the published installer of exactly this release", () => {
@@ -87,21 +87,21 @@ describe("checkForUpdate", () => {
 
   it("returns the advertised release with a safe installer URL", async () => {
     vi.mocked(get).mockResolvedValueOnce({
-      version: "0.9.9",
+      version: "1.1.0",
       downloadUrl: "https://cdn.example.test/app-0.5.7.exe",
     });
     await expect(checkForUpdate()).resolves.toEqual({
       current: APP_VERSION,
-      latest: "0.9.9",
+      latest: "1.1.0",
       downloadUrl: "https://cdn.example.test/app-0.5.7.exe",
     });
   });
 
   it("nulls an unsafe download URL instead of offering it", async () => {
-    vi.mocked(get).mockResolvedValueOnce({ version: "0.9.9", downloadUrl: "javascript:alert(1)" });
+    vi.mocked(get).mockResolvedValueOnce({ version: "1.1.0", downloadUrl: "javascript:alert(1)" });
     await expect(checkForUpdate()).resolves.toEqual({
       current: APP_VERSION,
-      latest: "0.9.9",
+      latest: "1.1.0",
       downloadUrl: null,
     });
   });
