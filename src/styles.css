@@ -202,7 +202,7 @@ body {
 
 /* Frontend text gradient: brand -> accent -> orange */
 .text-gradient-brand {
-  background-image: linear-gradient(110deg, var(--brand), var(--accent) 52%, var(--orange));
+  background-image: linear-gradient(110deg, #10B981, #34D399 52%, #6EE7B7);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -216,7 +216,7 @@ body {
 .ring-gradient {
   background:
     linear-gradient(var(--surface), var(--surface)) padding-box,
-    linear-gradient(120deg, var(--brand), var(--accent), var(--orange)) border-box;
+    linear-gradient(120deg, #10B981, #34D399, #059669) border-box;
   border: 1.5px solid transparent;
 }
 
@@ -1327,7 +1327,7 @@ textarea.field {
   --bw-stage: 336px;
   --bw-green: #10b981;
   --bw-green-soft: rgba(16, 185, 129, 0.55);
-  --bw-accent: #ffed29;
+  --bw-accent: #10b981;
   --bw-orange: #ff991c;
   position: fixed;
   inset: 0;
@@ -1410,7 +1410,7 @@ textarea.field {
 .bw-particle {
   position: absolute;
   border-radius: 9999px;
-  background: rgba(185, 255, 131, 0.8);
+  background: rgba(16, 185, 129, 0.8);
   opacity: 0;
   animation: bw-particle-in 0.6s ease-out both;
 }
@@ -1664,7 +1664,7 @@ textarea.field {
   text-indent: 0.32em;
   line-height: 1.9;
   text-wrap: balance;
-  color: #b9ff83;
+  color: #34d399;
   opacity: 0;
   transform: translateY(8px);
   animation: bw-rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) 1.15s both;

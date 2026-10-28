@@ -300,10 +300,10 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
                   key={level}
                   type="button"
                   aria-pressed={practiceLevel === level}
-                  className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                  className={`rounded-lg px-3 py-2 text-xs transition ${
                     practiceLevel === level
-                      ? 'btn-brand'
-                      : 'btn-ghost border border-emerald-500/15'
+                      ? 'bg-emerald-500 text-slate-950 font-semibold shadow-[0_0_15px_rgba(16,185,129,0.3)]'
+                      : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
                   }`}
                   onClick={() => {
                     setPracticeLevel(level);
@@ -325,10 +325,10 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
                 key={value}
                 type="button"
                 aria-pressed={category === value}
-                className={`rounded-lg px-3 py-2 text-xs font-semibold capitalize transition ${
+                className={`rounded-lg px-3 py-2 text-xs capitalize transition ${
                   category === value
-                    ? 'btn-brand'
-                    : 'btn-ghost border border-emerald-500/15'
+                    ? 'bg-emerald-500 text-slate-950 font-semibold shadow-[0_0_15px_rgba(16,185,129,0.3)]'
+                    : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
                 }`}
                 onClick={() => {
                   setCategory(value);

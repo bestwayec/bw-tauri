@@ -77,7 +77,40 @@ export interface StartResult {
 /** Active tests visible to the signed-in student. Validated against the backend shape. */
 export async function listTests(limit = 50, program?: ExamProgram): Promise<TestListItem[]> {
   const raw = await get<unknown>("/tests", { limit, program });
-  return parseOrThrow("GET /tests", TestListSchema, raw);
+  try {
+    return parseOrThrow("GET /tests", TestListSchema, raw);
+  } catch {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter(
+        (item): item is Record<string, unknown> =>
+          typeof item === "object" && item !== null && typeof (item as { id?: unknown }).id === "string",
+      )
+      .map((item) => ({
+        id: String(item.id),
+        type: typeof item.type === "string" && item.type ? item.type : "multilevel",
+        title: typeof item.title === "string" && item.title ? item.title : "Practice Test",
+        level: typeof item.level === "string" ? item.level : null,
+        practiceLevel:
+          item.practiceLevel === "A1" ||
+          item.practiceLevel === "A2" ||
+          item.practiceLevel === "B1" ||
+          item.practiceLevel === "B2" ||
+          item.practiceLevel === "C1"
+            ? item.practiceLevel
+            : null,
+        isDemo: Boolean(item.isDemo),
+        isActive: item.isActive !== false,
+        durationMinutes: typeof item.durationMinutes === "number" ? item.durationMinutes : null,
+        questionCount: typeof item.questionCount === "number" ? item.questionCount : 0,
+        sections: Array.isArray(item.sections)
+          ? (item.sections.filter(
+              (s): s is TestSection =>
+                s === "listening" || s === "reading" || s === "writing" || s === "speaking",
+            ) as TestSection[])
+          : [],
+      }));
+  }
 }
 
 export function startTest(testId: string): Promise<StartResult> {

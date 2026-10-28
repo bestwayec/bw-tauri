@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { post } from "./api";
+import { get, post } from "./api";
 import {
+  listMockExams,
   MOCK_SECTION_MINUTES,
   singleSectionOf,
   startMockExam,
@@ -99,5 +100,69 @@ describe("single-section start", () => {
 
   it("publishes the practice durations shown on the picker", () => {
     expect(MOCK_SECTION_MINUTES).toEqual({ listening: 35, reading: 60, writing: 60, speaking: 15 });
+  });
+});
+
+describe("listMockExams schema resilience & raw fallback", () => {
+  it("accepts writing_speaking, diagnostic, section, and custom profile values without SCHEMA_MISMATCH", async () => {
+    vi.mocked(get).mockResolvedValueOnce([
+      {
+        id: "exam-ws",
+        type: "multilevel",
+        profile: "writing_speaking",
+        title: "Writing + Speaking Essentials (B2)",
+        description: null,
+        level: "B2",
+        practiceLevel: "B2",
+        isDemo: false,
+        isPublished: true,
+        ready: true,
+        skills: ["writing", "speaking"],
+        questionCount: 2,
+        durationMinutes: 75,
+        price: 0,
+        access: "granted",
+      },
+      {
+        id: "exam-diag",
+        type: "ielts_academic",
+        profile: "diagnostic",
+        track: "IELTS",
+        status: "published",
+        difficulty: "hard",
+        target_level: "C1",
+        title: "Diagnostic IELTS",
+        description: null,
+        level: "C1",
+        isDemo: true,
+        isPublished: true,
+        skills: ["reading"],
+        questionCount: 13,
+        durationMinutes: 20,
+        price: 0,
+        access: "granted",
+      },
+    ]);
+    const list = await listMockExams("MULTILEVEL");
+    expect(list).toHaveLength(2);
+    expect(list[0].profile).toBe("writing_speaking");
+    expect(list[1].profile).toBe("diagnostic");
+  });
+
+  it("falls back safely when unexpected fields appear in raw array items", async () => {
+    vi.mocked(get).mockResolvedValueOnce([
+      {
+        id: "exam-raw-fallback",
+        type: "custom_future_track",
+        profile: null,
+        title: "Future Track Exam",
+        skills: ["listening", "unknown_skill"],
+        questionCount: 10,
+      },
+    ]);
+    const list = await listMockExams("MULTILEVEL");
+    expect(list).toHaveLength(1);
+    expect(list[0].id).toBe("exam-raw-fallback");
+    expect(list[0].profile).toBe("practice");
   });
 });

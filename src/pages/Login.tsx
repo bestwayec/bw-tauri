@@ -351,7 +351,7 @@ export default function Login({ onLogin }: Props) {
       <div className="card rounded-3xl p-8 shadow-[0_24px_80px_rgba(0,0,0,0.55)] sm:p-10">
         {/* Brand header */}
         <div className="flex items-center gap-3">
-          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-brand to-accent text-lg font-black text-brand-fg shadow-[0_0_28px_rgba(16, 185, 129,0.5)]">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold text-lg shadow-[0_0_20px_rgba(16,185,129,0.2)]">
             B
           </div>
           <div className="min-w-0 flex-1 leading-tight">

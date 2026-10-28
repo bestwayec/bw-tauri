@@ -42,22 +42,33 @@ export const MockExamTypeSchema = z.enum(["ielts_academic", "ielts_general", "mu
 export const MockSkillSchema = z.enum(["listening", "reading", "writing", "speaking"]);
 export const MockAccessSchema = z.enum(["granted", "pending", "locked"]);
 
+export const MockProfileSchema = z
+  .enum(["practice", "full_mock", "writing_speaking", "diagnostic", "section", "partial_practice", "single_skill"])
+  .or(z.string())
+  .catch("practice")
+  .default("practice");
+
 export const MockExamListItemSchema = z.object({
   id: z.string(),
-  type: MockExamTypeSchema,
-  profile: z.string().nullable().optional(),
-  title: z.string(),
-  description: nullableString,
-  level: nullableString,
+  type: MockExamTypeSchema.catch("multilevel").default("multilevel"),
+  profile: z.string().nullable().optional().catch("practice").default("practice").transform((v) => v || "practice"),
+  rawProfile: z.string().nullable().optional().catch(null),
+  track: z.string().nullable().optional().catch(null),
+  status: z.string().nullable().optional().catch("published").default("published"),
+  difficulty: z.string().nullable().optional().catch(null),
+  target_level: z.string().nullable().optional().catch(null),
+  title: z.string().catch("Mock Exam").default("Mock Exam"),
+  description: nullableString.catch(null).default(null),
+  level: nullableString.catch(null).default(null),
   practiceLevel: z.enum(['A1', 'A2', 'B1', 'B2', 'C1']).nullable().optional().catch(null),
-  isDemo: z.boolean(),
-  isPublished: z.boolean(),
-  ready: z.boolean().optional().default(true),
-  skills: z.array(MockSkillSchema),
-  questionCount: z.number(),
-  durationMinutes: nullableNumber,
-  price: z.number(),
-  access: MockAccessSchema,
+  isDemo: z.boolean().catch(false).default(false),
+  isPublished: z.boolean().catch(true).default(true),
+  ready: z.boolean().optional().catch(true).default(true),
+  skills: z.array(MockSkillSchema).catch([]).default([]),
+  questionCount: z.number().catch(0).default(0),
+  durationMinutes: nullableNumber.catch(null).default(null),
+  price: z.number().catch(0).default(0),
+  access: MockAccessSchema.catch("granted").default("granted"),
 });
 
 export const MockExamListSchema = z.array(MockExamListItemSchema);
@@ -181,15 +192,19 @@ export const MockSubmitResultSchema = z.object({
 
 export const TestListItemSchema = z.object({
   id: z.string(),
-  type: z.string(),
-  title: z.string(),
-  level: nullableString,
+  type: z.string().catch("multilevel").default("multilevel"),
+  track: z.string().nullable().optional().catch(null),
+  status: z.string().nullable().optional().catch("published").default("published"),
+  difficulty: z.string().nullable().optional().catch(null),
+  target_level: z.string().nullable().optional().catch(null),
+  title: z.string().catch("Practice Test").default("Practice Test"),
+  level: nullableString.catch(null).default(null),
   practiceLevel: z.enum(['A1', 'A2', 'B1', 'B2', 'C1']).nullable().optional().catch(null),
-  isDemo: z.boolean(),
-  isActive: z.boolean(),
-  durationMinutes: nullableNumber,
-  questionCount: z.number(),
-  sections: z.array(z.enum(["listening", "reading", "writing", "speaking"])),
+  isDemo: z.boolean().catch(false).default(false),
+  isActive: z.boolean().catch(true).default(true),
+  durationMinutes: nullableNumber.catch(null).default(null),
+  questionCount: z.number().catch(0).default(0),
+  sections: z.array(z.enum(["listening", "reading", "writing", "speaking"])).catch([]).default([]),
 });
 
 export const TestListSchema = z.array(TestListItemSchema);

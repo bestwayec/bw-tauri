@@ -107,7 +107,7 @@ function OnlineDot() {
   return (
     <span className="flex items-center gap-1.5 text-[11px] text-white/45">
       <span
-        className={`h-1.5 w-1.5 rounded-full ${online ? "bg-emerald-400 shadow-[0_0_8px_#10B981]" : "bg-red-400"}`}
+        className={`h-2 w-2 rounded-full ${online ? "bg-[#10B981] shadow-[0_0_8px_#10B981]" : "bg-red-400"}`}
       />
       {online ? "Online" : "Offline"}
     </span>

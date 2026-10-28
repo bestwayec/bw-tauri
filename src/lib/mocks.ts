@@ -211,7 +211,51 @@ export interface MockSubmitResult {
 /** Published + demo mocks visible to the signed-in student. Validated against the backend shape. */
 export async function listMockExams(program?: ExamProgram, practiceLevel?: PracticeLevel): Promise<MockExamListItem[]> {
   const raw = await get<unknown>("/mock/exams", { program, practiceLevel });
-  return parseOrThrow("GET /mock/exams", MockExamListSchema, raw);
+  try {
+    return parseOrThrow("GET /mock/exams", MockExamListSchema, raw);
+  } catch {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter(
+        (item): item is Record<string, unknown> =>
+          typeof item === "object" && item !== null && typeof (item as { id?: unknown }).id === "string",
+      )
+      .map((item) => ({
+        id: String(item.id),
+        type:
+          item.type === "ielts_academic" || item.type === "ielts_general" || item.type === "multilevel"
+            ? item.type
+            : "multilevel",
+        profile: typeof item.profile === "string" && item.profile ? item.profile : "practice",
+        title: typeof item.title === "string" && item.title ? item.title : "Mock Exam",
+        description: typeof item.description === "string" ? item.description : null,
+        level: typeof item.level === "string" ? item.level : null,
+        practiceLevel:
+          item.practiceLevel === "A1" ||
+          item.practiceLevel === "A2" ||
+          item.practiceLevel === "B1" ||
+          item.practiceLevel === "B2" ||
+          item.practiceLevel === "C1"
+            ? item.practiceLevel
+            : null,
+        isDemo: Boolean(item.isDemo),
+        isPublished: item.isPublished !== false,
+        ready: item.ready !== false,
+        skills: Array.isArray(item.skills)
+          ? (item.skills.filter(
+              (s): s is MockSkill =>
+                s === "listening" || s === "reading" || s === "writing" || s === "speaking",
+            ) as MockSkill[])
+          : [],
+        questionCount: typeof item.questionCount === "number" ? item.questionCount : 0,
+        durationMinutes: typeof item.durationMinutes === "number" ? item.durationMinutes : null,
+        price: typeof item.price === "number" ? item.price : 0,
+        access:
+          item.access === "granted" || item.access === "pending" || item.access === "locked"
+            ? item.access
+            : "granted",
+      }));
+  }
 }
 
 export interface MockStartOptions {

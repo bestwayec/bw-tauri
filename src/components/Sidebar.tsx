@@ -274,39 +274,6 @@ export function getNavItemsForRole(role?: string): NavItem[] {
   return STUDENT_NAV;
 }
 
-function WingedEmblem({ className = "h-10 w-10" }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 48 48" role="img" aria-label="BestWay" className={`shrink-0 select-none ${className}`} xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="bw_sb_grad" x1="4" y1="2" x2="44" y2="46" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#34D399" />
-          <stop offset="55%" stopColor="#10B981" />
-          <stop offset="100%" stopColor="#059669" />
-        </linearGradient>
-        <linearGradient id="bw_sb_wing" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.95" />
-          <stop offset="100%" stopColor="#E2E8F0" stopOpacity="0.85" />
-        </linearGradient>
-        <radialGradient id="bw_sb_sun" cx="50%" cy="35%" r="65%">
-          <stop offset="0%" stopColor="#FFFFFF" />
-          <stop offset="45%" stopColor="#FEF08A" />
-          <stop offset="100%" stopColor="#F59E0B" />
-        </radialGradient>
-      </defs>
-      <rect x="1.5" y="1.5" width="45" height="45" rx="12" fill="url(#bw_sb_grad)" />
-      <path d="M13.5 2H34.5C41.4 2 46 6.6 46 13.5V17C46 10.1 40.5 5 34.5 5H13.5C7.5 5 2 10.1 2 17V13.5C2 6.6 6.6 2 13.5 2Z" fill="#FFFFFF" opacity="0.25" />
-      <circle cx="24" cy="14" r="5.5" fill="url(#bw_sb_sun)" />
-      <g stroke="#FEF08A" strokeWidth="1.6" strokeLinecap="round" opacity="0.9">
-        <line x1="24" y1="5" x2="24" y2="7" />
-        <line x1="15.5" y1="7.5" x2="17" y2="9" />
-        <line x1="32.5" y1="7.5" x2="31" y2="9" />
-      </g>
-      <path fill="url(#bw_sb_wing)" d="M5 21.5C12.5 26.5 18.5 29.5 24 29.8C29.5 29.5 35.5 26.5 43 21.5C40.5 24.2 37.8 26.2 34.8 27.7C30.8 29.8 27.2 31.1 24 32.4C20.8 31.1 17.2 29.8 13.2 27.7C10.2 26.2 7.5 24.2 5 21.5Z" opacity="0.96" />
-      <path fill="#FFFFFF" fillRule="evenodd" d="M18.5 12H26C29.6 12 32 14.2 32 17.3C32 19.3 30.9 20.8 29.2 21.6C31.5 22.3 33 24.2 33 26.9C33 30.3 30.4 32.6 26.4 32.6H18.5V12ZM22.5 15.5V19.8H25.6C27 19.8 27.7 19 27.7 17.7C27.7 16.4 27 15.5 25.6 15.5H22.5ZM22.5 23.2V29H25.9C27.4 29 28.3 27.9 28.3 26.1C28.3 24.4 27.4 23.2 25.9 23.2H22.5Z" />
-    </svg>
-  );
-}
-
 /**
  * Collapsible modern desktop navigation rail: brand, role-aware nav items, collapse control.
  */
@@ -324,7 +291,12 @@ export default function Sidebar({ route, role, collapsed, onToggle, onNavigate }
     >
       {/* Brand Header */}
       <div className={`flex items-center gap-3 px-4 pb-4 pt-5 ${collapsed ? "justify-center px-2" : ""}`}>
-        <WingedEmblem className="h-10 w-10 drop-shadow-[0_0_20px_rgba(16,185,129,0.5)]" />
+        <div
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold text-lg shadow-[0_0_20px_rgba(16,185,129,0.2)] select-none"
+          aria-label="BestWay"
+        >
+          B
+        </div>
         {!collapsed && (
           <div className="min-w-0 leading-tight">
             <p className="truncate text-sm font-bold tracking-tight text-white">Bestway Exam</p>
@@ -359,8 +331,8 @@ export default function Sidebar({ route, role, collapsed, onToggle, onNavigate }
                 collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2.5"
               } ${
                 active
-                  ? "border border-emerald-500/25 bg-emerald-500/10 text-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.12)]"
-                  : "text-white/60 hover:bg-white/[0.04] hover:text-white"
+                  ? "bg-emerald-500/10 border-l-2 border-emerald-500 text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.12)]"
+                  : "text-slate-400 hover:bg-slate-900/80 hover:text-slate-200"
               }`}
             >
               <span className={active ? "text-emerald-400" : "text-white/45 group-hover:text-white/75"}>
