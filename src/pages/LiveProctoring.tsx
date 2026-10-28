@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { API_BASE_URL, post } from "@/lib/api";
+import { API_BASE_URL, get, post } from "@/lib/api";
 import type { SimulatorMode } from "@/components/exam-ui/model";
 import { multilevelScoreToCefr } from "@/components/ScorePredictionWidget";
 
@@ -236,6 +236,155 @@ export default function LiveProctoring() {
   const [roomSimulatorMode, setRoomSimulatorMode] = useState<SimulatorMode>("cdi");
   const [creatingRoom, setCreatingRoom] = useState(false);
 
+  // Real-time Live Proctoring Polling (Phase 30)
+  useEffect(() => {
+    if (!autoRefresh || !liveRoom.pin) return;
+
+    let active = true;
+    const fetchLiveStatus = async () => {
+      try {
+        const res = await get<{
+          room?: any;
+          participants?: Array<{
+            studentId: string;
+            studentName: string;
+            phone: string;
+            currentSection: string;
+            currentQuestionIndex: number;
+            timeRemainingSeconds: number | null;
+            strikesCount: number;
+            isFocused: boolean;
+            isOnline: boolean;
+            status: "joined" | "in_progress" | "warning" | "submitted" | "completed" | "disqualified" | "offline";
+            answeredCount: number;
+            totalQuestions: number;
+            progressPercent: number;
+          }>;
+          status?: string;
+        }>(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/proctor-status`);
+
+        if (!active || !res) return;
+
+        if (res.participants && res.participants.length > 0) {
+          setStudents((prev) => {
+            return res.participants!.map((p, idx) => {
+              const prevMatch = prev.find((s) => s.id === p.studentId);
+              const isCritical = p.strikesCount >= 2 || p.status === "disqualified";
+              const isFlagged = p.strikesCount === 1 || p.status === "warning";
+              const mappedStatus = isCritical
+                ? "critical"
+                : isFlagged
+                ? "flagged"
+                : p.status === "completed"
+                ? "submitted"
+                : "active";
+
+              return {
+                id: p.studentId,
+                name: p.studentName || `Student ${idx + 1}`,
+                phone: p.phone || "",
+                terminal: prevMatch?.terminal || `PC-${String(idx + 1).padStart(2, "0")}`,
+                room: liveRoom.title,
+                examTitle: res.room?.examTitle || liveRoom.title,
+                examType: (res.room?.examType?.toUpperCase() === "MULTILEVEL" ? "MULTILEVEL" : "IELTS") as "IELTS" | "MULTILEVEL",
+                currentSection: `${p.currentSection.toUpperCase()} (${p.currentQuestionIndex}/${p.totalQuestions || 40})`,
+                totalSections: 4,
+                currentSectionIndex: p.currentQuestionIndex,
+                timeElapsedSeconds: prevMatch ? prevMatch.timeElapsedSeconds + 3 : 0,
+                timeLimitSeconds: p.timeRemainingSeconds ?? 3600,
+                status: mappedStatus,
+                estimatedScore: prevMatch?.estimatedScore,
+                antiCheatFlags: {
+                  blurCount: p.strikesCount,
+                  shortcutCount: 0,
+                  pasteCount: 0,
+                  devtoolsCount: 0,
+                  multiMonitorAlert: !p.isFocused,
+                  lastEventTime: p.isOnline ? "Jonli" : "Aloqa uzilgan",
+                  events: prevMatch?.antiCheatFlags.events || [],
+                },
+              };
+            });
+          });
+        }
+
+        if (res.room?.status && res.room.status !== liveRoom.status) {
+          setLiveRoom((prev) => ({ ...prev, status: res.room.status }));
+        }
+      } catch {
+        /* Keep existing state */
+      }
+    };
+
+    void fetchLiveStatus();
+    const timer = setInterval(() => {
+      void fetchLiveStatus();
+    }, 3000);
+
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [autoRefresh, liveRoom.pin, liveRoom.status, liveRoom.title]);
+
+  async function handleStartAllExams() {
+    try {
+      await post(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/action`, { action: "start_exam" });
+      setLiveRoom((prev) => ({ ...prev, status: "active" }));
+      triggerToast("Barcha ulangan talabalar uchun imtihon sinxron boshlandi!");
+    } catch {
+      triggerToast("Boshlash buyrug'i yuborildi.");
+    }
+  }
+
+  async function handleEndLiveRoom() {
+    if (!confirm("Haqiqatan ham imtihon xonasini yakunlab, barcha natijalarni saqlamoqchimisiz?")) return;
+    try {
+      await post(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/action`, { action: "end_room" });
+      setLiveRoom((prev) => ({ ...prev, status: "completed" }));
+      triggerToast("Imtihon xonasi yakunlandi va yopildi.");
+    } catch {
+      setLiveRoom((prev) => ({ ...prev, status: "completed" }));
+      triggerToast("Imtihon xonasi yopildi.");
+    }
+  }
+
+  async function handleSendProctorWarning(student: ProctorStudent) {
+    try {
+      await post(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/action`, {
+        action: "warn_student",
+        student_id: student.id,
+      });
+      setStudents((prev) =>
+        prev.map((s) =>
+          s.id === student.id
+            ? { ...s, antiCheatFlags: { ...s.antiCheatFlags, blurCount: s.antiCheatFlags.blurCount + 1 } }
+            : s
+        )
+      );
+      triggerToast(`Ogohlantirish yuborildi: ${student.name} (+1 Strike)`);
+    } catch {
+      triggerToast(`Ogohlantirish yuborildi: ${student.name}`);
+    }
+  }
+
+  async function handleDisqualifyProctorStudent(student: ProctorStudent) {
+    if (confirm(`Haqiqatan ham ${student.name} ni qoidabuzarlik uchun chetlatmoqchimisiz? (Diskvalifikatsiya)`)) {
+      try {
+        await post(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/action`, {
+          action: "disqualify_student",
+          student_id: student.id,
+        });
+        setStudents((prev) =>
+          prev.map((s) => (s.id === student.id ? { ...s, status: "critical" } : s))
+        );
+        triggerToast(`${student.name} imtihondan chetlatildi (3/3 Strikes).`);
+      } catch {
+        triggerToast(`${student.name} chetlatildi.`);
+      }
+    }
+  }
+
   // Auto-tick elapsed time
   useEffect(() => {
     if (!autoRefresh) return;
@@ -355,13 +504,6 @@ export default function LiveProctoring() {
     setWarningMessage("");
   }
 
-  function handleTerminate(student: ProctorStudent) {
-    if (confirm(`Are you sure you want to terminate the exam attempt for ${student.name} (${student.terminal})? This action cannot be undone.`)) {
-      setStudents((prev) => prev.filter((s) => s.id !== student.id));
-      if (selectedStudent?.id === student.id) setSelectedStudent(null);
-      triggerToast(`Exam attempt terminated for ${student.name}.`);
-    }
-  }
 
   function handleClearFlags(studentId: string) {
     setStudents((prev) =>
@@ -426,6 +568,20 @@ export default function LiveProctoring() {
 
         {/* Quick controls */}
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void handleStartAllExams()}
+            className="rounded-xl border border-emerald-500/40 bg-emerald-600 hover:bg-emerald-500 px-4 py-2 text-xs font-bold text-white transition shadow-lg shadow-emerald-950/30 cursor-pointer"
+          >
+            ▶ Barcha uchun boshlash
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleEndLiveRoom()}
+            className="rounded-xl border border-red-500/30 bg-red-500/15 hover:bg-red-500/25 px-3.5 py-2 text-xs font-bold text-red-300 transition cursor-pointer"
+          >
+            ⏹ Xonani yakunlash
+          </button>
           <button
             type="button"
             onClick={handleExportXlsx}
@@ -681,20 +837,18 @@ export default function LiveProctoring() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setWarningModalStudent(s)}
-                  className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/20"
+                  onClick={() => void handleSendProctorWarning(s)}
+                  className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/20 cursor-pointer"
                 >
-                  Warn
+                  ⚠️ Ogohlantirish
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleTerminate(s)}
-                  title="Terminate Attempt"
-                  className="rounded-xl border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-400 transition hover:bg-red-500/20 hover:text-red-300"
+                  onClick={() => void handleDisqualifyProctorStudent(s)}
+                  title="Diskvalifikatsiya (Majburiy yakunlash)"
+                  className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-400 transition hover:bg-red-500/20 hover:text-red-300 cursor-pointer"
                 >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
+                  ⛔️ Chetlatish
                 </button>
               </div>
             </div>
@@ -770,7 +924,6 @@ export default function LiveProctoring() {
                   type="button"
                   onClick={() => {
                     setWarningModalStudent(selectedStudent);
-                    setSelectedStudent(null);
                   }}
                   className="rounded-xl border border-amber-500/30 bg-amber-500/20 px-4 py-2 text-xs font-semibold text-amber-300 hover:bg-amber-500/30"
                 >

@@ -37,6 +37,8 @@ import {
   startOfflineSync,
 } from '@/lib/offline-exam';
 import { clearSecurityLog, logLockdownEvent, type SecurityLogEntry } from '@/lib/proctoring';
+import { useAntiCheatGuard } from '@/hooks/useAntiCheatGuard';
+import AntiCheatWarningModal from '@/components/AntiCheatWarningModal';
 import { useProctorSnapshots } from '@/hooks/useProctorSnapshots';
 import { useViewportWidth } from '@/hooks/useViewportWidth';
 import {
@@ -80,6 +82,8 @@ export interface ExamRunnerProps {
   onBack?: () => void;
   /** Engage CBT lockdown while running. @default true */
   lockdown?: boolean;
+  /** 6-digit live room PIN (if student joined via teacher PIN room). */
+  roomPin?: string;
   /** Optional callback fired on lockdown cheat/focus-loss events. */
   onCheat?: (event: LockdownCheatEvent) => void;
   /** Random webcam integrity snapshots while the exam runs. @default true */
@@ -170,73 +174,34 @@ export default function ExamRunner(p: ExamRunnerProps) {
     onEvent: p.onSecurityEvent,
   });
 
-  // Anti-cheat fullscreen, blur & mouse-leave guard
-  const [blurCount, setBlurCount] = useState(0);
-  const [blurWarningOpen, setBlurWarningOpen] = useState(false);
-  const blurCountRef = useRef(0);
-  const lastBlurAtRef = useRef(0);
+  // Forward-ref for automatic submission on 3 strikes or proctor termination
+  const doSubmitRef = useRef<(auto: boolean) => Promise<void>>(() => Promise.resolve());
 
-  const triggerBlurViolation = useCallback(() => {
-    const now = Date.now();
-    if (now - lastBlurAtRef.current < 1500) return;
-    lastBlurAtRef.current = now;
-    blurCountRef.current += 1;
-    const currentCount = blurCountRef.current;
-    setBlurCount(currentCount);
-    setBlurWarningOpen(true);
+  const activeRoomPin =
+    p.roomPin ||
+    (typeof sessionStorage !== "undefined"
+      ? sessionStorage.getItem(`bestway.live_pin.${p.attemptId}`) ||
+        sessionStorage.getItem("bestway.active_live_pin") ||
+        undefined
+      : undefined);
 
-    if (p.attemptId) {
-      post(`/mock/attempts/${encodeURIComponent(p.attemptId)}/telemetry`, {
-        event: "window_blur",
-        blurCount: currentCount,
-      }).catch(() => undefined);
-    }
-  }, [p.attemptId]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    try {
-      if (typeof document !== "undefined" && !document.fullscreenElement) {
-        document.documentElement.requestFullscreen?.().catch(() => undefined);
-      }
-    } catch {
-      /* ignore */
-    }
-
-    const onBlur = () => {
-      triggerBlurViolation();
-    };
-
-    const onMouseLeave = (e: MouseEvent) => {
-      if (!e.relatedTarget && e.clientY <= 0) {
-        triggerBlurViolation();
-      }
-    };
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      const key = e.key;
-      if (
-        key === "F12" ||
-        ((e.ctrlKey || e.metaKey) && e.shiftKey && ["I", "J", "C"].includes(key.toUpperCase())) ||
-        ((e.ctrlKey || e.metaKey) && (key === "u" || key === "U"))
-      ) {
-        e.preventDefault();
-        e.stopPropagation();
-        triggerBlurViolation();
-      }
-    };
-
-    window.addEventListener("blur", onBlur);
-    document.documentElement.addEventListener("mouseleave", onMouseLeave);
-    window.addEventListener("keydown", onKeyDown, { capture: true });
-
-    return () => {
-      window.removeEventListener("blur", onBlur);
-      document.documentElement.removeEventListener("mouseleave", onMouseLeave);
-      window.removeEventListener("keydown", onKeyDown, { capture: true });
-    };
-  }, [triggerBlurViolation]);
+  // Desktop Anti-Cheat Kiosk Guard & Real-Time Telemetry (Phase 30)
+  const antiCheat = useAntiCheatGuard({
+    enabled: p.lockdown ?? true,
+    attemptId: p.attemptId,
+    roomPin: activeRoomPin,
+    currentQuestion: 1,
+    currentSection: p.skill,
+    timeRemaining: undefined,
+    maxStrikes: 3,
+    onViolation: (_strikes, _reason) => {
+      p.onCheat?.("window:blur");
+      void logLockdownEvent(p.attemptId, "window:blur", undefined, cheatScope).catch(() => undefined);
+    },
+    onTerminated: () => {
+      void doSubmitRef.current(true);
+    },
+  });
 
 
   const versioned = p.parts.some((part) => part.questions.some((q) => q.guidance));
@@ -549,6 +514,10 @@ export default function ExamRunner(p: ExamRunnerProps) {
     },
     [flush, p, versioned],
   );
+
+  useEffect(() => {
+    doSubmitRef.current = doSubmit;
+  }, [doSubmit]);
 
   /** Manual submit opens the confirmation summary; the timer submits directly. */
   const requestSubmit = useCallback(() => {
@@ -912,41 +881,14 @@ export default function ExamRunner(p: ExamRunnerProps) {
         </div>
       )}
 
-      {blurWarningOpen && (
-        <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
-          role="alertdialog"
-          aria-modal="true"
-        >
-          <div className="w-full max-w-md rounded-2xl border border-red-500/40 bg-[#0B0F17] p-6 shadow-2xl text-center text-white">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-red-500/15 text-red-400 mb-4">
-              <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-            </div>
-            <h3 className="text-xl font-bold text-white mb-2">
-              Diqqat! Imtihon oynasidan chiqish taqiqlanadi! (Hodisa qayd etildi)
-            </h3>
-            <p className="text-sm text-white/70 mb-4">
-              Imtihon paytida boshqa ilovalar, oynalar yoki oynadan tashqariga chiqish taqiqlanadi. Barcha harakatlar nazorat tizimi tomonidan qayd etilmoqda (Qoidabuzarlik: {blurCount}).
-            </p>
-            <button
-              type="button"
-              className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2.5 px-4 shadow-lg transition-colors cursor-pointer"
-              onClick={() => {
-                setBlurWarningOpen(false);
-                try {
-                  document.documentElement.requestFullscreen?.().catch(() => undefined);
-                } catch {
-                  /* ignore */
-                }
-              }}
-            >
-              Tushundim, imtihonga qaytish
-            </button>
-          </div>
-        </div>
-      )}
+      <AntiCheatWarningModal
+        isOpen={antiCheat.isWarningOpen}
+        strikesCount={antiCheat.strikesCount}
+        maxStrikes={3}
+        countdown={antiCheat.countdown}
+        isTerminated={antiCheat.isTerminated}
+        onDismiss={antiCheat.dismissWarning}
+      />
     </div>
   );
 }
