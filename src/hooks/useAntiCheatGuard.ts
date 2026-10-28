@@ -29,10 +29,51 @@ export interface UseAntiCheatGuardResult {
   isWarningOpen: boolean;
   countdown: number;
   isTerminated: boolean;
+  hasMultiMonitor: boolean;
+  recheckMonitors: () => Promise<boolean>;
   dismissWarning: () => void;
   triggerViolation: (reason?: string) => void;
   relockKiosk: () => Promise<void>;
   unlockKiosk: () => Promise<void>;
+}
+
+/** Safely wipe system clipboard on enter/exit */
+export function wipeClipboard(): void {
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText("").catch(() => undefined);
+    }
+  } catch {
+    /* Safe fallback if clipboard access denied */
+  }
+}
+
+/** Detect if multiple displays / monitors are connected */
+export async function checkMultiMonitor(): Promise<boolean> {
+  try {
+    const { availableMonitors } = await import("@tauri-apps/api/window").catch(() => ({
+      availableMonitors: null as any,
+    }));
+    if (typeof availableMonitors === "function") {
+      const monitors = await availableMonitors();
+      if (Array.isArray(monitors) && monitors.length > 1) {
+        return true;
+      }
+    }
+  } catch {
+    /* fallback to browser API */
+  }
+
+  if (typeof window !== "undefined") {
+    try {
+      if ((window.screen as any)?.isExtended) {
+        return true;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return false;
 }
 
 export function isBlockedKeyCombo(e: {
@@ -71,6 +112,8 @@ export function getAntiCheatSeverity(strikesCount: number, maxStrikes: number = 
 }
 
 export async function setKioskLock(locked: boolean): Promise<void> {
+  wipeClipboard();
+  wipeClipboard();
   try {
     const { getCurrentWindow } = await import("@tauri-apps/api/window").catch(() => ({
       getCurrentWindow: null as any,
@@ -124,6 +167,19 @@ export function useAntiCheatGuard(options: UseAntiCheatGuardOptions = {}): UseAn
   const [isWarningOpen, setIsWarningOpen] = useState(false);
   const [countdown, setCountdown] = useState(10);
   const [isTerminated, setIsTerminated] = useState(false);
+  const [hasMultiMonitor, setHasMultiMonitor] = useState(false);
+
+  const recheckMonitors = useCallback(async () => {
+    const isMulti = await checkMultiMonitor();
+    setHasMultiMonitor(isMulti);
+    return isMulti;
+  }, []);
+
+  useEffect(() => {
+    if (enabled && !isTerminated) {
+      void recheckMonitors();
+    }
+  }, [enabled, isTerminated, recheckMonitors]);
 
   const strikesRef = useRef(0);
   const isTerminatedRef = useRef(false);
@@ -250,9 +306,11 @@ export function useAntiCheatGuard(options: UseAntiCheatGuardOptions = {}): UseAn
   // Engage Kiosk Lock on mount and unlock on unmount
   useEffect(() => {
     if (enabled && !isTerminated) {
+      wipeClipboard();
       void relockKiosk();
     }
     return () => {
+      wipeClipboard();
       void unlockKiosk();
     };
   }, [enabled, isTerminated, relockKiosk, unlockKiosk]);
@@ -348,6 +406,8 @@ export function useAntiCheatGuard(options: UseAntiCheatGuardOptions = {}): UseAn
     isWarningOpen,
     countdown,
     isTerminated,
+    hasMultiMonitor,
+    recheckMonitors,
     dismissWarning,
     triggerViolation,
     relockKiosk,

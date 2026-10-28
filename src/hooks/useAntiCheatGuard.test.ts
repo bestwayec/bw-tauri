@@ -2,10 +2,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  checkMultiMonitor,
   getAntiCheatSeverity,
   isBlockedKeyCombo,
   setKioskLock,
   useAntiCheatGuard,
+  wipeClipboard,
 } from "./useAntiCheatGuard";
 
 afterEach(() => {
@@ -106,5 +108,18 @@ describe("useAntiCheatGuard", () => {
 
     const htmlDisabled = renderToStaticMarkup(createElement(Probe, { enabled: false }));
     expect(htmlDisabled).toBe("<div>strikes:0;warning:false;term:false;count:10</div>");
+  });
+});
+
+describe("wipeClipboard", () => {
+  it("clears clipboard text safely without throwing", () => {
+    expect(() => wipeClipboard()).not.toThrow();
+  });
+});
+
+describe("checkMultiMonitor", () => {
+  it("returns a boolean resolving properly", async () => {
+    const isMulti = await checkMultiMonitor();
+    expect(typeof isMulti).toBe("boolean");
   });
 });

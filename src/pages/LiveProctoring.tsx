@@ -19,6 +19,32 @@ export function generateSixDigitPin(): string {
   return String(n);
 }
 
+/** Synthesize attention chime when a student commits a strike */
+export function playStrikeChime(): void {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.3);
+
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.35);
+  } catch {
+    /* Safe fallback if audio context blocked */
+  }
+}
+
 export interface ProctorStudent {
   id: string;
   name: string;
@@ -267,6 +293,14 @@ export default function LiveProctoring() {
 
         if (res.participants && res.participants.length > 0) {
           setStudents((prev) => {
+            const hasNewStrike = res.participants!.some((p) => {
+              const match = prev.find((s) => s.id === p.studentId);
+              return match && p.strikesCount > match.antiCheatFlags.blurCount;
+            });
+            if (hasNewStrike) {
+              playStrikeChime();
+            }
+
             return res.participants!.map((p, idx) => {
               const prevMatch = prev.find((s) => s.id === p.studentId);
               const isCritical = p.strikesCount >= 2 || p.status === "disqualified";
@@ -334,6 +368,24 @@ export default function LiveProctoring() {
       triggerToast("Barcha ulangan talabalar uchun imtihon sinxron boshlandi!");
     } catch {
       triggerToast("Boshlash buyrug'i yuborildi.");
+    }
+  }
+
+  async function handleExtendAllExams(minutes: number = 5) {
+    try {
+      await post(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/action`, {
+        action: "extend_time",
+        minutes,
+      });
+      triggerToast(`Barcha talabalar uchun +${minutes} daqiqa qo'shildi!`);
+      setStudents((prev) =>
+        prev.map((s) => ({
+          ...s,
+          timeLimitSeconds: s.timeLimitSeconds + minutes * 60,
+        }))
+      );
+    } catch {
+      triggerToast("Vaqt qo'shishda xatolik yuz berdi");
     }
   }
 
@@ -574,6 +626,13 @@ export default function LiveProctoring() {
             className="rounded-xl border border-emerald-500/40 bg-emerald-600 hover:bg-emerald-500 px-4 py-2 text-xs font-bold text-white transition shadow-lg shadow-emerald-950/30 cursor-pointer"
           >
             ▶ Barcha uchun boshlash
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleExtendAllExams(5)}
+            className="rounded-xl border border-amber-500/35 bg-amber-500/15 hover:bg-amber-500/25 px-3.5 py-2 text-xs font-bold text-amber-300 transition cursor-pointer"
+          >
+            ⏱ +5 Daqiqa qo'shish
           </button>
           <button
             type="button"

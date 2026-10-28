@@ -881,6 +881,35 @@ export default function ExamRunner(p: ExamRunnerProps) {
         </div>
       )}
 
+      {/* Multi-Monitor Alert Block */}
+      {antiCheat.hasMultiMonitor && (
+        <div
+          className="fixed inset-0 z-[999999] flex items-center justify-center bg-black/95 p-4 backdrop-blur-lg"
+          role="alertdialog"
+        >
+          <div className="w-full max-w-md rounded-3xl border border-amber-500/50 bg-[#0B0F17] p-8 text-center text-white shadow-2xl">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-400">
+              <svg className="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
+            </div>
+            <h3 className="text-xl font-bold text-white mb-2">Qo'shimcha Monitor Aniqlondi</h3>
+            <p className="text-xs text-gray-300 leading-relaxed mb-6">
+              Imtihon faqat 1 ta monitor bilan o'tkaziladi. Iltimos, ikkinchi monitorni uzing!
+            </p>
+            <button
+              type="button"
+              onClick={() => void antiCheat.recheckMonitors()}
+              className="w-full rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 shadow-lg transition cursor-pointer"
+            >
+              Qayta tekshirish
+            </button>
+          </div>
+        </div>
+      )}
+
       <AntiCheatWarningModal
         isOpen={antiCheat.isWarningOpen}
         strikesCount={antiCheat.strikesCount}
