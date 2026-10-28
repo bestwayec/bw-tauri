@@ -25,7 +25,7 @@ export function validateRelease(env, versions) {
   }
   const { packageVersion, tauriVersion, cargoVersion } = versions;
   if (!packageVersion || packageVersion !== tauriVersion || packageVersion !== cargoVersion ||
-      env.GITHUB_REF_NAME !== `bestway-app-v${packageVersion}`) {
+      ![`bestway-app-v${packageVersion}`, `v${packageVersion}`].includes(env.GITHUB_REF_NAME)) {
     throw new Error('Release tag and package, Tauri and Cargo versions must match');
   }
   return {
