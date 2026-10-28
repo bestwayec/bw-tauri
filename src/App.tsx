@@ -30,6 +30,7 @@ import ReauthModal from "@/components/ReauthModal";
 import { checkForUpdate, getDismissedVersion, type UpdateInfo } from "@/lib/version";
 import ClickSpark from "@/components/ClickSpark";
 import CrashRecovery from "@/components/CrashRecovery";
+import ResumeExamModal, { persistActiveMockSession, clearActiveMockSession } from "@/components/ResumeExamModal";
 import { logout } from "@/lib/api";
 import { isAdminRole, isStaffRole, isTeacherRole } from "@/lib/auth";
 import { useSessionStore } from "@/lib/session-store";
@@ -265,6 +266,7 @@ export default function App() {
   };
 
   const handleStartMock = (mock: MockExamListItem, start: MockStartResult, chosen?: MockSkill) => {
+    persistActiveMockSession(mock, start, chosen);
     setActiveMock(mock);
     setActiveMockStart(start);
     const wanted = targetSectionOf(start, chosen);
@@ -276,6 +278,7 @@ export default function App() {
   };
 
   const handleFinishMock = (result: MockSubmitResult) => {
+    clearActiveMockSession();
     if (!activeMockSection) return;
     setLastMockResult({ ...result, skill: activeMockSection.skill });
     setLastScore(null);
@@ -284,6 +287,7 @@ export default function App() {
   };
 
   const handleBackToExams = () => {
+    clearActiveMockSession();
     setActiveTest(null);
     setActiveStart(null);
     setActiveMock(null);
@@ -389,6 +393,7 @@ export default function App() {
           </Suspense>
         )}
         <CrashRecovery />
+    <ResumeExamModal onResume={handleStartMock} isExamActive={examActive} />
       </>
     );
   }

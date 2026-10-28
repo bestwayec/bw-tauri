@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { post } from "@/lib/api";
+import { get, post } from "@/lib/api";
 import { startMockExam, type MockExamListItem, type MockStartResult } from "@/lib/mocks";
 import type { SimulatorMode } from "@/components/exam-ui/model";
 
@@ -48,10 +48,17 @@ export default function LiveExamPinJoin({ onJoinedMock, onNavigateExams }: Props
     setJoining(true);
     setError(null);
     try {
-      const res = await post<LiveRoomJoinResponse>("/mock/live-rooms/join", {
-        pin: cleaned,
-        simulatorMode: mode,
-      });
+      let res: LiveRoomJoinResponse;
+      try {
+        res = await get<LiveRoomJoinResponse>(
+          `/v1/live-room/join?pin=${encodeURIComponent(cleaned)}&simulatorMode=${encodeURIComponent(mode)}`
+        );
+      } catch {
+        res = await post<LiveRoomJoinResponse>("/mock/live-rooms/join", {
+          pin: cleaned,
+          simulatorMode: mode,
+        });
+      }
       const resolvedMode: SimulatorMode = res.simulatorMode ?? mode;
       setJoinedRoom({ ...res, simulatorMode: resolvedMode });
 

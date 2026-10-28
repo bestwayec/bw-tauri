@@ -249,6 +249,13 @@ export default function ExamRunner(p: ExamRunnerProps) {
       const q = loadQueue(p.attemptId);
       const dirtySet = new Set(q.dirty);
       const merged = { ...p.initialAnswers };
+      try {
+        const rawSession = sessionStorage.getItem(`examui.answers.${p.attemptId}`);
+        if (rawSession) {
+          const parsed = JSON.parse(rawSession);
+          if (parsed && typeof parsed === "object") Object.assign(merged, parsed);
+        }
+      } catch {}
       for (const [qid, v] of Object.entries(q.answers)) {
         if (dirtySet.has(qid) && typeof v === "string" && (!versioned || writableIds.has(qid))) merged[qid] = v;
       }
@@ -463,6 +470,13 @@ export default function ExamRunner(p: ExamRunnerProps) {
     // Mirror every answer locally the moment it is typed, before any request:
     // this survives a reload or a crash with no network at all.
     void cacheAnswer(p.attemptId, qid, value).catch(() => undefined);
+    try {
+      sessionStorage.setItem(`examui.answer.${p.attemptId}.${qid}`, value);
+      sessionStorage.setItem(
+        `examui.answers.${p.attemptId}`,
+        JSON.stringify({ ...answersRef.current, [qid]: value })
+      );
+    } catch {}
     setAnswers((a) => (a[qid] === value ? a : { ...a, [qid]: value }));
     if (allQuestions.some((q) => q.guidance)) { setSaveState('saving'); scheduleFlush(); return; }
     if (immediate) {
