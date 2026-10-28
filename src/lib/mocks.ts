@@ -45,6 +45,10 @@ export interface MockExamListItem {
   /** Backend-authoritative start readiness. */
   ready?: boolean;
   skills: MockSkill[];
+  practiceSkills?: MockSkill[];
+  available_practice_skills?: MockSkill[];
+  practiceReady?: boolean;
+  is_practice_ready?: boolean;
   questionCount: number;
   durationMinutes: number | null;
   price: number;

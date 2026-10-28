@@ -36,9 +36,18 @@ export function supportsFullMock(exam: Pick<MockExamListItem, "profile">): boole
 
 /** Single sections offered for this exam; a section without content is disabled. */
 export function sectionChoices(
-  exam: Pick<MockExamListItem, "skills">,
+  exam: Pick<MockExamListItem, "skills"> & {
+    practiceSkills?: MockSkill[];
+    available_practice_skills?: MockSkill[];
+  },
 ): Array<{ skill: MockSkill; enabled: boolean }> {
-  const available = new Set(exam.skills);
+  const activeSkills =
+    exam.available_practice_skills && exam.available_practice_skills.length > 0
+      ? exam.available_practice_skills
+      : exam.practiceSkills && exam.practiceSkills.length > 0
+        ? exam.practiceSkills
+        : exam.skills;
+  const available = new Set(activeSkills);
   return MOCK_SKILLS.map((skill) => ({ skill, enabled: available.has(skill) }));
 }
 
@@ -122,9 +131,9 @@ export function MockSectionBody({ exam, mode, onCancel, onStart, busy, error }: 
             type="button"
             disabled={!fullMock || busy}
             onClick={() => onStart(fullMockChoice(mode))}
-            className="card mt-2 flex w-full items-center gap-4 rounded-2xl p-4 text-left transition enabled:hover:border-brand/25 disabled:opacity-40"
+            className="card mt-2 flex w-full items-center gap-4 rounded-2xl p-4 text-left transition enabled:hover:border-emerald-500/30 disabled:opacity-40"
           >
-            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-brand/10 text-2xl ring-1 ring-brand/25">
+            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-emerald-500/10 text-2xl ring-1 ring-emerald-500/30 text-emerald-400">
               🏁
             </span>
             <span className="min-w-0 flex-1">
@@ -139,7 +148,7 @@ export function MockSectionBody({ exam, mode, onCancel, onStart, busy, error }: 
               )}
             </span>
             {fullMock && (
-              <span className="shrink-0 rounded-lg bg-brand px-3 py-1.5 text-xs font-bold text-black">Start</span>
+              <span className="shrink-0 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-slate-950 shadow-sm">Start</span>
             )}
           </button>
         </div>
@@ -154,7 +163,7 @@ export function MockSectionBody({ exam, mode, onCancel, onStart, busy, error }: 
                   type="button"
                   disabled={!enabled || busy}
                   onClick={() => onStart(singleSectionChoice(mode, skill))}
-                  className="card flex w-full items-center gap-3 rounded-xl p-3.5 text-left transition enabled:hover:border-brand/25 disabled:opacity-40"
+                  className="card flex w-full items-center gap-3 rounded-xl p-3.5 text-left transition enabled:hover:border-emerald-500/30 disabled:opacity-40"
                 >
                   <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/5 text-xl ring-1 ring-white/10">
                     {MOCK_SECTION_ICON[skill]}
