@@ -268,7 +268,7 @@ export default function StudentResults() {
 
         <div className="card rounded-2xl p-4">
           <p className="text-xs font-medium uppercase tracking-wider text-white/40">High Band (7.5+)</p>
-          <p className="mt-2 text-3xl font-extrabold text-[#89F336]">{stats.highDistinction}</p>
+          <p className="mt-2 text-3xl font-extrabold text-[#10B981]">{stats.highDistinction}</p>
           <p className="mt-2 text-[11px] text-white/45">Candidates with Band 7.5+</p>
         </div>
 
@@ -508,7 +508,7 @@ export default function StudentResults() {
               </button>
             </div>
 
-            <div className="mt-6 rounded-2xl border border-emerald-500/40 bg-gradient-to-br from-emerald-500/15 to-[#89F336]/5 p-5 text-center">
+            <div className="mt-6 rounded-2xl border border-emerald-500/40 bg-gradient-to-br from-emerald-500/15 to-[#10B981]/5 p-5 text-center">
               <p className="text-xs uppercase tracking-widest text-emerald-300 font-semibold">Overall Achieved Performance</p>
               <p className="mt-2 text-5xl font-black text-white">
                 {selectedStudent.program === "IELTS" ? `Band ${selectedStudent.overallBand}` : `${selectedStudent.overallBand} Points`}

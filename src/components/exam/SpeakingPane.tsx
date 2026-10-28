@@ -232,7 +232,7 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
   return (
     <div>
       <div className="rounded-2xl bg-black/40 p-4 ring-1 ring-white/10">
-        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#89F336]/80">
+        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#10B981]/80">
           Cue card · Q{num}{part ? ` · ${part}` : ""}
         </p>
         <p className="mt-1.5 whitespace-pre-wrap leading-relaxed text-white/85" style={{ fontSize }}>
@@ -242,9 +242,9 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
 
       {/* Timers */}
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <div className={`rounded-xl px-3 py-2.5 ring-1 ${prepDone ? "bg-[#89F336]/10 ring-[#89F336]/30" : "bg-black/30 ring-white/10"}`}>
+        <div className={`rounded-xl px-3 py-2.5 ring-1 ${prepDone ? "bg-[#10B981]/10 ring-[#10B981]/30" : "bg-black/30 ring-white/10"}`}>
           <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/40">✎ Prepare</p>
-          <p className={`mt-0.5 font-mono text-xl font-black tabular-nums ${prepDone ? "text-[#89F336]" : "text-white"}`}>
+          <p className={`mt-0.5 font-mono text-xl font-black tabular-nums ${prepDone ? "text-[#10B981]" : "text-white"}`}>
             {prepDone ? "Go! ✓" : fmt(prepLeft)}
           </p>
           <div className="mt-1.5 flex gap-1.5">
@@ -270,9 +270,9 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
             )}
           </div>
         </div>
-        <div className={`rounded-xl px-3 py-2.5 ring-1 ${speakDone ? "bg-[#89F336]/10 ring-[#89F336]/30" : speakRunning ? "bg-amber-400/10 ring-amber-400/30" : "bg-black/30 ring-white/10"}`}>
+        <div className={`rounded-xl px-3 py-2.5 ring-1 ${speakDone ? "bg-[#10B981]/10 ring-[#10B981]/30" : speakRunning ? "bg-amber-400/10 ring-amber-400/30" : "bg-black/30 ring-white/10"}`}>
           <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/40">🎙 Speak</p>
-          <p className={`mt-0.5 font-mono text-xl font-black tabular-nums ${speakDone ? "text-[#89F336]" : speakRunning ? "text-amber-200" : "text-white"}`}>
+          <p className={`mt-0.5 font-mono text-xl font-black tabular-nums ${speakDone ? "text-[#10B981]" : speakRunning ? "text-amber-200" : "text-white"}`}>
             {speakDone ? "Done ✓" : fmt(speakLeft)}
           </p>
           <div className="mt-1.5 flex gap-1.5">
@@ -314,7 +314,7 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
               <button
                 type="button"
                 onClick={() => void startRecording()}
-                className="rounded-lg bg-[#89F336]/10 px-2.5 py-1 text-[11px] font-bold text-[#89F336] ring-1 ring-[#89F336]/30 hover:bg-[#89F336]/20"
+                className="rounded-lg bg-[#10B981]/10 px-2.5 py-1 text-[11px] font-bold text-[#10B981] ring-1 ring-[#10B981]/30 hover:bg-[#10B981]/20"
               >
                 ● Record
               </button>

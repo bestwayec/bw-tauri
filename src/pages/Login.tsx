@@ -60,7 +60,7 @@ export default function Login({ onLogin }: Props) {
         const meRes = await get<MeResponse>("/auth/me", { token: p.token });
         const user = meRes?.user;
         const role = String(user?.role ?? "");
-        const ALLOWED_ROLES = ["student", "teacher", "admin", "super_admin"];
+        const ALLOWED_ROLES = ["student", "teacher", "instructor", "admin", "super_admin"];
         if (!ALLOWED_ROLES.includes(role)) {
           await clearSession();
           setError(`Access denied: unauthorized role (${role || "none"}).`);
@@ -119,7 +119,7 @@ export default function Login({ onLogin }: Props) {
       await clearBrowserLoginState();
       // Fail-closed role gate: missing role must NOT pass.
       const role = String((session.user as { role?: unknown } | undefined)?.role ?? "");
-      const ALLOWED_ROLES = ["student", "teacher", "admin", "super_admin"];
+      const ALLOWED_ROLES = ["student", "teacher", "instructor", "admin", "super_admin"];
       if (!ALLOWED_ROLES.includes(role)) {
         await clearSession();
         setError(`Access denied: unauthorized role (${role || "none"}).`);
@@ -248,7 +248,7 @@ export default function Login({ onLogin }: Props) {
       const session = await exchangeCode(p.code, s.verifier, s.deviceId);
       await clearBrowserLoginState();
       const role = String((session.user as { role?: unknown } | undefined)?.role ?? "");
-      const ALLOWED_ROLES = ["student", "teacher", "admin", "super_admin"];
+      const ALLOWED_ROLES = ["student", "teacher", "instructor", "admin", "super_admin"];
       if (!ALLOWED_ROLES.includes(role)) {
         await clearSession();
         setError(`Access denied: unauthorized role (${role || "none"}).`);
@@ -300,7 +300,7 @@ export default function Login({ onLogin }: Props) {
       const session = await login(normalizedPhone, password);
       // Fail-closed: missing/unknown role must NOT default to student.
       const role = String(session.user?.role ?? "");
-      const ALLOWED_ROLES = ["student", "teacher", "admin", "super_admin"];
+      const ALLOWED_ROLES = ["student", "teacher", "instructor", "admin", "super_admin"];
       if (!ALLOWED_ROLES.includes(role)) {
         await clearSession();
         setError(`Access denied: unauthorized role (${role || "none"}).`);
@@ -351,7 +351,7 @@ export default function Login({ onLogin }: Props) {
       <div className="card rounded-3xl p-8 shadow-[0_24px_80px_rgba(0,0,0,0.55)] sm:p-10">
         {/* Brand header */}
         <div className="flex items-center gap-3">
-          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-brand to-accent text-lg font-black text-brand-fg shadow-[0_0_28px_rgba(137,243,54,0.5)]">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-brand to-accent text-lg font-black text-brand-fg shadow-[0_0_28px_rgba(16, 185, 129,0.5)]">
             B
           </div>
           <div className="min-w-0 flex-1 leading-tight">

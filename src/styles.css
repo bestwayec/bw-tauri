@@ -3,7 +3,7 @@
 /*
  * BESTWAY desktop — frontend (bestway/frontend/src/app/globals.css) bilan
  * bir xil dizayn tokenlari. Frontend — yagona manba, bu fayl faqat aks ettiradi.
- * Primary #89F336, highlight #FFED29, warmth #FF991C, dark olive surfaces.
+ * Primary #10B981, highlight #FFED29, warmth #FF991C, dark olive surfaces.
  */
 
 @theme inline {
@@ -55,15 +55,15 @@ body,
   color-scheme: dark;
 
   --bg: #0B0F17;
-  --bg-subtle: #111927;
-  --surface: #162032;
+  --bg-subtle: #111827;
+  --surface: #111827;
   --surface-hover: #1E2B45;
 
   --fg: #F8FAFC;
   --fg-muted: #94A3B8;
   --fg-subtle: #64748B;
 
-  --border: rgba(255, 255, 255, 0.08);
+  --border: rgba(16, 185, 129, 0.15);
   --border-strong: rgba(255, 255, 255, 0.16);
 
   --brand: #10B981;
@@ -104,7 +104,7 @@ body {
   font-family: var(--font-sans);
   background:
     radial-gradient(circle at 10% -10%, rgba(16, 185, 129, 0.12), transparent 32rem),
-    radial-gradient(circle at 90% 15%, rgba(137, 243, 54, 0.08), transparent 30rem),
+    radial-gradient(circle at 90% 15%, rgba(16, 185, 129, 0.08), transparent 30rem),
     var(--bg);
   color: var(--fg);
   overflow-x: hidden;
@@ -115,7 +115,7 @@ body {
 .app-bg {
   background:
     radial-gradient(circle at 10% -10%, rgba(16, 185, 129, 0.12), transparent 32rem),
-    radial-gradient(circle at 90% 15%, rgba(137, 243, 54, 0.08), transparent 30rem),
+    radial-gradient(circle at 90% 15%, rgba(16, 185, 129, 0.08), transparent 30rem),
     var(--bg);
 }
 
@@ -133,10 +133,10 @@ body {
 
 /* Glassmorphism Card: rounded 18px, border-border, sleek dark glass */
 .card {
-  background: rgba(22, 32, 50, 0.72);
+  background: #111827;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.15);
   border-radius: var(--radius-card);
   box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.4);
 }
@@ -145,7 +145,7 @@ body {
   background: rgba(17, 25, 40, 0.75);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.15);
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
 }
 
@@ -197,7 +197,7 @@ body {
 .field:focus {
   outline: none;
   border-color: var(--brand);
-  box-shadow: 0 0 0 2px rgba(137, 243, 54, 0.2);
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
 }
 
 /* Frontend text gradient: brand -> accent -> orange */
@@ -343,7 +343,7 @@ audio {
   border-radius: 9999px;
   background: var(--brand);
   border: 2px solid var(--brand-fg);
-  box-shadow: 0 0 10px rgba(137, 243, 54, 0.5);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
 }
 
 .exam-range::-moz-range-thumb {
@@ -352,7 +352,7 @@ audio {
   border-radius: 9999px;
   background: var(--brand);
   border: 2px solid var(--brand-fg);
-  box-shadow: 0 0 10px rgba(137, 243, 54, 0.5);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
 }
 
 .exam-range::-moz-range-track {
@@ -362,7 +362,7 @@ audio {
 }
 
 .exam-range:focus-visible {
-  box-shadow: 0 0 0 3px rgba(137, 243, 54, 0.25);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25);
 }
 
 /* Long-answer textareas share the field look */
@@ -1337,7 +1337,7 @@ textarea.field {
   justify-content: center;
   overflow: hidden;
   background:
-    radial-gradient(circle at 8% -10%, rgba(137, 243, 54, 0.08), transparent 28rem),
+    radial-gradient(circle at 8% -10%, rgba(16, 185, 129, 0.08), transparent 28rem),
     radial-gradient(circle at 92% 10%, rgba(255, 153, 28, 0.07), transparent 26rem),
     var(--bg);
   color: var(--fg);
@@ -1385,8 +1385,8 @@ textarea.field {
 .bw-ambient-core {
   background: radial-gradient(
     340px 340px at 50% 38%,
-    rgba(137, 243, 54, 0.16),
-    rgba(137, 243, 54, 0.05) 45%,
+    rgba(16, 185, 129, 0.16),
+    rgba(16, 185, 129, 0.05) 45%,
     transparent 70%
   );
   opacity: 0;
@@ -1396,7 +1396,7 @@ textarea.field {
 .bw-ambient-drift {
   background: radial-gradient(
     560px 380px at 50% 110%,
-    rgba(137, 243, 54, 0.06),
+    rgba(16, 185, 129, 0.06),
     transparent 65%
   );
   opacity: 0;
@@ -1442,8 +1442,8 @@ textarea.field {
   border-radius: 9999px;
   background: radial-gradient(
     closest-side,
-    rgba(137, 243, 54, 0.15),
-    rgba(137, 243, 54, 0.045) 55%,
+    rgba(16, 185, 129, 0.15),
+    rgba(16, 185, 129, 0.045) 55%,
     transparent 72%
   );
   opacity: 0;
@@ -1459,7 +1459,7 @@ textarea.field {
   background: radial-gradient(
     closest-side,
     rgba(190, 255, 210, 0.28),
-    rgba(137, 243, 54, 0.1) 55%,
+    rgba(16, 185, 129, 0.1) 55%,
     transparent 72%
   );
   opacity: 0;
@@ -1476,8 +1476,8 @@ textarea.field {
   border-radius: 9999px;
   border: 1px solid rgba(110, 231, 160, 0.7);
   box-shadow:
-    0 0 18px rgba(137, 243, 54, 0.35),
-    inset 0 0 12px rgba(137, 243, 54, 0.18);
+    0 0 18px rgba(16, 185, 129, 0.35),
+    inset 0 0 12px rgba(16, 185, 129, 0.18);
   opacity: 0;
   transform: scale(0.6);
 }
@@ -1504,9 +1504,9 @@ textarea.field {
   background: conic-gradient(
     from 0deg,
     transparent 0deg,
-    rgba(137, 243, 54, 0.06) 120deg,
+    rgba(16, 185, 129, 0.06) 120deg,
     rgba(140, 255, 180, 0.85) 178deg,
-    rgba(137, 243, 54, 0.06) 236deg,
+    rgba(16, 185, 129, 0.06) 236deg,
     transparent 360deg
   );
   -webkit-mask: radial-gradient(
@@ -1530,9 +1530,9 @@ textarea.field {
   background: conic-gradient(
     from 180deg,
     transparent 0deg,
-    rgba(137, 243, 54, 0.05) 140deg,
+    rgba(16, 185, 129, 0.05) 140deg,
     rgba(190, 255, 210, 0.5) 200deg,
-    rgba(137, 243, 54, 0.05) 260deg,
+    rgba(16, 185, 129, 0.05) 260deg,
     transparent 360deg
   );
   -webkit-mask: radial-gradient(
@@ -1572,8 +1572,8 @@ textarea.field {
   border-radius: 9999px;
   background: #c8ffd9;
   box-shadow:
-    0 0 8px 2px rgba(137, 243, 54, 0.8),
-    0 0 20px 6px rgba(137, 243, 54, 0.3);
+    0 0 8px 2px rgba(16, 185, 129, 0.8),
+    0 0 20px 6px rgba(16, 185, 129, 0.3);
 }
 
 /* One-shot cinematic entrance (no loops — the intro plays once).
@@ -1599,7 +1599,7 @@ textarea.field {
   border-radius: 28px;
   background: radial-gradient(
     closest-side,
-    rgba(137, 243, 54, 0.4),
+    rgba(16, 185, 129, 0.4),
     transparent 72%
   );
   opacity: 0;

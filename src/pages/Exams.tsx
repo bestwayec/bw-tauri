@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ExamTracks, usePrograms } from '@/components/ExamTracks';
-import { PRACTICE_LEVELS, programQueryKey, type PracticeLevel } from '@/lib/programs';
+import { isStaffRole } from '@/lib/auth';
+import { PRACTICE_LEVELS, programQueryKey, type ExamProgram, type PracticeLevel } from '@/lib/programs';
 import { matchesCatalogue, type CatalogueCategory } from '@/lib/catalogue';
 import { useSessionStore } from '@/lib/session-store';
 import { useQuery } from "@tanstack/react-query";
-import { API_BASE_URL, del } from "@/lib/api";
+import { API_BASE_URL, del, type ApiError } from "@/lib/api";
 import { listTests, startTest, type StartResult, type TestListItem } from "@/lib/tests";
 import {
   deleteMockExam,
@@ -25,96 +26,163 @@ type Props = {
 };
 
 const TYPE_STYLE: Record<string, string> = {
-  ielts: "bg-sky-400/10 text-sky-200 ring-sky-400/30",
-  ielts_academic: "bg-sky-400/10 text-sky-200 ring-sky-400/30",
+  ielts: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30",
+  ielts_academic: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30",
   ielts_general: "bg-teal-400/10 text-teal-200 ring-teal-400/30",
-  multilevel: "bg-violet-400/10 text-violet-200 ring-violet-400/30",
+  multilevel: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30",
 };
 
 type UnifiedItem =
   | { kind: "test"; data: TestListItem }
   | { kind: "mock"; data: MockExamListItem };
 
-function Greeting({ name }: { name: string | null }) {
+function Greeting({ name, isStaff }: { name: string | null; isStaff?: boolean }) {
   const hour = new Date().getHours();
   const part = hour < 5 ? "Good night" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   return (
     <div>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-brand/70">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-400">
         {part}{name ? `, ${name.split(" ")[0]}` : ""}
       </p>
-      <h1 className="mt-1 text-2xl font-black tracking-tight text-white">Ready for your exam?</h1>
-      <p className="mt-1 text-sm text-white/50">
-        Pick a test below. Listening audio plays inside the runner — set your volume first.
+      <div className="mt-1 flex flex-wrap items-center gap-2.5">
+        <h1 className="text-2xl font-black tracking-tight text-white">
+          {isStaff ? "Imtihonlar bazasi (Published Exams)" : "Ready for your exam?"}
+        </h1>
+        {isStaff && (
+          <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-300">
+            Teacher Preview Mode
+          </span>
+        )}
+      </div>
+      <p className="mt-1 text-sm text-slate-400">
+        {isStaff
+          ? "Preview published mock exams, verify audio and sections, or manage exam availability."
+          : "Pick a test below. Listening audio plays inside the runner — set your volume first."}
       </p>
     </div>
   );
 }
 
-/**
- * TanStack Query fetching: cached per source (stale-while-revalidate),
- * exponential-backoff retries, refetch on focus/online, background refresh
- * every 30s. This screen unmounts during an exam, so no exam-time polling;
- * background refills also pause while the window is hidden.
- */
 const QUERY_OPTS = {
   staleTime: 30_000,
   refetchInterval: 30_000,
   refetchIntervalInBackground: false,
   refetchOnWindowFocus: true,
   refetchOnReconnect: true,
-  retry: 3,
-  retryDelay: (attempt: number) => Math.min(1_000 * 2 ** attempt, 15_000),
+  retry: (failureCount: number, error: unknown) => {
+    const err = error as ApiError | undefined;
+    if (
+      err?.code === "SCHEMA_MISMATCH" ||
+      (typeof err?.status === "number" && err.status >= 400 && err.status < 500)
+    ) {
+      return false;
+    }
+    return failureCount < 2;
+  },
+  retryDelay: (attempt: number) => Math.min(1_000 * 2 ** attempt, 5_000),
 } as const;
 
 export default function Exams({ studentName, onStart, onStartMock }: Props) {
   const programs = usePrograms();
-  const program = programs.data?.activeProgram;
   const userId = useSessionStore((state) => state.profile?.id);
   const userRole = useSessionStore((state) => state.profile?.role);
-  const canDeleteExam =
-    userRole === "teacher" || userRole === "admin" || userRole === "super_admin";
+  const profileProgram = useSessionStore((state) => state.profile?.activeProgram);
+  const staffUser = isStaffRole(userRole);
+  const canDeleteExam = staffUser;
+
+  const [manualTrack, setManualTrack] = useState<ExamProgram | null>(null);
   const [practiceLevel, setPracticeLevel] = useState<PracticeLevel | 'All'>('All');
   const [category, setCategory] = useState<CatalogueCategory>('all');
   const [startingId, setStartingId] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ kind: "mock" | "test"; id: string; title: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
-  // Start-of-exam choice (Full Mock vs one section) — no request until confirmed.
   const [picker, setPicker] = useState<{ mock: MockExamListItem; mode: MockAttemptMode } | null>(null);
+  const [watchdogExpired, setWatchdogExpired] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setWatchdogExpired(true), 4500);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const primaryProgram: ExamProgram =
+    manualTrack ?? programs.data?.activeProgram ?? profileProgram ?? "MULTILEVEL";
+  const altProgram: ExamProgram = primaryProgram === "IELTS" ? "MULTILEVEL" : "IELTS";
 
   const testsQuery = useQuery({
-    queryKey: programQueryKey('tests', userId, program),
-    queryFn: () => listTests(50, program ?? undefined),
-    enabled: !!program,
-    ...QUERY_OPTS,
-  });
-  const mocksQuery = useQuery({
-    queryKey: [...programQueryKey('mock-exams', userId, program), program === 'MULTILEVEL' ? practiceLevel : 'All'],
-    queryFn: () => listMockExams(program ?? undefined, program === 'MULTILEVEL' && practiceLevel !== 'All' ? practiceLevel : undefined),
-    enabled: !!program,
+    queryKey: programQueryKey('tests', userId, primaryProgram),
+    queryFn: () => listTests(50, primaryProgram),
     ...QUERY_OPTS,
   });
 
-  // Per-source errors: a failed source must NEVER look like "no exams".
-  // Each fetch reports its own failure; the empty state renders only when a
-  // source genuinely succeeded with zero items.
+  // Fetch all published mocks for the track and filter practiceLevel client-side
+  // so exams with profile="writing_speaking" are never hidden by server practice-only filters.
+  const mocksQuery = useQuery({
+    queryKey: programQueryKey('mock-exams', userId, primaryProgram),
+    queryFn: () => listMockExams(primaryProgram),
+    ...QUERY_OPTS,
+  });
+
+  const primaryEmpty =
+    !testsQuery.isLoading &&
+    !mocksQuery.isLoading &&
+    (testsQuery.data?.length ?? 0) === 0 &&
+    (mocksQuery.data?.length ?? 0) === 0;
+
+  // When primary track has 0 published exams, automatically check the other track
+  // so students whose default track was IELTS still see published Multilevel exams (and vice versa).
+  const altMocksQuery = useQuery({
+    queryKey: programQueryKey('mock-exams', userId, altProgram),
+    queryFn: () => listMockExams(altProgram),
+    enabled: primaryEmpty,
+    ...QUERY_OPTS,
+  });
+
+  const altTestsQuery = useQuery({
+    queryKey: programQueryKey('tests', userId, altProgram),
+    queryFn: () => listTests(50, altProgram),
+    enabled: primaryEmpty,
+    ...QUERY_OPTS,
+  });
+
+  const useAltTrack =
+    manualTrack === null &&
+    primaryEmpty &&
+    ((altMocksQuery.data?.length ?? 0) > 0 || (altTestsQuery.data?.length ?? 0) > 0);
+
+  const program: ExamProgram = useAltTrack ? altProgram : primaryProgram;
+  const rawTests = useAltTrack ? (altTestsQuery.data ?? []) : (testsQuery.data ?? []);
+  const rawMocks = useAltTrack ? (altMocksQuery.data ?? []) : (mocksQuery.data ?? []);
+
   const testsError = testsQuery.error ? friendlyError(testsQuery.error) : null;
   const mocksError = mocksQuery.error ? friendlyError(mocksQuery.error) : null;
-  const loading = programs.isPending || (testsQuery.isPending && testsQuery.fetchStatus !== "idle") || (mocksQuery.isPending && mocksQuery.fetchStatus !== "idle");
 
-  // Students can never start a 0-question exam (backend throws TEST_EMPTY),
-  // so hide them outright — an empty row is always junk (seed leftover or
-  // unfinished admin draft), never a real assigned exam.
-  const tests = (testsQuery.data ?? []).filter((t) => t.questionCount > 0 && !!program && matchesCatalogue(t, program, practiceLevel, category));
-  // Only show published mocks to students; keep demos visible.
-  const mocks = (mocksQuery.data ?? []).filter((m) => (m.isPublished || m.isDemo) && m.questionCount > 0 && !!program && matchesCatalogue(m, program, practiceLevel, category));
-  const testsLoaded = testsQuery.status === "success";
-  const mocksLoaded = mocksQuery.status === "success";
+  const loading =
+    !watchdogExpired &&
+    ((programs.isLoading && !programs.data) ||
+      testsQuery.isLoading ||
+      mocksQuery.isLoading ||
+      (primaryEmpty && (altMocksQuery.isLoading || altTestsQuery.isLoading)));
+
+  const tests = rawTests.filter(
+    (t) => t.questionCount > 0 && matchesCatalogue(t, program, practiceLevel, category),
+  );
+  const mocks = rawMocks.filter(
+    (m) =>
+      (m.isPublished || m.isDemo || staffUser) &&
+      m.questionCount > 0 &&
+      matchesCatalogue(m, program, practiceLevel, category),
+  );
+
+  const testsLoaded = testsQuery.status === "success" || altTestsQuery.status === "success";
+  const mocksLoaded = mocksQuery.status === "success" || altMocksQuery.status === "success";
 
   const retry = () => {
+    void programs.refetch();
     void testsQuery.refetch();
     void mocksQuery.refetch();
+    void altMocksQuery.refetch();
+    void altTestsQuery.refetch();
   };
 
   async function handleStartTest(test: TestListItem) {
@@ -163,46 +231,136 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
     ...mocks.map((m) => ({ kind: "mock" as const, data: m })),
   ];
 
-  // Stats over real server data
+  const totalUnfiltered =
+    rawTests.filter((t) => t.questionCount > 0).length +
+    rawMocks.filter((m) => (m.isPublished || m.isDemo || staffUser) && m.questionCount > 0).length;
   const totalAssigned = allTests.length + mocks.length;
-  const totalQuestions = allTests.reduce((s, t) => s + t.questionCount, 0) + mocks.reduce((s, m) => s + m.questionCount, 0);
-  const readyCount = allTests.filter((t) => t.questionCount > 0).length + mocks.filter((m) => m.questionCount > 0).length;
+  const totalQuestions =
+    allTests.reduce((s, t) => s + t.questionCount, 0) +
+    mocks.reduce((s, m) => s + m.questionCount, 0);
+  const readyCount =
+    allTests.filter((t) => t.questionCount > 0).length +
+    mocks.filter((m) => m.questionCount > 0 && m.ready !== false).length;
 
   return (
     <section>
       <ExamTracks />
-      <div className="flex items-start justify-between gap-3">
-        <Greeting name={studentName} />
-        <span className="hidden items-center gap-1.5 text-[11px] text-white/35 sm:inline-flex" aria-live="polite">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand" aria-hidden />
-          Auto-sync
-        </span>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <Greeting name={studentName} isStaff={staffUser} />
+        <div className="flex items-center gap-2">
+          <div
+            className="inline-flex rounded-xl border border-emerald-500/20 bg-[#111827] p-1"
+            role="group"
+            aria-label="Track view filter"
+          >
+            {(["IELTS", "MULTILEVEL"] as const).map((trk) => {
+              const active = program === trk;
+              return (
+                <button
+                  key={trk}
+                  type="button"
+                  onClick={() => {
+                    setManualTrack(trk);
+                    setPracticeLevel("All");
+                    setCategory("all");
+                  }}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                    active
+                      ? "bg-emerald-500 text-slate-950 shadow-sm"
+                      : "text-slate-300 hover:text-white"
+                  }`}
+                >
+                  {trk === "IELTS" ? "IELTS" : "Multi-Level (CEFR)"}
+                </button>
+              );
+            })}
+          </div>
+          <span className="hidden items-center gap-1.5 text-[11px] text-slate-400 sm:inline-flex" aria-live="polite">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" aria-hidden />
+            Auto-sync
+          </span>
+        </div>
       </div>
 
       <div className="mt-4">
         <LiveExamPinJoin onJoinedMock={(mock, start) => onStartMock(mock, start)} />
       </div>
 
-      {program && <h2 className="mt-4 text-lg font-bold">{program === 'IELTS' ? 'IELTS exams' : 'Multilevel exams'}</h2>}
-      {program === 'MULTILEVEL' && <div className="mt-3 space-y-3">
-        <div><p className="mb-2 text-xs text-white/50">Practice content level</p><div className="flex flex-wrap gap-2" aria-label="Practice level">{(['All', ...PRACTICE_LEVELS] as const).map((level) => <button key={level} type="button" aria-pressed={practiceLevel === level} className={`rounded-lg px-3 py-2 text-xs ${practiceLevel === level ? 'btn-brand' : 'btn-ghost'}`} onClick={() => { setPracticeLevel(level); if (level !== 'All' && category === 'full_mock') setCategory('all'); }}>{level}</button>)}</div></div>
-        <div className="flex flex-wrap gap-2" aria-label="Exam category">{(['all', 'full_mock', 'listening', 'reading', 'writing', 'speaking'] as const).map((value) => <button key={value} type="button" aria-pressed={category === value} className={`rounded-lg px-3 py-2 text-xs capitalize ${category === value ? 'btn-brand' : 'btn-ghost'}`} onClick={() => { setCategory(value); if (value === 'full_mock') setPracticeLevel('All'); }}>{value === 'full_mock' ? 'Full Mock' : value === 'all' ? 'All skills' : value}</button>)}</div>
-        <p className="text-xs text-white/50">A1–C1 describe practice content. Full Mock estimated results remain Below B1 / B1 / B2 / C1.</p>
-      </div>}
+      <h2 className="mt-5 text-lg font-bold text-slate-100">
+        {program === 'IELTS' ? 'IELTS exams' : 'Multilevel exams'}
+      </h2>
+
+      <div className="mt-3 rounded-2xl border border-emerald-500/15 bg-[#111827] p-4 space-y-3">
+        {program === 'MULTILEVEL' && (
+          <div>
+            <p className="mb-2 text-xs font-medium text-slate-400">Practice content level (CEFR)</p>
+            <div className="flex flex-wrap gap-2" aria-label="Practice level">
+              {(['All', ...PRACTICE_LEVELS] as const).map((level) => (
+                <button
+                  key={level}
+                  type="button"
+                  aria-pressed={practiceLevel === level}
+                  className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                    practiceLevel === level
+                      ? 'btn-brand'
+                      : 'btn-ghost border border-emerald-500/15'
+                  }`}
+                  onClick={() => {
+                    setPracticeLevel(level);
+                    if (level !== 'All' && category === 'full_mock') setCategory('all');
+                  }}
+                >
+                  {level}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div>
+          <p className="mb-2 text-xs font-medium text-slate-400">Skill / Exam Category</p>
+          <div className="flex flex-wrap gap-2" aria-label="Exam category">
+            {(['all', 'full_mock', 'listening', 'reading', 'writing', 'speaking'] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={category === value}
+                className={`rounded-lg px-3 py-2 text-xs font-semibold capitalize transition ${
+                  category === value
+                    ? 'btn-brand'
+                    : 'btn-ghost border border-emerald-500/15'
+                }`}
+                onClick={() => {
+                  setCategory(value);
+                  if (value === 'full_mock') setPracticeLevel('All');
+                }}
+              >
+                {value === 'full_mock' ? 'Full Mock' : value === 'all' ? 'All skills' : value}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {program === 'MULTILEVEL' && (
+          <p className="text-xs text-slate-400">
+            A1–C1 describe practice content. Full Mock estimated results remain Below B1 / B1 / B2 / C1.
+          </p>
+        )}
+      </div>
 
       {!loading && (testsLoaded || mocksLoaded) && (
         <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
-          <div className="card rounded-2xl p-3 text-center">
+          <div className="rounded-2xl border border-emerald-500/15 bg-[#111827] p-3 text-center">
             <p className="text-xl font-black text-white">{totalAssigned}</p>
-            <p className="mt-0.5 text-[10px] uppercase tracking-widest text-white/40">assigned</p>
+            <p className="mt-0.5 text-[10px] uppercase tracking-widest text-slate-400">assigned</p>
           </div>
-          <div className="card rounded-2xl p-3 text-center">
+          <div className="rounded-2xl border border-emerald-500/15 bg-[#111827] p-3 text-center">
             <p className="text-xl font-black text-white">{totalQuestions}</p>
-            <p className="mt-0.5 text-[10px] uppercase tracking-widest text-white/40">questions</p>
+            <p className="mt-0.5 text-[10px] uppercase tracking-widest text-slate-400">questions</p>
           </div>
-          <div className="card rounded-2xl p-3 text-center">
-            <p className="text-xl font-black text-brand">{readyCount}</p>
-            <p className="mt-0.5 text-[10px] uppercase tracking-widest text-white/40">ready</p>
+          <div className="rounded-2xl border border-emerald-500/15 bg-[#111827] p-3 text-center">
+            <p className="text-xl font-black text-emerald-400">{readyCount}</p>
+            <p className="mt-0.5 text-[10px] uppercase tracking-widest text-slate-400">ready</p>
           </div>
         </div>
       )}
@@ -210,40 +368,70 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
       {loading && (
         <div className="mt-4 space-y-3" aria-label="Loading exams">
           {[0, 1].map((i) => (
-            <div key={i} className="card animate-pulse rounded-2xl p-5">
-              <div className="h-4 w-1/2 rounded bg-white/10" />
-              <div className="mt-2 h-3 w-1/4 rounded bg-white/5" />
+            <div key={i} className="rounded-2xl border border-emerald-500/15 bg-[#111827] animate-pulse p-5">
+              <div className="h-4 w-1/2 rounded bg-slate-800" />
+              <div className="mt-2 h-3 w-1/4 rounded bg-slate-800" />
             </div>
           ))}
         </div>
       )}
 
-      {!loading && (testsError || mocksError) && (
+      {!loading && testsError && mocksError && (
         <div className="mt-4 space-y-3" role="alert">
-          {testsError && (
-            <SourceErrorCard
-              source="Tests"
-              detail={testsError}
-              onRetry={retry}
-            />
-          )}
-          {mocksError && (
-            <SourceErrorCard
-              source="Mock exams"
-              detail={mocksError}
-              onRetry={retry}
-            />
-          )}
+          <SourceErrorCard
+            source="Mock exams"
+            detail={mocksError}
+            onRetry={retry}
+          />
         </div>
       )}
 
-      {!!program && !loading && !testsError && !mocksError && allMocks.length === 0 && (
-        <div className="card mt-4 rounded-2xl p-6 text-center">
-          <p className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-white/5 text-xl">🎯</p>
-          <p className="mt-3 text-sm font-semibold text-white">{program === 'MULTILEVEL' && (practiceLevel !== 'All' || category !== 'all') ? 'No exams match these filters' : 'No exams available yet'}</p>
-          <p className="mx-auto mt-1 max-w-70 text-xs text-white/40">
-            New tests and mock exams appear here automatically once an admin creates them. The list refreshes every 30s and when you return to this window.
+      {!loading && !(testsError && mocksError) && allMocks.length === 0 && (
+        <div className="mt-4 rounded-2xl border border-emerald-500/15 bg-[#111827] p-8 text-center">
+          <p className="mx-auto grid h-12 w-12 place-items-center rounded-2xl border border-emerald-500/25 bg-emerald-500/10 text-xl">
+            🎯
           </p>
+          <p className="mt-3 text-base font-bold text-slate-100">
+            {totalUnfiltered > 0 && (practiceLevel !== 'All' || category !== 'all')
+              ? 'No exams match these filters'
+              : "Hozircha faol imtihonlar mavjud emas. Yangi mock e'lon qilinganda bu yerda ko'rinadi."}
+          </p>
+          <p className="mx-auto mt-1.5 max-w-md text-xs text-slate-400">
+            {totalUnfiltered > 0 && (practiceLevel !== 'All' || category !== 'all')
+              ? 'Reset the level or skill filter below to view all published exams on this track.'
+              : 'New tests and mock exams appear here automatically once published. The list refreshes every 30s and when you return to this window.'}
+          </p>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+            {totalUnfiltered > 0 && (practiceLevel !== 'All' || category !== 'all') ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setPracticeLevel('All');
+                  setCategory('all');
+                }}
+                className="btn-brand rounded-xl px-4 py-2 text-xs font-bold"
+              >
+                Reset filters ({totalUnfiltered} available)
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setManualTrack(program === "IELTS" ? "MULTILEVEL" : "IELTS")}
+                  className="btn-brand rounded-xl px-4 py-2 text-xs font-bold"
+                >
+                  Check {program === "IELTS" ? "Multi-Level (CEFR)" : "IELTS"} Track
+                </button>
+                <button
+                  type="button"
+                  onClick={retry}
+                  className="btn-ghost rounded-xl border border-emerald-500/20 px-4 py-2 text-xs font-semibold"
+                >
+                  ↻ Refresh
+                </button>
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -256,30 +444,30 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
               return (
                 <li
                   key={`test-${t.id}`}
-                  className="card animate-rise group rounded-2xl p-5 transition hover:border-brand/25"
+                  className="animate-rise group rounded-2xl border border-emerald-500/15 bg-[#111827] p-5 transition hover:border-emerald-500/35"
                   style={{ animationDelay: `${Math.min(idx, 8) * 40}ms` }}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span
-                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1 ${TYPE_STYLE[t.type] ?? "bg-white/10 text-white/70 ring-white/20"}`}
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1 ${TYPE_STYLE[t.type] ?? "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30"}`}
                         >
                           {t.type}
                         </span>
                         {(program === 'MULTILEVEL' ? t.practiceLevel : t.level) && (
-                          <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-white/60 ring-1 ring-white/10">
+                          <span className="rounded-full bg-[#0B0F17] px-2 py-0.5 text-[10px] font-semibold text-emerald-300 ring-1 ring-emerald-500/20">
                             {program === 'MULTILEVEL' ? `Practice ${t.practiceLevel}` : t.level}
                           </span>
                         )}
                         {t.isDemo && (
-                          <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-white/60 ring-1 ring-white/10">
+                          <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-300 ring-1 ring-amber-500/30">
                             demo
                           </span>
                         )}
                       </div>
                       <p className="mt-1.5 truncate text-base font-bold text-white">{t.title}</p>
-                      <p className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-white/40">
+                      <p className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-slate-400">
                         {t.durationMinutes != null && <span>⏱ {t.durationMinutes} min</span>}
                         <span>❓ {t.questionCount} questions</span>
                       </p>
@@ -288,7 +476,7 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
                           {t.sections.map((s) => (
                             <span
                               key={s}
-                              className="rounded-md bg-black/40 px-1.5 py-0.5 text-[10px] font-medium text-white/50 ring-1 ring-white/10"
+                              className="rounded-md bg-[#0B0F17] px-1.5 py-0.5 text-[10px] font-medium text-slate-300 ring-1 ring-emerald-500/15"
                             >
                               {s}
                             </span>
@@ -328,48 +516,49 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
               const m = item.data;
               const empty = m.questionCount === 0;
               const mockType = m.type === "ielts_academic" ? "IELTS Academic" : m.type === "ielts_general" ? "IELTS General" : "Multilevel";
+              const canAccessMock = m.access === "granted" || m.isPublished || m.isDemo || staffUser;
               return (
                 <li
                   key={`mock-${m.id}`}
-                  className="card animate-rise group rounded-2xl p-5 transition hover:border-violet-400/25"
+                  className="animate-rise group rounded-2xl border border-emerald-500/15 bg-[#111827] p-5 transition hover:border-emerald-500/35"
                   style={{ animationDelay: `${Math.min(idx, 8) * 40}ms` }}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1 ${TYPE_STYLE[m.type] ?? "bg-white/10 text-white/70 ring-white/20"}`}>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1 ${TYPE_STYLE[m.type] ?? "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30"}`}>
                           {m.type === "multilevel" ? "multilevel" : "ielts"}
                         </span>
                         {(program === 'MULTILEVEL' ? m.practiceLevel : m.level) && (
-                          <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-white/60 ring-1 ring-white/10">
+                          <span className="rounded-full bg-[#0B0F17] px-2 py-0.5 text-[10px] font-semibold text-emerald-300 ring-1 ring-emerald-500/20">
                             {program === 'MULTILEVEL' ? `Practice ${m.practiceLevel}` : m.level}
                           </span>
                         )}
                         {m.isDemo && (
-                          <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-white/60 ring-1 ring-white/10">
+                          <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-300 ring-1 ring-amber-500/30">
                             demo
                           </span>
                         )}
-                        <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-[10px] font-semibold text-violet-200 ring-1 ring-violet-400/20">
+                        <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300 ring-1 ring-emerald-500/30">
                           mock
                         </span>
                       </div>
                       <p className="mt-1.5 truncate text-base font-bold text-white" title={m.title}>
                         {m.title}
                       </p>
-                      <p className="text-[11px] text-white/45">{mockType}</p>
-                      <p className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-white/40">
+                      <p className="text-[11px] text-slate-400">{mockType}</p>
+                      <p className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-slate-400">
                         {m.durationMinutes != null && <span>⏱ {m.durationMinutes} min</span>}
                         <span>❓ {m.questionCount} questions</span>
                         {m.skills.length > 0 && <span>· {m.skills.join(" · ")}</span>}
                       </p>
                       {m.description && (
-                        <p className="mt-1 line-clamp-2 text-[11px] text-white/30">{m.description}</p>
+                        <p className="mt-1 line-clamp-2 text-[11px] text-slate-400">{m.description}</p>
                       )}
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-violet-300">Mock</p>
-                      <p className="mt-1 text-[11px] text-white/40">{empty ? "Empty" : `${m.questionCount} Q`}</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400">Mock</p>
+                      <p className="mt-1 text-[11px] text-slate-400">{empty ? "Empty" : `${m.questionCount} Q`}</p>
                       {canDeleteExam && (
                         <button
                           type="button"
@@ -389,7 +578,7 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
                   {!empty && m.ready === false && (
                     <p className="mt-2 text-[11px] text-amber-300/80">This Multilevel exam is not ready yet. Please ask an administrator to repair or complete its blueprint.</p>
                   )}
-                  {!empty && m.ready !== false && (m.access === "granted" || m.isDemo) && (
+                  {!empty && m.ready !== false && canAccessMock && (
                     <div className="mt-3 flex gap-2">
                       {(["practice", "timed"] as const).map((mode) => (
                         <button
@@ -398,7 +587,7 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
                           disabled={startingId !== null}
                           className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-bold capitalize transition disabled:opacity-50 ${
                             mode === "timed"
-                              ? "bg-violet-500/20 text-violet-100 ring-1 ring-violet-400/40 hover:bg-violet-500/30"
+                              ? "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-500/35 hover:bg-emerald-500/25"
                               : "btn-brand"
                           }`}
                         >
@@ -407,16 +596,16 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
                       ))}
                     </div>
                   )}
-                  {!empty && m.access === "pending" && (
+                  {!empty && !canAccessMock && m.access === "pending" && (
                     <p className="mt-2 text-[11px] text-amber-300/80">
                       Admin tasdig‘ini kuting — bu mock hali ochilmagan.
-                      <span className="block text-white/40">Waiting for admin confirmation before you can start this mock.</span>
+                      <span className="block text-slate-400">Waiting for admin confirmation before you can start this mock.</span>
                     </p>
                   )}
-                  {!empty && m.access === "locked" && (
-                    <p className="mt-2 text-[11px] text-white/30">
+                  {!empty && !canAccessMock && m.access === "locked" && (
+                    <p className="mt-2 text-[11px] text-slate-400">
                       Bu mock sotuvda — admin bilan bog‘laning.
-                      <span className="block text-white/25">This mock needs a purchase — ask your admin.</span>
+                      <span className="block text-slate-500">This mock needs a purchase — ask your admin.</span>
                     </p>
                   )}
                 </li>
@@ -434,9 +623,9 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
 
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-md">
-          <div className="card w-full max-w-md rounded-3xl border border-white/15 p-6 shadow-2xl">
+          <div className="w-full max-w-md rounded-3xl border border-emerald-500/20 bg-[#111827] p-6 shadow-2xl">
             <h3 className="text-base font-bold text-white">Imtihonni o&apos;chirishni tasdiqlang</h3>
-            <p className="mt-2 text-xs text-white/60">
+            <p className="mt-2 text-xs text-slate-300">
               &ldquo;{deleteTarget.title}&rdquo; imtihonini butunlay o&apos;chirib tashlamoqchimisiz? Bu amalni ortga qaytarib bo&apos;lmaydi.
             </p>
             <div className="mt-5 flex justify-end gap-2">
@@ -444,7 +633,7 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
                 type="button"
                 disabled={deleting}
                 onClick={() => setDeleteTarget(null)}
-                className="rounded-xl border border-white/15 px-4 py-2 text-xs font-semibold text-white/70 hover:bg-white/10"
+                className="rounded-xl border border-emerald-500/20 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-white/10"
               >
                 Bekor qilish
               </button>
@@ -496,11 +685,6 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
   );
 }
 
-/**
- * Actionable per-source failure card: what failed, why (status/code), which
- * backend was contacted, and a manual retry. A failed source must never be
- * mistaken for "no exams assigned".
- */
 function SourceErrorCard({
   source,
   detail,
@@ -511,11 +695,11 @@ function SourceErrorCard({
   onRetry: () => void;
 }) {
   return (
-    <div className="card rounded-2xl border border-red-500/30 p-5">
+    <div className="rounded-2xl border border-red-500/30 bg-[#111827] p-5">
       <p className="text-sm font-medium text-red-300">Could not load {source}</p>
-      <p className="mt-1 text-xs text-white/60">{detail}</p>
-      <p className="mt-1 break-all font-mono text-[11px] text-white/30">API: {API_BASE_URL}</p>
-      <p className="mt-1 text-[11px] text-white/30">
+      <p className="mt-1 text-xs text-slate-300">{detail}</p>
+      <p className="mt-1 break-all font-mono text-[11px] text-slate-500">API: {API_BASE_URL}</p>
+      <p className="mt-1 text-[11px] text-slate-400">
         Check your connection and that the backend is reachable, then retry. The list also refreshes automatically.
       </p>
       <button

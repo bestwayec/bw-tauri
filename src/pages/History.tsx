@@ -4,7 +4,7 @@ import AttemptReview from "@/components/exam/AttemptReview";
 import { myAttempts, type AttemptSummary } from "@/lib/tests";
 import { usePrograms } from '@/components/ExamTracks';
 import MockAssessmentHistory from '@/components/assessment/MockAssessmentHistory';
-import { belongsToProgram, programQueryKey } from '@/lib/programs';
+import { belongsToProgram, programQueryKey, type ExamProgram } from '@/lib/programs';
 import { useSessionStore } from '@/lib/session-store';
 
 type Props = {
@@ -15,7 +15,7 @@ type Props = {
 
 function statusBadge(status: AttemptSummary["status"]) {
   if (status === "completed")
-    return "bg-brand/10 text-brand-subtle-fg ring-brand/30";
+    return "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30";
   if (status === "grading") return "bg-amber-400/10 text-amber-200 ring-amber-400/30";
   return "bg-sky-400/10 text-sky-200 ring-sky-400/30";
 }
@@ -42,38 +42,56 @@ function formatDate(iso: string | null): string {
 /** Past attempts with scores — pulled from GET /tests/attempts/mine. */
 export default function History({ refreshKey = 0, onStats }: Props) {
   const programs = usePrograms();
-  const program = programs.data?.activeProgram;
   const userId = useSessionStore((state) => state.profile?.id);
+  const profileProgram = useSessionStore((state) => state.profile?.activeProgram);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [watchdogExpired, setWatchdogExpired] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setWatchdogExpired(true), 4500);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const program: ExamProgram =
+    programs.data?.activeProgram ?? profileProgram ?? "MULTILEVEL";
+
   const history = useQuery({
     queryKey: [...programQueryKey('my-attempts', userId, program), refreshKey],
-    queryFn: () => myAttempts(50, program ?? undefined), enabled: !!program,
+    queryFn: () => myAttempts(50, program),
   });
-  const attempts = useMemo(() => history.data?.filter((attempt) => !!program && belongsToProgram(attempt.testType, program)) ?? [], [history.data, program]);
-  const loading = programs.isPending || history.isPending;
+
+  const attempts = useMemo(
+    () => history.data?.filter((attempt) => belongsToProgram(attempt.testType, program)) ?? [],
+    [history.data, program],
+  );
+  const loading = !watchdogExpired && ((programs.isLoading && !programs.data) || history.isLoading);
   const error = history.error ? friendlyError(history.error) : null;
   const load = () => history.refetch();
+
   useEffect(() => {
     setExpandedId(null);
   }, [program]);
+
   useEffect(() => {
     const scored = attempts.filter((a) => a.totalScore != null);
-    onStats?.({ attempts: attempts.length, completed: attempts.filter((a) => a.status === 'completed').length,
-      avgScore: scored.length ? scored.reduce((sum, a) => sum + (a.totalScore ?? 0), 0) / scored.length : null });
+    onStats?.({
+      attempts: attempts.length,
+      completed: attempts.filter((a) => a.status === 'completed').length,
+      avgScore: scored.length ? scored.reduce((sum, a) => sum + (a.totalScore ?? 0), 0) / scored.length : null,
+    });
   }, [attempts, onStats]);
 
-  if (!program) return <section><h1 className="text-xl font-bold">History</h1><p role={programs.isError ? 'alert' : 'status'} className="mt-3">{programs.isError ? 'Could not load your exam track.' : 'Loading your exam track…'}</p></section>;
   return (
     <section>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold tracking-tight">{program === 'IELTS' ? 'IELTS' : 'Multilevel'} history</h1>
-          <p className="mt-1 text-sm text-white/50">Your past attempts in this exam track. Other track results remain saved.</p>
+          <h1 className="text-xl font-bold tracking-tight text-slate-100">{program === 'IELTS' ? 'IELTS' : 'Multilevel'} history</h1>
+          <p className="mt-1 text-sm text-slate-400">Your past attempts in this exam track. Other track results remain saved.</p>
         </div>
         {!loading && (
           <button
             onClick={() => void load()}
-            className="btn-ghost shrink-0 rounded-xl px-3 py-2 text-xs text-white"
+            className="btn-ghost shrink-0 rounded-xl px-3 py-2 text-xs text-slate-200 border border-emerald-500/15"
           >
             Refresh
           </button>
@@ -81,23 +99,23 @@ export default function History({ refreshKey = 0, onStats }: Props) {
       </div>
 
       <div className="mt-4"><MockAssessmentHistory key={program} program={program} refreshKey={refreshKey} /></div>
-      <h2 className="mt-5 font-bold">Practice test attempts</h2><p className="mt-1 text-xs text-white/50">Practice points are separate from full mock {program === 'IELTS' ? 'bands' : '/75 estimates'}.</p>
+      <h2 className="mt-5 font-bold text-slate-100">Practice test attempts</h2><p className="mt-1 text-xs text-slate-400">Practice points are separate from full mock {program === 'IELTS' ? 'bands' : '/75 estimates'}.</p>
 
       {loading && (
         <div className="mt-4 space-y-3" aria-label="Loading history">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="card animate-pulse rounded-2xl p-5">
-              <div className="h-4 w-2/3 rounded bg-white/10" />
-              <div className="mt-2 h-3 w-1/3 rounded bg-white/5" />
+            <div key={i} className="rounded-2xl border border-emerald-500/15 bg-[#111827] animate-pulse p-5">
+              <div className="h-4 w-2/3 rounded bg-slate-800" />
+              <div className="mt-2 h-3 w-1/3 rounded bg-slate-800" />
             </div>
           ))}
         </div>
       )}
 
       {!loading && error && (
-        <div className="card mt-4 rounded-2xl border border-red-500/30 p-5">
+        <div className="mt-4 rounded-2xl border border-red-500/30 bg-[#111827] p-5">
           <p className="text-sm font-medium text-red-300">Could not load history</p>
-          <p className="mt-1 text-xs text-white/60">{error}</p>
+          <p className="mt-1 text-xs text-slate-400">{error}</p>
           <button
             onClick={() => void load()}
             className="btn-brand mt-3 rounded-xl px-4 py-2 text-sm font-semibold"
@@ -108,10 +126,10 @@ export default function History({ refreshKey = 0, onStats }: Props) {
       )}
 
       {!loading && !error && attempts && attempts.length === 0 && (
-        <div className="card mt-4 rounded-2xl p-6 text-center">
-          <p className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-white/5 text-xl">📝</p>
-          <p className="mt-3 text-sm font-semibold text-white">No attempts yet</p>
-          <p className="mx-auto mt-1 max-w-60 text-xs text-white/40">
+        <div className="mt-4 rounded-2xl border border-emerald-500/15 bg-[#111827] p-6 text-center">
+          <p className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-xl">📝</p>
+          <p className="mt-3 text-sm font-semibold text-slate-100">No attempts yet</p>
+          <p className="mx-auto mt-1 max-w-60 text-xs text-slate-400">
             Finished exams will appear here with their scores once graded.
           </p>
         </div>
@@ -123,13 +141,13 @@ export default function History({ refreshKey = 0, onStats }: Props) {
             const open = expandedId === a.id;
             const reviewable = a.status !== "in_progress";
             return (
-            <li key={a.id} className="card rounded-2xl p-4">
+            <li key={a.id} className="rounded-2xl border border-emerald-500/15 bg-[#111827] p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-white">
+                  <p className="truncate text-sm font-semibold text-slate-100">
                     {a.testTitle ?? "Exam"}
                   </p>
-                  <p className="mt-0.5 text-[11px] text-white/40">
+                  <p className="mt-0.5 text-[11px] text-slate-400">
                     {formatDate(a.finishedAt ?? a.startedAt)}
                     {a.testType && <span className="uppercase"> · {a.testType}</span>}
                   </p>
@@ -152,7 +170,7 @@ export default function History({ refreshKey = 0, onStats }: Props) {
                   type="button"
                   onClick={() => setExpandedId(open ? null : a.id)}
                   aria-expanded={open}
-                  className="btn-ghost mt-3 w-full rounded-xl px-3 py-2 text-xs font-semibold text-white/70 hover:text-white"
+                  className="btn-ghost mt-3 w-full rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 hover:text-white border border-emerald-500/15"
                 >
                   {open ? "▾ Hide answer review" : "⌖ Review answers — locate & explain"}
                 </button>

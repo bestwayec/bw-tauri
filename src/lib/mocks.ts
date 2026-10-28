@@ -33,7 +33,7 @@ export type MockAttemptMode = "practice" | "timed";
 export type MockAttemptStatus = "in_progress" | "grading" | "completed";
 
 export interface MockExamListItem {
-  profile?: "practice" | "full_mock";
+  profile?: string | null;
   id: string;
   type: MockExamType;
   title: string;

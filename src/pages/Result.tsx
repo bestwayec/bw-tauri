@@ -61,7 +61,7 @@ function ScoreRing({ score, max }: { score: number; max: number | null }) {
         )}
         <defs>
           <linearGradient id="scoreGrad" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#89F336" />
+            <stop offset="0%" stopColor="#10B981" />
             <stop offset="100%" stopColor="#4cc9f0" />
           </linearGradient>
         </defs>

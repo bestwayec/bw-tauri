@@ -45,6 +45,7 @@ describe('student exam track navigation', () => {
     expect(html).toContain('Live Proctoring');
     expect(html).toContain('Grading Queue');
     expect(html).toContain('Groups &amp; Results');
+    expect(html).toContain('Imtihonlar bazasi');
     expect(html).toContain('TEACHER WORKSPACE');
     expect(html).toContain('aria-current="page"');
 
@@ -52,7 +53,19 @@ describe('student exam track navigation', () => {
     desktopButtons[0].props.onClick();
     desktopButtons[1].props.onClick();
     desktopButtons[2].props.onClick();
-    expect(onNavigate.mock.calls).toEqual([['proctoring'], ['grading'], ['groups']]);
+    desktopButtons[3].props.onClick();
+    expect(onNavigate.mock.calls).toEqual([['proctoring'], ['grading'], ['groups'], ['exams']]);
+  });
+
+  it('renders instructor navigation destinations and INSTRUCTOR CLIENT badge', () => {
+    const onNavigate = vi.fn();
+    const props = { route: 'groups' as const, role: 'instructor', onNavigate };
+    const html = renderToStaticMarkup(<Sidebar {...props} collapsed={false} onToggle={() => {}} />);
+    expect(html).toContain('INSTRUCTOR CLIENT');
+    expect(html).toContain('Guruhlarim (Cohorts)');
+    expect(html).toContain('Imtihonlar monitoringi');
+    expect(html).toContain('Imtihonlar bazasi');
+    expect(html).toContain('aria-current="page"');
   });
 
   it('renders admin navigation destinations and badge', () => {
@@ -72,4 +85,3 @@ describe('student exam track navigation', () => {
     expect(onNavigate.mock.calls).toEqual([['centerOverview'], ['proctoring'], ['studentResults']]);
   });
 });
-

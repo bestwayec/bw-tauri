@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { Route } from "@/App";
+import { getClientRoleBadge, isAdminRole, isTeacherRole } from "@/lib/auth";
 
 type Props = {
   route: Route;
@@ -121,12 +122,12 @@ const STUDENT_NAV: NavItem[] = [
   },
 ];
 
-// Teacher navigation
+// Teacher & Instructor navigation
 const TEACHER_NAV: NavItem[] = [
   {
     id: "proctoring",
     label: "Live Proctoring",
-    hint: "Active exams & surveillance",
+    hint: "Imtihonlar monitoringi",
     icon: icon(
       <>
         <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
@@ -149,13 +150,25 @@ const TEACHER_NAV: NavItem[] = [
   {
     id: "groups",
     label: "Groups & Results",
-    hint: "Cohorts & class progress",
+    hint: "Guruhlarim (Cohorts)",
     icon: icon(
       <>
         <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
         <circle cx="9" cy="7" r="4" />
         <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
         <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      </>
+    ),
+  },
+  {
+    id: "exams",
+    label: "Imtihonlar bazasi",
+    hint: "Published exams & preview",
+    icon: icon(
+      <>
+        <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+        <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+        <path d="m9 15 2 2 4-4" />
       </>
     ),
   },
@@ -200,7 +213,7 @@ const ADMIN_NAV: NavItem[] = [
   {
     id: "proctoring",
     label: "Live Proctoring",
-    hint: "Live anti-cheat surveillance",
+    hint: "Imtihonlar monitoringi",
     icon: icon(
       <>
         <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
@@ -216,6 +229,18 @@ const ADMIN_NAV: NavItem[] = [
       <>
         <path d="M12 2v20" />
         <path d="m17 5-5-3-5 3v6c0 5 3.5 8 5 9 1.5-1 5-4 5-9V5Z" />
+      </>
+    ),
+  },
+  {
+    id: "exams",
+    label: "Imtihonlar bazasi",
+    hint: "Published exams & preview",
+    icon: icon(
+      <>
+        <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+        <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+        <path d="m9 15 2 2 4-4" />
       </>
     ),
   },
@@ -244,9 +269,8 @@ const ADMIN_NAV: NavItem[] = [
 ];
 
 export function getNavItemsForRole(role?: string): NavItem[] {
-  const norm = (role ?? "student").toLowerCase();
-  if (norm === "teacher") return TEACHER_NAV;
-  if (norm === "admin" || norm === "super_admin") return ADMIN_NAV;
+  if (isTeacherRole(role)) return TEACHER_NAV;
+  if (isAdminRole(role)) return ADMIN_NAV;
   return STUDENT_NAV;
 }
 
@@ -288,19 +312,13 @@ function WingedEmblem({ className = "h-10 w-10" }: { className?: string }) {
  */
 export default function Sidebar({ route, role, collapsed, onToggle, onNavigate }: Props) {
   const navItems = getNavItemsForRole(role);
-  const normRole = (role ?? "student").toLowerCase();
-  const isTeacher = normRole === "teacher";
-  const isAdmin = normRole === "admin" || normRole === "super_admin";
-
-  const roleBadge = isTeacher
-    ? "TEACHER WORKSPACE"
-    : isAdmin
-    ? "ADMIN CENTER"
-    : "STUDENT CLIENT";
+  const isTeacher = isTeacherRole(role);
+  const isAdmin = isAdminRole(role);
+  const roleBadge = getClientRoleBadge(role);
 
   return (
     <aside
-      className={`hidden h-full shrink-0 flex-col border-r border-white/8 bg-[#0B0F17]/90 backdrop-blur-2xl transition-[width] duration-200 ease-out lg:flex ${
+      className={`hidden h-full shrink-0 flex-col border-r border-emerald-500/15 bg-[#0B0F17]/95 backdrop-blur-2xl transition-[width] duration-200 ease-out lg:flex ${
         collapsed ? "w-[68px]" : "w-64"
       }`}
     >
@@ -363,13 +381,13 @@ export default function Sidebar({ route, role, collapsed, onToggle, onNavigate }
       </nav>
 
       {/* Collapse control */}
-      <div className="border-t border-white/8 p-3">
+      <div className="border-t border-emerald-500/15 p-3">
         <button
           type="button"
           onClick={onToggle}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           title={collapsed ? "Expand" : "Collapse"}
-          className="grid h-9 w-full place-items-center rounded-xl border border-white/8 bg-surface/60 text-white/50 transition hover:bg-surface-hover hover:text-white"
+          className="grid h-9 w-full place-items-center rounded-xl border border-emerald-500/15 bg-[#111827] text-white/50 transition hover:bg-slate-800 hover:text-white"
         >
           {collapsed ? (
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -396,7 +414,7 @@ export function MobileNavigation({
   return (
     <nav
       aria-label="Mobile main"
-      className="grid shrink-0 grid-cols-3 gap-1 border-b border-white/8 bg-[#0B0F17]/90 p-2 lg:hidden"
+      className="grid shrink-0 grid-cols-3 gap-1 border-b border-emerald-500/15 bg-[#0B0F17]/95 p-2 lg:hidden"
     >
       {navItems.map((item) => (
         <button

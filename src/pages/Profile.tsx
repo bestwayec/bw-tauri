@@ -54,12 +54,12 @@ function LogoutIcon() {
 export default function Profile({ name, phone, role, onLogout, stats }: Props) {
   const normRole = (role ?? "student").toLowerCase();
   const roleLabel =
-    normRole === "teacher"
+    normRole === "teacher" || normRole === "instructor"
       ? "Teacher"
       : normRole === "admin" || normRole === "super_admin"
       ? "Administrator"
       : "Student";
-  const display = name ?? (normRole === "teacher" ? "Teacher" : normRole === "admin" ? "Admin" : "Student");
+  const display = name ?? (normRole === "teacher" || normRole === "instructor" ? "Teacher" : normRole === "admin" ? "Admin" : "Student");
   const initial = display.trim().charAt(0).toUpperCase() || "?";
   const [confirmSubmit, setConfirmSubmit] = useState(() => getConfirmBeforeSubmit());
 
@@ -82,7 +82,7 @@ export default function Profile({ name, phone, role, onLogout, stats }: Props) {
         <div className="p-6 sm:p-7">
           {/* Primary identity */}
           <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:items-center sm:text-left">
-            <div className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-brand to-accent text-2xl font-black text-black shadow-[0_0_32px_rgba(137, 243, 54,0.45)]">
+            <div className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-brand to-accent text-2xl font-black text-black shadow-[0_0_32px_rgba(16, 185, 129,0.45)]">
               {initial}
             </div>
             <div className="min-w-0 flex-1">

@@ -31,6 +31,7 @@ import { checkForUpdate, getDismissedVersion, type UpdateInfo } from "@/lib/vers
 import ClickSpark from "@/components/ClickSpark";
 import CrashRecovery from "@/components/CrashRecovery";
 import { logout } from "@/lib/api";
+import { isAdminRole, isStaffRole, isTeacherRole } from "@/lib/auth";
 import { useSessionStore } from "@/lib/session-store";
 import { tryTauriInvoke } from "@/hooks/useLockdown";
 import { usePrograms } from '@/lib/programs';
@@ -118,14 +119,10 @@ export default function App() {
   const programs = usePrograms();
   const [route, setRoute] = useState<Route>("login");
   const [student, setStudent] = useState<Student | null>(null);
-  // Session-restore flag: written by the restore effect, intentionally NOT
-  // used for rendering — the intro is timer-driven so slow networks never
-  // hold the splash on screen.
   const [, setRestoring] = useState(true);
   const [activeTest, setActiveTest] = useState<TestListItem | null>(null);
   const [activeStart, setActiveStart] = useState<StartResult | null>(null);
   const [lastScore, setLastScore] = useState<{ autoScore: number | null } | null>(null);
-  // Mock (IELTS) section-by-section flow — parallel to the tests flow.
   const [activeMock, setActiveMock] = useState<MockExamListItem | null>(null);
   const [activeMockStart, setActiveMockStart] = useState<MockStartResult | null>(null);
   const [activeMockSection, setActiveMockSection] = useState<MockShapedSection | null>(null);
@@ -151,9 +148,7 @@ export default function App() {
     }
     cachedStudent.current = id;
   }, [student?.id, queryClient]);
-  // Fixed 2.5s brand intro (presentational only — timer-driven, never tied
-  // to `restoring` or network speed). The real UI renders underneath from the
-  // first frame; the splash exits at 2.2s and unmounts at exactly 2.5s.
+
   const [introLeaving, setIntroLeaving] = useState(false);
   const [introDone, setIntroDone] = useState(false);
   useEffect(() => {
@@ -171,15 +166,12 @@ export default function App() {
     };
   }, []);
   const showSplash = !introDone;
-  // Particles backdrop renders on the login page only; skipped for reduced motion.
   const [reduceMotion] = useState(
     () =>
       typeof window !== "undefined" &&
       typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   );
-  // Update toast: checked once per login, a beat after the intro finishes.
-  // Silent on failure — a failed check must never disturb the student.
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const updateChecked = useRef(false);
   const updateTimer = useRef<number | null>(null);
@@ -193,11 +185,6 @@ export default function App() {
         if (info && getDismissedVersion() !== info.latest) setUpdate(info);
       })();
     }, 3000);
-    // No per-render cleanup: `student` is replaced every time the session store
-    // revalidates the profile, and clearing the timer there silently cancelled
-    // the only update check of the session (the `updateChecked` guard then
-    // stopped it from ever being rescheduled). The timer is cancelled on
-    // unmount instead.
   }, [student]);
   useEffect(
     () => () => {
@@ -206,9 +193,6 @@ export default function App() {
     [],
   );
 
-  // Single session store drives auth UI. The store renders the cached profile
-  // immediately and revalidates in the background — a network failure never
-  // sends the student to the login screen while tokens exist.
   useEffect(() => {
     let dead = false;
     const applySession = (status: string, profile: { id: string; name?: string | null; phone?: string | null; role?: string } | null) => {
@@ -221,17 +205,17 @@ export default function App() {
         setRestoring(false);
         return;
       }
-      const role = (profile.role || "student").toLowerCase();
+      const role = profile.role || "student";
       setStudent({
         id: profile.id,
         name: typeof profile.name === "string" ? profile.name : null,
         phone: typeof profile.phone === "string" ? profile.phone : null,
-        role: profile.role || "student",
+        role,
       });
       setRoute((r) => {
         if (r === "login") {
-          if (role === "teacher") return "proctoring";
-          if (role === "admin" || role === "super_admin") return "centerOverview";
+          if (isTeacherRole(role)) return "proctoring";
+          if (isAdminRole(role)) return "centerOverview";
           return "dashboard";
         }
         return r;
@@ -250,8 +234,6 @@ export default function App() {
 
   const navigate = (next: Route) => setRoute(next);
 
-  // Mid-exam re-login: definitive auth failures dispatch
-  // `exam:reauth-required` — show the modal over the attempt, never navigate.
   const [showReauth, setShowReauth] = useState(false);
   const routeRef = useRef<Route>("login");
   useEffect(() => {
@@ -282,11 +264,6 @@ export default function App() {
     setRoute("result");
   };
 
-  /**
-   * `chosen` is the section the student picked in the start modal. A
-   * single-section attempt is scoped server-side, so the runner opens straight
-   * into that section (and only that section) without a second picker.
-   */
   const handleStartMock = (mock: MockExamListItem, start: MockStartResult, chosen?: MockSkill) => {
     setActiveMock(mock);
     setActiveMockStart(start);
@@ -295,7 +272,6 @@ export default function App() {
     setActiveMockSection(section);
     setLastMockResult(null);
     setLastScore(null);
-    // No resolvable section (multi-skill partial practice): fall back to the picker page.
     setRoute(section ? 'mockRunner' : 'mockSections');
   };
 
@@ -329,16 +305,15 @@ export default function App() {
 
   const handleLogin = (s: Student) => {
     setStudent(s);
-    const role = (s.role || "student").toLowerCase();
-    if (role === "teacher") setRoute("proctoring");
-    else if (role === "admin" || role === "super_admin") setRoute("centerOverview");
+    const role = s.role || "student";
+    if (isTeacherRole(role)) setRoute("proctoring");
+    else if (isAdminRole(role)) setRoute("centerOverview");
     else setRoute("dashboard");
   };
 
-  // In Teacher / Admin desktop mode:
+  // In Teacher / Instructor / Admin desktop mode:
   // Automatically DISABLE lockdown (no fullscreen kiosk, no WH_KEYBOARD_LL, multi-monitors allowed).
-  const currentRole = (student?.role || "").toLowerCase();
-  const isPrivilegedRole = currentRole === "teacher" || currentRole === "admin" || currentRole === "super_admin";
+  const isPrivilegedRole = isStaffRole(student?.role);
   useEffect(() => {
     if (isPrivilegedRole) {
       void tryTauriInvoke("set_locked", { locked: false });
@@ -350,8 +325,6 @@ export default function App() {
 
   const handleLogout = async () => {
     if (!confirm("Log out of Bestway Exam on this device?")) return;
-    // logout() revokes server-side and wipes locally; the store subscription
-    // flips the UI back to login.
     await logout().catch(() => undefined);
     setStudent(null);
     setActiveTest(null);
@@ -365,9 +338,7 @@ export default function App() {
     setRoute("login");
   };
 
-  // Student-only gate: force login when unauthenticated.
   const activeRoute: Route = student ? route : "login";
-  // Focused exam screens hide the sidebar + topbar so lockdown stays distraction-free.
   const examActive =
     activeRoute === "runner" ||
     activeRoute === "mockSections" ||
@@ -378,10 +349,6 @@ export default function App() {
     ? activeStart.questions.reduce((s, q) => s + (q.maxScore ?? 0), 0)
     : null;
 
-  // Auth screen: full-window, no sidebar.
-  // NOTE: rendered immediately (even while `restoring` is still in flight) so
-  // the timed intro reveals the real app in under a second. When restore
-  // completes with a valid session, this flips to the dashboard by itself.
   if (activeRoute === "login") {
     return (
       <>
@@ -443,7 +410,7 @@ export default function App() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         {showChrome && (
-          <div className="flex shrink-0 items-center gap-3 border-b border-white/10 bg-black/50 px-6 py-3 backdrop-blur-xl 2xl:px-10">
+          <div className="flex shrink-0 items-center gap-3 border-b border-emerald-500/15 bg-[#0B0F17]/90 px-6 py-3 backdrop-blur-xl 2xl:px-10">
             <p className="text-[11px] text-white/35">
               Bestway Exam <span className="mx-1 text-white/20">/</span>{" "}
               <span className="font-semibold text-white/75">{TITLES[activeRoute]}</span>

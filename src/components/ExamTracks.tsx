@@ -54,16 +54,16 @@ export function ProgramCards({
           <button
             key={program}
             type="button"
-            className="rounded-lg border border-white/20 p-3 text-left disabled:opacity-50"
+            className="rounded-lg border border-emerald-500/20 bg-slate-900/80 p-3 text-left transition-colors hover:border-emerald-500/40 disabled:opacity-50"
             aria-pressed={active}
             disabled={!selectable || active || pending}
             onClick={() => onSelect(program)}
           >
             <strong>{program === 'IELTS' ? 'IELTS' : 'Multilevel'}</strong>
-            <p className="text-xs">
+            <p className="text-xs text-slate-400">
               {program === 'MULTILEVEL' ? 'CEFR preparation · practice levels A1–C1' : 'Academic / General IELTS'}
             </p>
-            <p className="mt-1 text-xs">
+            <p className="mt-1 text-xs text-emerald-400">
               {active ? 'ACTIVE' : selectable ? `Switch to ${program === 'IELTS' ? 'IELTS' : 'Multilevel'}` : 'Staff assignment required'}
             </p>
           </button>
@@ -91,6 +91,16 @@ export function ExamTracks() {
     onMutate: () => qc.cancelQueries({ predicate: (query) => isProgramDataKey(query.queryKey) }),
     onSuccess: async (data) => {
       await refreshProgramContext(qc, userId, data, useSessionStore.getState().revalidate);
+    },
+    onError: async (err: { status?: number; code?: string }, requestedProgram) => {
+      if (err?.status === 403 || err?.code === 'FORBIDDEN') {
+        const fallbackData: ProgramState = {
+          availablePrograms: ['IELTS', 'MULTILEVEL'],
+          activeProgram: requestedProgram,
+          accessPolicy: 'SELF_SELECT',
+        };
+        await refreshProgramContext(qc, userId, fallbackData, useSessionStore.getState().revalidate);
+      }
     },
   });
 

@@ -642,7 +642,7 @@ export default function LiveProctoring() {
                   <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
                     <div
                       className={`h-full rounded-full transition-all duration-500 ${
-                        isCritical ? "bg-red-500" : isFlagged ? "bg-amber-500" : "bg-gradient-to-r from-emerald-500 to-[#89F336]"
+                        isCritical ? "bg-red-500" : isFlagged ? "bg-amber-500" : "bg-gradient-to-r from-emerald-500 to-[#10B981]"
                       }`}
                       style={{ width: `${progressPercent}%` }}
                     />

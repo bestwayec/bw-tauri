@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { isAllowedClientRole } from "./auth";
 import { API_BASE_URL } from "./config";
 import {
   secureGetItemAsync,
@@ -87,6 +88,7 @@ export function jwtExpMs(token: string): number | null {
 
 const ACCESS_KEY = "bestway.accessToken";
 const REFRESH_KEY = "bestway.refreshToken";
+const PROFILE_KEY = "bestway.profile";
 /** Refresh this far ahead of expiry so requests almost never see a 401. */
 const PROACTIVE_LEAD_MS = 75_000;
 
@@ -252,11 +254,15 @@ export const useSessionStore = create<SessionState>()((set, get) => {
     } else if (accessToken === null) {
       await secureRemoveItemAsync(ACCESS_KEY);
       await secureRemoveItemAsync(REFRESH_KEY);
+      await secureRemoveItemAsync(PROFILE_KEY);
     } else {
       await secureSetItemAsync(ACCESS_KEY, accessToken);
       if (refreshToken !== undefined) {
         if (refreshToken === null) await secureRemoveItemAsync(REFRESH_KEY);
         else await secureSetItemAsync(REFRESH_KEY, refreshToken);
+      }
+      if (profile) {
+        await secureSetItemAsync(PROFILE_KEY, JSON.stringify(profile));
       }
     }
   }
@@ -317,7 +323,12 @@ export const useSessionStore = create<SessionState>()((set, get) => {
         }
       } else {
         try {
-          access = await secureGetItemAsync(ACCESS_KEY);
+          const [storedAccess, storedProfile] = await Promise.all([
+            secureGetItemAsync(ACCESS_KEY),
+            secureGetItemAsync(PROFILE_KEY),
+          ]);
+          access = storedAccess;
+          profile = parseProfile(storedProfile);
         } catch {
           access = null;
         }
@@ -354,6 +365,7 @@ export const useSessionStore = create<SessionState>()((set, get) => {
         else {
           await secureRemoveItemAsync(ACCESS_KEY);
           await secureRemoveItemAsync(REFRESH_KEY);
+          await secureRemoveItemAsync(PROFILE_KEY);
         }
       } catch {
         /* wipe is best-effort */
@@ -395,6 +407,7 @@ export const useSessionStore = create<SessionState>()((set, get) => {
             if (isDefinitiveLogout(verdictOf(e))) {
               await secureRemoveItemAsync(ACCESS_KEY).catch(() => undefined);
               await secureRemoveItemAsync(REFRESH_KEY).catch(() => undefined);
+              await secureRemoveItemAsync(PROFILE_KEY).catch(() => undefined);
               set({ accessToken: null, profile: null, status: "logged-out" });
             }
             throw e;
@@ -433,8 +446,7 @@ export const useSessionStore = create<SessionState>()((set, get) => {
       if (!token) return;
       try {
         const user = await rawGetMe(token);
-        const allowedRoles = ["student", "teacher", "admin", "super_admin"];
-        if (user.role && !allowedRoles.includes(user.role)) {
+        if (user.role && !isAllowedClientRole(user.role)) {
           await get().wipeLocal();
           return;
         }

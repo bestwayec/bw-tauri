@@ -122,7 +122,7 @@ export default function Waveform({
         {shown.map((value, index) => (
           <span
             key={index}
-            className={active ? "flex-1 rounded-sm bg-[#89F336]" : "flex-1 rounded-sm bg-current opacity-30"}
+            className={active ? "flex-1 rounded-sm bg-[#10B981]" : "flex-1 rounded-sm bg-current opacity-30"}
             style={{ height: `${Math.round(Math.max(IDLE_BAR, value) * 100)}%` }}
           />
         ))}

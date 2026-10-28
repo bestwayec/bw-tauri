@@ -197,7 +197,7 @@ export default function CenterOverview({ onNavigate }: Props) {
                   <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
                     <div
                       className={`h-full rounded-full transition-all duration-500 ${
-                        isFull ? "bg-amber-400" : "bg-gradient-to-r from-emerald-500 to-[#89F336]"
+                        isFull ? "bg-amber-400" : "bg-gradient-to-r from-emerald-500 to-[#10B981]"
                       }`}
                       style={{ width: `${pct}%` }}
                     />
@@ -295,10 +295,10 @@ export default function CenterOverview({ onNavigate }: Props) {
             <div>
               <div className="flex justify-between text-xs font-semibold">
                 <span className="text-white">CEFR Multilevel (UZBMB National Standard)</span>
-                <span className="font-mono text-[#89F336]">32% (36 candidates)</span>
+                <span className="font-mono text-[#10B981]">32% (36 candidates)</span>
               </div>
               <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/10">
-                <div className="h-full rounded-full bg-[#89F336]" style={{ width: "32%" }} />
+                <div className="h-full rounded-full bg-[#10B981]" style={{ width: "32%" }} />
               </div>
             </div>
 

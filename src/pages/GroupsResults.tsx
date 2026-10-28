@@ -181,7 +181,22 @@ export default function GroupsResults() {
     let active = true;
     void (async () => {
       try {
-        const remoteGroups = await get<Array<Record<string, unknown>>>("/v1/groups");
+        let remoteGroups: Array<Record<string, unknown>> = [];
+        try {
+          const gRes = await get<Array<Record<string, unknown>>>("/v1/groups");
+          if (Array.isArray(gRes)) remoteGroups = gRes;
+        } catch {
+          remoteGroups = [];
+        }
+        if (remoteGroups.length === 0) {
+          try {
+            const cRes = await get<Array<Record<string, unknown>> | { results?: Array<Record<string, unknown>> }>("/v1/teacher/cohorts/");
+            const list = Array.isArray(cRes) ? cRes : Array.isArray(cRes?.results) ? cRes.results : [];
+            if (list.length > 0) remoteGroups = list;
+          } catch {
+            // ignore
+          }
+        }
         if (!active || !Array.isArray(remoteGroups) || remoteGroups.length === 0) return;
 
         const mapped: StudentGroup[] = await Promise.all(

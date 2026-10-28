@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
 import type { Route } from "@/App";
+import type { ApiError } from "@/lib/api";
+import { isStaffRole } from "@/lib/auth";
 import {
   listTests,
   myAttempts,
@@ -14,7 +16,7 @@ import { ExamTracks, usePrograms } from '@/components/ExamTracks';
 import MultilevelHistory from '@/components/MultilevelHistory';
 import ScorePredictionWidget from '@/components/ScorePredictionWidget';
 import LiveExamPinJoin from '@/components/LiveExamPinJoin';
-import { belongsToProgram, programQueryKey } from '@/lib/programs';
+import { belongsToProgram, programQueryKey, type ExamProgram } from '@/lib/programs';
 import { useSessionStore } from '@/lib/session-store';
 
 type Props = {
@@ -38,45 +40,92 @@ function formatDate(iso: string | null): string {
   return d.toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-/** Desktop overview: stats, in-progress resume, recent activity, quick actions. */
 const OVERVIEW_QUERY_OPTS = {
   staleTime: 30_000,
   refetchInterval: 30_000,
   refetchIntervalInBackground: false,
   refetchOnWindowFocus: true,
   refetchOnReconnect: true,
-  retry: 3,
-  retryDelay: (attempt: number) => Math.min(1_000 * 2 ** attempt, 15_000),
+  retry: (failureCount: number, error: unknown) => {
+    const err = error as ApiError | undefined;
+    if (
+      err?.code === "SCHEMA_MISMATCH" ||
+      (typeof err?.status === "number" && err.status >= 400 && err.status < 500)
+    ) {
+      return false;
+    }
+    return failureCount < 2;
+  },
+  retryDelay: (attempt: number) => Math.min(1_000 * 2 ** attempt, 5_000),
 } as const;
 
 export default function Dashboard({ studentName, onNavigate, onStart, onStartMock }: Props) {
   const programs = usePrograms();
-  const program = programs.data?.activeProgram;
   const userId = useSessionStore((state) => state.profile?.id);
+  const userRole = useSessionStore((state) => state.profile?.role);
+  const profileProgram = useSessionStore((state) => state.profile?.activeProgram);
+  const staffUser = isStaffRole(userRole);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [resumingId, setResumingId] = useState<string | null>(null);
+  const [watchdogExpired, setWatchdogExpired] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setWatchdogExpired(true), 4500);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const primaryProgram: ExamProgram =
+    programs.data?.activeProgram ?? profileProgram ?? "MULTILEVEL";
+  const altProgram: ExamProgram = primaryProgram === "IELTS" ? "MULTILEVEL" : "IELTS";
 
   const [testsQuery, attemptsQuery, mocksQuery] = useQueries({
     queries: [
-      { queryKey: programQueryKey('tests', userId, program), queryFn: () => listTests(50, program ?? undefined), enabled: !!program, ...OVERVIEW_QUERY_OPTS },
-      { queryKey: programQueryKey('my-attempts', userId, program), queryFn: () => myAttempts(50, program ?? undefined), enabled: !!program, ...OVERVIEW_QUERY_OPTS },
-      { queryKey: programQueryKey('mock-exams', userId, program), queryFn: () => listMockExams(program ?? undefined), enabled: !!program, ...OVERVIEW_QUERY_OPTS },
+      { queryKey: programQueryKey('tests', userId, primaryProgram), queryFn: () => listTests(50, primaryProgram), ...OVERVIEW_QUERY_OPTS },
+      { queryKey: programQueryKey('my-attempts', userId, primaryProgram), queryFn: () => myAttempts(50, primaryProgram), ...OVERVIEW_QUERY_OPTS },
+      { queryKey: programQueryKey('mock-exams', userId, primaryProgram), queryFn: () => listMockExams(primaryProgram), ...OVERVIEW_QUERY_OPTS },
     ],
   });
 
-  const loading = testsQuery.isPending || attemptsQuery.isPending || mocksQuery.isPending;
+  const primaryEmpty =
+    !testsQuery.isLoading &&
+    !mocksQuery.isLoading &&
+    (testsQuery.data?.length ?? 0) === 0 &&
+    (mocksQuery.data?.length ?? 0) === 0;
+
+  const [altTestsQuery, altMocksQuery] = useQueries({
+    queries: [
+      { queryKey: programQueryKey('tests', userId, altProgram), queryFn: () => listTests(50, altProgram), enabled: primaryEmpty, ...OVERVIEW_QUERY_OPTS },
+      { queryKey: programQueryKey('mock-exams', userId, altProgram), queryFn: () => listMockExams(altProgram), enabled: primaryEmpty, ...OVERVIEW_QUERY_OPTS },
+    ],
+  });
+
+  const useAltTrack =
+    !programs.data?.activeProgram &&
+    primaryEmpty &&
+    ((altMocksQuery.data?.length ?? 0) > 0 || (altTestsQuery.data?.length ?? 0) > 0);
+
+  const program: ExamProgram = useAltTrack ? altProgram : primaryProgram;
+  const rawTests = useAltTrack ? (altTestsQuery.data ?? []) : (testsQuery.data ?? []);
+  const rawMocks = useAltTrack ? (altMocksQuery.data ?? []) : (mocksQuery.data ?? []);
+
+  const loading =
+    !watchdogExpired &&
+    (testsQuery.isLoading ||
+      attemptsQuery.isLoading ||
+      mocksQuery.isLoading ||
+      (primaryEmpty && (altTestsQuery.isLoading || altMocksQuery.isLoading)));
+
   const error =
-    testsQuery.isError || attemptsQuery.isError || mocksQuery.isError
+    testsQuery.isError && attemptsQuery.isError && mocksQuery.isError
       ? "Could not load overview. Retrying automatically…"
       : null;
 
-  // Include live mock count in assigned so new mocks appear without manual refresh.
-  // 0-question rows are junk (never startable) — hide them like Exams does.
-  const matchesTrack = (type: string) => !!program && belongsToProgram(type, program);
-  const tVisible = (testsQuery.data ?? []).filter((x) => x.questionCount > 0 && matchesTrack(x.type));
-  const publishedMocks = (mocksQuery.data ?? []).filter((x) => (x.isPublished || x.isDemo) && x.questionCount > 0 && matchesTrack(x.type));
-  // Merge for display purposes: tests are primary, mocks are additive for stats.
-  // Mock-origin rows carry _isMock so resume never sends them to /tests/start.
+  const matchesTrack = (type: string) => belongsToProgram(type, program);
+  const tVisible = rawTests.filter((x) => x.questionCount > 0 && matchesTrack(x.type));
+  const publishedMocks = rawMocks.filter(
+    (x) => (x.isPublished || x.isDemo || staffUser) && x.questionCount > 0 && matchesTrack(x.type),
+  );
+
   const tests: TestListItem[] = [
     ...tVisible,
     ...publishedMocks.map(
@@ -95,12 +144,12 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
         }) as unknown as TestListItem,
     ),
   ];
-  const attempts: AttemptSummary[] | null = attemptsQuery.data?.filter((attempt) => !!program && belongsToProgram(attempt.testType, program)) ?? null;
+  const attempts: AttemptSummary[] | null =
+    attemptsQuery.data?.filter((attempt) => belongsToProgram(attempt.testType, program)) ?? null;
 
   async function handleResume(a: AttemptSummary) {
     const test = tests.find((t) => t.id === a.testId);
     if (!test) return;
-    // Mock attempts are not resumable via test endpoint – they use mock flow on web
     if ((test as unknown as { _isMock?: boolean })._isMock) return;
     setResumingId(a.id);
     setResumeError(null);
@@ -124,7 +173,6 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
     : null;
   const recent = (attempts ?? []).slice(0, 6);
 
-  if (!program) return <section><h1 className="text-2xl font-bold">{greeting(studentName)}</h1><ExamTracks /><p className="text-sm text-white/50">Select your exam track to load your dashboard.</p></section>;
   if (program === 'MULTILEVEL') {
     const skillMetadata: Record<'listening' | 'reading' | 'writing' | 'speaking', { title: string; desc: string; icon: React.ReactNode; color: string; bg: string }> = {
       listening: {
@@ -182,13 +230,13 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
       <section className="space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-brand/80">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-400">
               Multi-Level CEFR Track
             </p>
             <h1 className="mt-1 text-2xl font-black tracking-tight text-white">
               {greeting(studentName)}
             </h1>
-            <p className="mt-1 text-sm text-white/50">
+            <p className="mt-1 text-sm text-slate-400">
               Practice levels A1–C1 · Full Mock estimated evaluation: A2, B1, B2 or C1.
             </p>
           </div>
@@ -214,17 +262,17 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
         />
 
         {/* Hero Full Mock Banner */}
-        <div className="relative overflow-hidden rounded-2xl border border-brand/40 bg-gradient-to-br from-brand/15 via-[#162032] to-[#0B0F17] p-6 shadow-lg">
-          <div className="pointer-events-none absolute -right-12 -top-12 h-56 w-56 rounded-full bg-brand/10 blur-3xl" />
+        <div className="relative overflow-hidden rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/15 via-[#111827] to-[#0B0F17] p-6 shadow-lg">
+          <div className="pointer-events-none absolute -right-12 -top-12 h-56 w-56 rounded-full bg-emerald-500/10 blur-3xl" />
           <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="space-y-1.5">
               <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-400">
-                Official CBT Sequence
+                Official CBT Sequence · {assigned} available
               </span>
               <h2 className="text-xl font-bold tracking-tight text-white sm:text-2xl">
                 Multi-Level CEFR CBT Full Mock Exam
               </h2>
-              <p className="max-w-xl text-sm text-white/70">
+              <p className="max-w-xl text-sm text-slate-300">
                 1. Listening (45m) → 2. Reading (60m) → 3. Writing (60m) → 4. Speaking (15m).
                 Full lockdown environment with AI evaluation out of 75 points.
               </p>
@@ -242,7 +290,7 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
         <div>
           <div className="mb-3 flex items-center justify-between">
             <h3 className="text-base font-bold text-white">Individual Practice Sections</h3>
-            <span className="text-xs text-white/40">Select a section to begin focused practice</span>
+            <span className="text-xs text-slate-400">Select a section to begin focused practice</span>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {(['listening', 'reading', 'writing', 'speaking'] as const).map((skill) => {
@@ -251,28 +299,28 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
               return (
                 <div
                   key={skill}
-                  className="card group flex flex-col justify-between rounded-xl border border-white/10 p-4 transition-all hover:border-brand/40 hover:bg-[#1A263D]"
+                  className="group flex flex-col justify-between rounded-xl border border-emerald-500/15 bg-[#111827] p-4 transition-all hover:border-emerald-500/40 hover:bg-[#162032]"
                 >
                   <div>
                     <div className="flex items-center justify-between">
                       <div className={`flex size-10 items-center justify-center rounded-xl border ${meta.bg} ${meta.color}`}>
                         {meta.icon}
                       </div>
-                      <span className="rounded-full bg-white/5 px-2.5 py-0.5 text-[11px] font-semibold text-white/60">
+                      <span className="rounded-full bg-[#0B0F17] border border-emerald-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-300">
                         {count} available
                       </span>
                     </div>
-                    <h4 className="mt-3 font-bold capitalize text-white group-hover:text-brand transition-colors">
+                    <h4 className="mt-3 font-bold capitalize text-white group-hover:text-emerald-400 transition-colors">
                       {meta.title}
                     </h4>
-                    <p className="mt-1 text-xs text-white/50 leading-relaxed">
+                    <p className="mt-1 text-xs text-slate-400 leading-relaxed">
                       {meta.desc}
                     </p>
                   </div>
                   <div className="mt-4 pt-3 border-t border-white/10">
                     <button
                       onClick={() => onNavigate("exams")}
-                      className="w-full rounded-lg bg-white/5 py-2 text-xs font-semibold text-white/80 group-hover:bg-brand group-hover:text-black transition-colors"
+                      className="w-full rounded-lg bg-white/5 py-2 text-xs font-semibold text-white/80 group-hover:bg-emerald-500 group-hover:text-black transition-colors"
                     >
                       Practice Section →
                     </button>
@@ -294,13 +342,13 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-4">
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-brand/70">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-400">
               IELTS overview
             </p>
             <h1 className="mt-1 text-2xl font-black tracking-tight text-white">
               {greeting(studentName)}
             </h1>
-            <p className="mt-1 text-sm text-white/50">
+            <p className="mt-1 text-sm text-slate-400">
               {inProgress.length > 0
                 ? `You have ${inProgress.length} unfinished attempt${inProgress.length === 1 ? "" : "s"} — resume below.`
                 : "Pick an exam when you're ready. Scores land in History after grading."}
@@ -308,8 +356,8 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className="hidden items-center gap-1.5 text-[11px] text-white/35 sm:inline-flex" aria-live="polite">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand" aria-hidden />
+          <span className="hidden items-center gap-1.5 text-[11px] text-slate-400 sm:inline-flex" aria-live="polite">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" aria-hidden />
             Auto-sync
           </span>
           <button
@@ -336,16 +384,16 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
       {loading ? (
         <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Loading overview">
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="card animate-pulse rounded-2xl p-5">
-              <div className="h-7 w-16 rounded bg-white/10" />
-              <div className="mt-2 h-3 w-24 rounded bg-white/5" />
+            <div key={i} className="rounded-2xl border border-emerald-500/15 bg-[#111827] animate-pulse p-5">
+              <div className="h-7 w-16 rounded bg-slate-800" />
+              <div className="mt-2 h-3 w-24 rounded bg-slate-800" />
             </div>
           ))}
         </div>
       ) : error ? (
-        <div className="card mt-5 rounded-2xl border border-red-500/30 p-5">
+        <div className="mt-5 rounded-2xl border border-red-500/30 bg-[#111827] p-5">
           <p className="text-sm font-medium text-red-300">{error}</p>
-          <p className="mt-1 text-[11px] text-white/30">Retrying automatically… check your connection.</p>
+          <p className="mt-1 text-[11px] text-slate-400">Retrying automatically… check your connection.</p>
         </div>
       ) : (
         <>
@@ -357,21 +405,21 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
               { value: String(inProgress.length), label: "in progress", accent: inProgress.length > 0 },
               { value: completed > 0 || avg != null ? `${completed}` : "—", label: "completed", accent: false },
             ].map((s) => (
-              <div key={s.label} className="card rounded-2xl p-5">
-                <p className={`text-3xl font-black tabular-nums ${s.accent ? "text-brand" : "text-white"}`}>
+              <div key={s.label} className="rounded-2xl border border-emerald-500/15 bg-[#111827] p-5">
+                <p className={`text-3xl font-black tabular-nums ${s.accent ? "text-emerald-400" : "text-white"}`}>
                   {s.value}
                 </p>
-                <p className="mt-1 text-[11px] uppercase tracking-widest text-white/40">{s.label}</p>
+                <p className="mt-1 text-[11px] uppercase tracking-widest text-slate-400">{s.label}</p>
               </div>
             ))}
           </div>
 
           <div className="mt-4 grid gap-3 xl:grid-cols-2">
             {/* Resume panel */}
-            <div className="card rounded-2xl p-5">
+            <div className="rounded-2xl border border-emerald-500/15 bg-[#111827] p-5">
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-bold text-white">Continue where you left off</h2>
-                <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-white/50 ring-1 ring-white/10">
+                <span className="rounded-full bg-[#0B0F17] px-2 py-0.5 text-[11px] text-emerald-300 ring-1 ring-emerald-500/20">
                   {inProgress.length}
                 </span>
               </div>
@@ -381,7 +429,7 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
                 </p>
               )}
               {inProgress.length === 0 ? (
-                <p className="mt-2 text-xs leading-relaxed text-white/40">
+                <p className="mt-2 text-xs leading-relaxed text-slate-400">
                   Nothing in progress. Starting an exam from the Exams tab lets you resume it here if you leave.
                 </p>
               ) : (
@@ -389,13 +437,13 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
                   {inProgress.slice(0, 4).map((a) => (
                     <li
                       key={a.id}
-                      className="flex items-center gap-3 rounded-xl bg-black/30 px-3 py-2.5 ring-1 ring-white/10"
+                      className="flex items-center gap-3 rounded-xl bg-[#0B0F17] px-3 py-2.5 ring-1 ring-emerald-500/15"
                     >
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-[13px] font-semibold text-white">
                           {a.testTitle ?? "Exam"}
                         </p>
-                        <p className="text-[11px] text-white/40">started {formatDate(a.startedAt)}</p>
+                        <p className="text-[11px] text-slate-400">started {formatDate(a.startedAt)}</p>
                       </div>
                       <button
                         onClick={() => void handleResume(a)}
@@ -411,18 +459,18 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
             </div>
 
             {/* Recent activity */}
-            <div className="card rounded-2xl p-5">
+            <div className="rounded-2xl border border-emerald-500/15 bg-[#111827] p-5">
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-bold text-white">Recent activity</h2>
                 <button
                   onClick={() => onNavigate("history")}
-                  className="text-xs font-semibold text-brand hover:text-brand-subtle-fg"
+                  className="text-xs font-semibold text-emerald-400 hover:text-emerald-300"
                 >
                   Full history →
                 </button>
               </div>
               {recent.length === 0 ? (
-                <p className="mt-2 text-xs leading-relaxed text-white/40">
+                <p className="mt-2 text-xs leading-relaxed text-slate-400">
                   No attempts yet. Your finished exams and scores will show up here.
                 </p>
               ) : (
@@ -432,7 +480,7 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
                       <span
                         className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-xs font-black ${
                           a.status === "completed"
-                            ? "bg-brand/15 text-brand-subtle-fg"
+                            ? "bg-emerald-500/15 text-emerald-300"
                             : a.status === "grading"
                               ? "bg-amber-400/15 text-amber-200"
                               : "bg-sky-400/15 text-sky-200"
@@ -444,9 +492,9 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
                         <p className="truncate text-[13px] font-medium text-white">
                           {a.testTitle ?? "Exam"}
                         </p>
-                        <p className="text-[11px] text-white/40">{formatDate(a.finishedAt ?? a.startedAt)}</p>
+                        <p className="text-[11px] text-slate-400">{formatDate(a.finishedAt ?? a.startedAt)}</p>
                       </div>
-                      <span className="shrink-0 font-mono text-xs text-white/60">
+                      <span className="shrink-0 font-mono text-xs text-slate-300">
                         {a.totalScore ?? a.autoScore ?? "—"}{a.totalScore != null || a.autoScore != null ? ' pts' : ''}
                       </span>
                     </li>
