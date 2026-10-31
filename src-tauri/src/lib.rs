@@ -4,6 +4,7 @@ mod lockdown;
 mod logger;
 mod session;
 mod tray;
+mod video_stream;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -162,6 +163,10 @@ pub fn run() {
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+
+    let builder = builder.register_uri_scheme_protocol("bway", |_ctx, request| {
+        video_stream::handle_bway_protocol(&request)
+    });
 
     builder
         .setup(|app| {
