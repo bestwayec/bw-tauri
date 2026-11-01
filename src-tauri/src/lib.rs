@@ -4,6 +4,7 @@ mod lockdown;
 mod logger;
 mod session;
 mod tray;
+mod encryption;
 mod video_stream;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -122,6 +123,30 @@ fn quit_app(app: tauri::AppHandle, state: tauri::State<'_, LockState>) -> Result
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Download an encrypted offline video file to app data directory
+#[tauri::command]
+async fn download_offline_video(
+    app: tauri::AppHandle,
+    url: String,
+    filename: String,
+) -> Result<String, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let videos_dir = app_dir.join("offline_videos");
+    std::fs::create_dir_all(&videos_dir).map_err(|e| e.to_string())?;
+
+    let clean_name = filename.trim().trim_end_matches(".bway");
+    let target_path = videos_dir.join(format!("{clean_name}.bway"));
+
+    encryption::download_and_encrypt_video(&url, &target_path).await?;
+    Ok(target_path.to_string_lossy().to_string())
+}
+
+/// Query local machine key fingerprint for security audits
+#[tauri::command]
+fn get_offline_device_fingerprint() -> Result<String, String> {
+    Ok(encryption::get_machine_fingerprint())
+}
+
 pub fn run() {
     let builder = tauri::Builder::default()
         .manage(LockState(AtomicBool::new(false)))
@@ -267,7 +292,9 @@ pub fn run() {
             session::session_set,
             session::session_clear,
             session::auth_refresh,
-            session::auth_logout
+            session::auth_logout,
+            download_offline_video,
+            get_offline_device_fingerprint
         ])
         .build(tauri::generate_context!())
         .expect("error while building Bestway Exam")

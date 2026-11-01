@@ -29,6 +29,8 @@ export interface UpdateInfo {
   current: string;
   latest: string;
   downloadUrl: string | null;
+  body?: string | null;
+  date?: string | null;
 }
 
 /** Runtime app version via Tauri, bundled constant otherwise. Never throws. */

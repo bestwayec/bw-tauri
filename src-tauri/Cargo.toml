@@ -26,6 +26,11 @@ url = "2"
 # Auth token ownership (Phase 1): HTTP refresh + OS credential store.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 keyring = { version = "3", default-features = false }
+aes = "0.8"
+ctr = "0.9"
+cipher = "0.4"
+rand = "0.8"
+sha2 = "0.10"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }

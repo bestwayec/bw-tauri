@@ -25,6 +25,8 @@ const Particles = lazy(() => import("@/components/Particles"));
 import Sidebar, { MobileNavigation } from "@/components/Sidebar";
 import TitleBar from "@/components/TitleBar";
 import UpdateNotifier from "@/components/UpdateNotifier";
+import UpdateModal from "@/components/UpdateModal";
+import { useAutoUpdater } from "@/hooks/useAutoUpdater";
 import ExitConfirmModal from "@/components/ExitConfirmModal";
 import ReauthModal from "@/components/ReauthModal";
 import { checkForUpdate, getDismissedVersion, type UpdateInfo } from "@/lib/version";
@@ -117,6 +119,7 @@ function OnlineDot() {
 
 export default function App() {
   const queryClient = useQueryClient();
+  const autoUpdater = useAutoUpdater(true);
   const programs = usePrograms();
   const [route, setRoute] = useState<Route>("login");
   const [student, setStudent] = useState<Student | null>(null);
@@ -547,6 +550,7 @@ export default function App() {
     </div>
     </div>
     {update && <UpdateNotifier update={update} onClose={() => setUpdate(null)} deferInstall={examActive} />}
+    <UpdateModal updater={autoUpdater} examActive={examActive} />
     {showSplash && (
       <Suspense fallback={null}>
         <BootSplash exiting={introLeaving} />
