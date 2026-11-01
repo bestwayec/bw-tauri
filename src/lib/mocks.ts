@@ -213,6 +213,12 @@ export interface MockSubmitResult {
 }
 
 /** Published + demo mocks visible to the signed-in student. Validated against the backend shape. */
+/** Fetches full dynamic Computer-Delivered (CD) exam session payload. */
+export async function fetchCdExamSession(examId: string): Promise<any> {
+  const res = await get<{ data?: any }>(`/api/v1/exams/${encodeURIComponent(examId)}/cd-session/`);
+  return (res as any)?.data ?? res;
+}
+
 export async function listMockExams(program?: ExamProgram, practiceLevel?: PracticeLevel): Promise<MockExamListItem[]> {
   const raw = await get<unknown>("/mock/exams", { program, practiceLevel });
   try {
