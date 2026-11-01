@@ -13,6 +13,7 @@ import MicCheck from "./MicCheck";
 import PassagePane, { type PassageMarks } from "./PassagePane";
 import QuestionGroup from "./QuestionGroup";
 import SubmitConfirmModal from "./SubmitConfirmModal";
+import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import TopBar, { type SaveState } from "./TopBar";
 import {
   isAnswered,
@@ -690,7 +691,8 @@ export default function ExamRunner(p: ExamRunnerProps) {
       {p.skill === "speaking" && <MicCheck />}
 
       <main className="exam-body">
-        {split ? (
+        <ErrorBoundary fallbackTitle={`Part ${partIdx + 1} savollarini ko'rsatishda xatolik yuz berdi`}>
+          {split ? (
           <div className="exam-split" style={{ gridTemplateColumns: splitColumns(leftWidth) }}>
             <div className="exam-pane exam-pane-left">
               <div className="exam-pane-head">
@@ -811,6 +813,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
             />
           </div>
         )}
+        </ErrorBoundary>
       </main>
 
       {error && (

@@ -37,9 +37,9 @@ function essayMin(prompt: string, instructions: string | null): number {
 export default function QuestionGroup(p: QuestionGroupProps) {
   const list = p.only ?? p.part.questions;
   if (list.length === 0) return null;
-  const first = list[0].number;
-  const last = list[list.length - 1].number;
-  const showMap = list.some((q) => q.kind === "map_label") && p.part.imageUrl;
+  const first = list[0]?.number ?? 1;
+  const last = list[list.length - 1]?.number ?? first;
+  const showMap = Boolean(p.part.imageUrl);
 
   // Absent configuration preserves legacy IELTS one-use interaction.
   const takenBy = new Map<string, string[]>();

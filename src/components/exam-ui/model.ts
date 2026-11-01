@@ -3,7 +3,6 @@ import { materialOwnerId, normalizeKind } from "@/lib/exam-types";
 import {
   mockGroupAudioUrl,
   resolveMockMediaUrl,
-  type MockShapedGroup,
   type MockShapedQuestion,
   type MockShapedSection,
 } from "@/lib/mocks";
@@ -118,31 +117,48 @@ export function widgetFor(kind: UIKind, hasOptions: boolean): WidgetId {
 }
 
 /** Map a backend mock question type onto a UIKind. */
-export function mockKindOf(t: MockShapedQuestion["type"]): UIKind {
+export function mockKindOf(t: MockShapedQuestion["type"] | string | undefined | null): UIKind {
   switch (t) {
+    case "single_choice":
     case "multiple_choice":
+    case "mcq":
       return "single_choice";
     case "multi_select":
       return "multi_select";
     case "true_false_notgiven":
+    case "true_false_ng":
+    case "true_false":
+    case "tfng":
       return "tfng";
     case "yes_no_notgiven":
+    case "ynng":
       return "ynng";
     case "matching":
+    case "speaker_matching":
+    case "matching_statements":
       return "matching";
     case "matching_headings":
       return "matching_headings";
     case "map_labelling":
+    case "map_labeling":
+    case "map_dropdown":
+    case "map_label":
       return "map_label";
     case "sentence_completion":
     case "note_completion":
     case "summary_completion":
     case "table_completion":
+    case "in_text_blank":
+    case "gap_fill":
+    case "completion":
       return "completion";
+    case "essay":
     case "essay_task1":
     case "essay_task2":
       return "essay";
+    case "speaking":
     case "speaking_task":
+    case "speaking_prompt":
       return "speaking";
     case "short_answer":
     default:
@@ -243,45 +259,47 @@ export function mockSectionToParts(
   attemptId: string,
   timed: boolean,
 ): UIPart[] {
-  const groups = [...section.groups].sort((a, b) => a.sortOrder - b.sortOrder);
+  const rawGroups = (section?.groups || (section as any)?.parts || []);
+  const groups = [...rawGroups].sort((a: any, b: any) => (a.sortOrder ?? a.order ?? 0) - (b.sortOrder ?? b.order ?? 0));
   let n = 0;
-  return groups.map((g: MockShapedGroup, gi: number) => {
-    const questions: UIQuestion[] = [...g.questions]
-      .sort((a, b) => a.sortOrder - b.sortOrder || a.number - b.number)
+  return groups.map((g: any, gi: number) => {
+    const rawQuestions = (g?.questions || []);
+    const questions: UIQuestion[] = [...rawQuestions]
+      .sort((a: any, b: any) => (a.sortOrder ?? a.order ?? 0) - (b.sortOrder ?? b.order ?? 0) || (a.number ?? 0) - (b.number ?? 0))
       .map((q) => ({ ...toUIQuestion(q), number: ++n }));
     const startSec = parseAudioStartSec(g.audioStartSec, g.stimulusRef);
     return {
-      key: g.id,
-      label: (section.skill === 'speaking' || section.skill === 'writing') && g.questions[0]?.guidance
-        ? g.questions[0].guidance.displayLabel ?? `Part ${g.questions[0].guidance.taskKey}`
-        : g.contentLayout === 'multi_extract' ? `Extract ${gi + 1}` : partLabel(section.skill, gi),
-      title: g.title,
-      instructions: g.instructions,
-      passageText: g.passageText,
-      contentHtml: g.contentHtml,
-      contentLayout: g.contentLayout,
+      key: g.id || g.key || `part-${gi + 1}`,
+      label: (section?.skill === 'speaking' || section?.skill === 'writing') && questions[0]?.guidance
+        ? questions[0].guidance.displayLabel ?? `Part ${questions[0].guidance.taskKey}`
+        : g.contentLayout === 'multi_extract' ? `Extract ${gi + 1}` : (g.label || partLabel(section?.skill || 'listening', gi)),
+      title: g.title ?? null,
+      instructions: g.instructions ?? null,
+      passageText: g.passageText ?? g.contentHtml ?? null,
+      contentHtml: g.contentHtml ?? g.passageText ?? null,
+      contentLayout: g.contentLayout ?? null,
       optionsReusable: g.optionsReusable,
-      audioUrl: mockGroupAudioUrl(g, attemptId, timed && section.skill === "listening"),
+      audioUrl: mockGroupAudioUrl(g, attemptId, timed && section?.skill === "listening") ?? g.audioUrl ?? null,
       ...(startSec != null ? { audioStartSec: startSec } : {}),
       ...(g.stimulusRef ? { stimulusRef: g.stimulusRef } : {}),
-      imageUrl: resolveMockMediaUrl(g.imageUrl),
-      strictAudio: timed && section.skill === "listening" && !!g.audioUrl,
-      ...(g.questions[0]?.guidance && timed && section.skill === 'listening' ? { multilevelAudio: { attemptId, groupId: g.id } } : {}),
+      imageUrl: g.imageUrl ? resolveMockMediaUrl(g.imageUrl) : null,
+      strictAudio: timed && section?.skill === "listening" && !!(mockGroupAudioUrl(g, attemptId, true) || g.audioUrl || g.audioKey),
+      ...(questions[0]?.guidance && timed && section?.skill === 'listening' ? { multilevelAudio: { attemptId, groupId: g.id } } : {}),
       questions,
     };
   });
 }
 
-function toUIQuestion(q: MockShapedQuestion): Omit<UIQuestion, "number"> {
+function toUIQuestion(q: any): Omit<UIQuestion, "number"> {
   return {
     id: q.id,
-    kind: mockKindOf(q.type),
-    prompt: q.prompt,
-    options: q.options,
-    points: q.points,
-    wordLimit: q.wordLimit,
-    answerRule: q.answerRule,
-    guidance: q.guidance,
+    kind: mockKindOf(q.kind || q.type || q.questionType),
+    prompt: q.prompt ?? q.text ?? "",
+    options: q.options ?? (q.payload?.options ?? null),
+    points: q.points ?? 1,
+    wordLimit: q.wordLimit ?? (q.payload?.wordLimit ?? null),
+    answerRule: q.answerRule ?? q.payload?.answerRule,
+    guidance: q.guidance ?? q.payload?.guidance,
   };
 }
 
