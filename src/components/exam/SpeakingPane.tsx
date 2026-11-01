@@ -169,8 +169,17 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
     requesting.current = true;
     try {
       if (recordingKey) markActiveRecording(recordingKey, true);
-      // Constrained capture: echo cancellation + noise suppression + auto gain.
-      const stream = await openMicrophone();
+      // Constrained capture: echo cancellation + noise suppression + auto gain, with explicit fallback.
+      let stream: MediaStream;
+      try {
+        stream = await openMicrophone();
+      } catch (err) {
+        const errName = typeof err === "object" && err !== null ? (err as { name?: unknown }).name : undefined;
+        if (errName === "NotAllowedError" || errName === "PermissionDeniedError" || errName === "SecurityError") {
+          throw err;
+        }
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      }
       if (!alive.current) { stream.getTracks().forEach((track) => track.stop()); if (recordingKey) markActiveRecording(recordingKey, false); return; }
       streamRef.current = stream;
       setLiveStream(stream);
@@ -211,9 +220,22 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
       stopTracks();
       if (recordingKey) markActiveRecording(recordingKey, false);
       setRecState("error");
-      setRecError(
-        e instanceof Error ? e.message : "Microphone blocked — allow access in the OS prompt, or practice with timers + notes.",
-      );
+      const errName = typeof e === "object" && e !== null ? (e as { name?: unknown }).name : undefined;
+      const isPermission =
+        errName === "NotAllowedError" ||
+        errName === "PermissionDeniedError" ||
+        errName === "SecurityError" ||
+        (e instanceof Error && /permission|blocked|allowed/i.test(e.message));
+
+      if (isPermission) {
+        setRecError(
+          "Microphone access was denied. Please allow microphone permissions in your operating system settings (Windows: Settings > Privacy > Microphone; macOS: System Settings > Privacy & Security > Microphone), then click Record again."
+        );
+      } else {
+        setRecError(
+          e instanceof Error ? e.message : "Microphone blocked — allow access in the OS prompt, or practice with timers + notes.",
+        );
+      }
     } finally { requesting.current = false; }
   }
 
@@ -342,7 +364,21 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
           </>
         )}
         {recError && (
-          <p role="alert" className="mt-2 text-[11px] leading-relaxed text-amber-200/90">{recError}</p>
+          <div role="alert" className="mt-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[11px] leading-relaxed text-amber-200">
+            <div className="flex items-start gap-2.5">
+              <span className="text-base leading-none">⚠️</span>
+              <div className="flex-1 space-y-1">
+                <p className="font-semibold text-amber-100">{recError}</p>
+                <button
+                  type="button"
+                  onClick={() => void startRecording()}
+                  className="mt-1 inline-flex items-center gap-1 rounded-md bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-200 hover:bg-amber-500/30"
+                >
+                  ↻ Retry Microphone Access
+                </button>
+              </div>
+            </div>
+          </div>
         )}
         {uploadNote && (
           <p className="mt-2 text-[11px] leading-relaxed text-brand-subtle-fg/80">{uploadNote}</p>

@@ -88,6 +88,19 @@ describe("openMicrophone", () => {
     stubMicrophone(vi.fn().mockRejectedValue("boom"));
     await expect(openMicrophone()).rejects.toThrow(/could not be opened/i);
   });
+
+  it("falls back to unconstrained audio: true when DSP constraints reject with OverconstrainedError", async () => {
+    const fallbackStream = { id: "fallback-stream" } as unknown as MediaStream;
+    const getUserMedia = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error("constraint fail"), { name: "OverconstrainedError" }))
+      .mockResolvedValueOnce(fallbackStream);
+    stubMicrophone(getUserMedia);
+    await expect(openMicrophone()).resolves.toBe(fallbackStream);
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    expect(getUserMedia).toHaveBeenNthCalledWith(1, AUDIO_CAPTURE_CONSTRAINTS);
+    expect(getUserMedia).toHaveBeenNthCalledWith(2, { audio: true, video: false });
+  });
 });
 
 describe("audio processing reporting", () => {

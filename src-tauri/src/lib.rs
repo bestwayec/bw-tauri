@@ -147,7 +147,31 @@ fn get_offline_device_fingerprint() -> Result<String, String> {
     Ok(encryption::get_machine_fingerprint())
 }
 
+fn setup_media_environment() {
+    #[cfg(target_os = "windows")]
+    {
+        let existing = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").unwrap_or_default();
+        let media_flags = "--enable-media-stream --enable-features=msWebAudioCapture,msWebAudioCaptureMute,PreloadMediaEngagementData --autoplay-policy=no-user-gesture-required";
+        if !existing.contains("--enable-media-stream") {
+            let combined = if existing.is_empty() {
+                media_flags.to_string()
+            } else {
+                format!("{} {}", existing, media_flags)
+            };
+            std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", combined);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::env::set_var("WEBKIT_WEBRTC_AUDIO_CAPTURE", "1");
+        std::env::set_var("WEBKIT_MEDIA_STREAM", "1");
+    }
+}
+
 pub fn run() {
+    setup_media_environment();
+
     let builder = tauri::Builder::default()
         .manage(LockState(AtomicBool::new(false)))
         .manage(session::SessionStore::new())

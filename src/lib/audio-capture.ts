@@ -39,7 +39,7 @@ export function audioCaptureFailure(error: unknown): string {
     case "NotAllowedError":
     case "PermissionDeniedError":
     case "SecurityError":
-      return "Microphone permission was blocked. Allow it in the OS prompt (or system privacy settings) and retry.";
+      return "Microphone permission was blocked. Allow access in your operating system or browser settings and retry.";
     case "NotFoundError":
     case "DevicesNotFoundError":
       return "No microphone was found. Connect a microphone and retry.";
@@ -55,6 +55,8 @@ export function audioCaptureFailure(error: unknown): string {
 
 /**
  * Open the microphone with echo cancellation, noise suppression and auto gain.
+ * If advanced audio processing constraints fail with OverconstrainedError,
+ * gracefully falls back to basic unconstrained audio (`{ audio: true, video: false }`).
  *
  * Rejects with an `Error` carrying the friendly text and the original
  * DOMException `name` (existing call sites still branch on the name).
@@ -66,9 +68,24 @@ export async function openMicrophone(): Promise<MediaStream> {
   try {
     return await navigator.mediaDevices.getUserMedia(AUDIO_CAPTURE_CONSTRAINTS);
   } catch (error) {
-    const failure = new Error(audioCaptureFailure(error));
     const name =
       typeof error === "object" && error !== null ? (error as { name?: unknown }).name : undefined;
+
+    if (name === "OverconstrainedError" || name === "ConstraintNotSatisfiedError") {
+      try {
+        return await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      } catch (fallbackError) {
+        const failure = new Error(audioCaptureFailure(fallbackError || error));
+        const finalName =
+          typeof fallbackError === "object" && fallbackError !== null
+            ? (fallbackError as { name?: unknown }).name
+            : name;
+        if (typeof finalName === "string" && finalName) failure.name = finalName;
+        throw failure;
+      }
+    }
+
+    const failure = new Error(audioCaptureFailure(error));
     if (typeof name === "string" && name) failure.name = name;
     throw failure;
   }
