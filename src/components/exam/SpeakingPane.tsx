@@ -197,14 +197,19 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
           if (prev) URL.revokeObjectURL(prev);
           return blob.size > 0 ? URL.createObjectURL(blob) : null;
         });
-        setRecState(blob.size > 0 ? "recorded" : "idle");
+        if (blob.size < 10240) {
+          setRecState("error");
+          setRecError("Recording too short (< 10 KB). Please speak clearly and record again.");
+          recorderRef.current = null;
+          if (recordingKey) markActiveRecording(recordingKey, false);
+          return;
+        }
+        setRecState("recorded");
         recorderRef.current = null;
-        if (blob.size > 0) {
-          try {
-            onBlobRef.current?.(blob);
-          } catch {
-            /* caller surfaces upload errors */
-          }
+        try {
+          onBlobRef.current?.(blob);
+        } catch {
+          /* caller surfaces upload errors */
         }
         if (recordingKey) markActiveRecording(recordingKey, false);
       };

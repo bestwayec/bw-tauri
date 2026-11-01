@@ -51,6 +51,7 @@ export function SubmitConfirmBody({
 }: Props) {
   if (!open) return null;
 
+  const hasQuestions = total > 0;
   const unanswered = Math.max(0, total - answered);
   const { shown, hidden } = summariseNumbers(unansweredNumbers);
 
@@ -58,13 +59,22 @@ export function SubmitConfirmBody({
     <div className="exam-help" role="dialog" aria-modal="true" aria-label="Submit section" onClick={onCancel}>
       <div className="exam-help-card" onClick={(e) => e.stopPropagation()}>
         <h2>Submit this section?</h2>
-        <p className="exam-confirm-line">
-          <strong>{answered}</strong> of <strong>{total}</strong> question{total === 1 ? "" : "s"} answered
-          {unanswered > 0 ? ` · ${unanswered} still empty` : " · nothing left empty"}
-          {flagged > 0 ? ` · ${flagged} flagged for review` : ""}
-        </p>
+        {!hasQuestions ? (
+          <div className="exam-confirm-warn">
+            <p className="exam-confirm-warn-head">No questions loaded</p>
+            <p className="exam-confirm-warn-note">
+              No questions found for this section (0 / 0). Submission is disabled. Please reload or contact your teacher.
+            </p>
+          </div>
+        ) : (
+          <p className="exam-confirm-line">
+            <strong>{answered}</strong> of <strong>{total}</strong> question{total === 1 ? "" : "s"} answered
+            {unanswered > 0 ? ` · ${unanswered} still empty` : " · nothing left empty"}
+            {flagged > 0 ? ` · ${flagged} flagged for review` : ""}
+          </p>
+        )}
 
-        {unanswered > 0 && (
+        {hasQuestions && unanswered > 0 && (
           <div className="exam-confirm-warn">
             <p className="exam-confirm-warn-head">Unanswered questions</p>
             <p className="exam-confirm-warn-nums">
@@ -86,7 +96,12 @@ export function SubmitConfirmBody({
           <button type="button" onClick={onCancel} disabled={submitting} className="exam-btn-ghost">
             Keep working
           </button>
-          <button type="button" onClick={onConfirm} disabled={submitting} className="exam-btn-primary">
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={submitting || !hasQuestions}
+            className="exam-btn-primary"
+          >
             {submitting ? "Submitting…" : submitLabel}
           </button>
         </div>

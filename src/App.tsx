@@ -236,7 +236,18 @@ export default function App() {
     };
   }, []);
 
-  const navigate = (next: Route) => setRoute(next);
+  const navigate = (next: Route) => {
+    const isExamRunning =
+      route === "runner" ||
+      route === "mockSections" ||
+      route === "mockRunner" ||
+      route === "locked";
+    if (isExamRunning && next !== route) {
+      setShowExitConfirm(true);
+      return;
+    }
+    setRoute(next);
+  };
 
   const [showReauth, setShowReauth] = useState(false);
   const routeRef = useRef<Route>("login");
