@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { APP_VERSION } from "@/lib/version";
 
 export interface TitleBarProps {
   examActive?: boolean;
@@ -90,7 +91,7 @@ export default function TitleBar({ examActive = false }: TitleBarProps) {
           <path d="M2 12l10 5 10-5" />
         </svg>
         <span className="font-semibold tracking-wide text-white/90">BestWay Exam</span>
-        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/60 font-mono">v0.8.3</span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/60 font-mono">v{APP_VERSION}</span>
         {examActive && (
           <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-medium tracking-wide">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />

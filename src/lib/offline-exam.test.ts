@@ -66,12 +66,12 @@ describe('offline exam cache', () => {
     await offline.cacheAnswer('other', 'q-1', 'Another attempt');
     expect(await offline.pendingAnswerCount('matt-1')).toBe(2);
 
-    expect(await offline.resolvePendingAnswers('matt-1', ['q-1'])).toBe(1);
+    expect(await offline.resolvePendingAnswers('matt-1', [{ questionId: 'q-1', response: 'First draft answer' }])).toBe(1);
     expect(await offline.pendingAnswerCount('matt-1')).toBe(1);
     // The acknowledged answer is gone, the other attempt is untouched.
     expect(await offline.pendingAnswerCount('other')).toBe(1);
     // Unknown ids are ignored.
-    expect(await offline.resolvePendingAnswers('matt-1', ['q-9'])).toBe(0);
+    expect(await offline.resolvePendingAnswers('matt-1', [{ questionId: 'q-9', response: 'unknown' }])).toBe(0);
   });
 
   it('reads the mirrored answers back for the runner to restore', async () => {
@@ -106,6 +106,28 @@ describe('offline exam cache', () => {
     expect(count).toBe(2);
     expect(received.map((r) => r.questionId).sort()).toEqual(['q-1', 'q-2']);
     expect(await offline.pendingAnswerCount('matt-1')).toBe(0);
+  });
+
+  it('retains a newer answer typed while the previous value is being uploaded', async () => {
+    const offline = await freshModule();
+    await offline.cacheAnswer('matt-1', 'q-1', 'First draft');
+    await offline.flushOfflineSyncQueue('matt-1', async () => {
+      await offline.cacheAnswer('matt-1', 'q-1', 'Final draft');
+    });
+    expect(await offline.readPendingAnswers('matt-1')).toEqual([
+      expect.objectContaining({ questionId: 'q-1', response: 'Final draft' }),
+    ]);
+    const send = vi.fn(async () => undefined);
+    await offline.flushOfflineSyncQueue('matt-1', send);
+    expect(send).toHaveBeenCalledWith([{ questionId: 'q-1', response: 'Final draft' }]);
+    expect(await offline.pendingAnswerCount('matt-1')).toBe(0);
+  });
+
+  it('keeps all answers when an upload fails', async () => {
+    const offline = await freshModule();
+    await offline.cacheAnswer('matt-1', 'q-1', 'Offline draft');
+    await expect(offline.flushOfflineSyncQueue('matt-1', async () => { throw new Error('offline'); })).rejects.toThrow('offline');
+    expect(await offline.pendingAnswerCount('matt-1')).toBe(1);
   });
 
   it('clears cached exam, mirrored answers, and timer for one attempt', async () => {

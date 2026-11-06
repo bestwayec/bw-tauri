@@ -407,7 +407,6 @@ export default function App() {
           </Suspense>
         )}
         <CrashRecovery />
-    <ResumeExamModal onResume={handleStartMock} isExamActive={examActive} />
       </>
     );
   }
@@ -561,6 +560,7 @@ export default function App() {
     </div>
     </div>
     {update && <UpdateNotifier update={update} onClose={() => setUpdate(null)} deferInstall={examActive} />}
+    <ResumeExamModal onResume={handleStartMock} isExamActive={examActive} />
     <UpdateModal updater={autoUpdater} examActive={examActive} />
     {showSplash && (
       <Suspense fallback={null}>
