@@ -26,6 +26,13 @@ test('student password login stores no plaintext credentials and survives reload
 });
 
 test('a writing draft survives an API outage and restart, and finalization waits for upload', async ({ page }) => {
+  const acknowledgedAnswers: Array<{ response?: string }> = [];
+  page.on('response', response => {
+    if (response.ok() && /\/mock\/attempts\/[^/]+\/answers?$/.test(response.url())) {
+      const body = response.request().postDataJSON();
+      acknowledgedAnswers.push(...(body.answers ?? [body]));
+    }
+  });
   await page.addInitScript(() => {
     Object.assign(window, { cameraRequests: 0 });
     navigator.mediaDevices.getUserMedia = async constraints => {
@@ -66,5 +73,6 @@ test('a writing draft survives an API outage and restart, and finalization waits
   const acknowledgement = page.waitForResponse(response => /\/mock\/attempts\/[^/]+\/submit$/.test(response.url()) && response.ok());
   await page.getByRole('dialog', { name: 'Submit section' }).getByRole('button', { name: 'Submit Writing', exact: true }).click();
   await acknowledgement;
+  expect(acknowledgedAnswers.some(answer => answer.response === draft)).toBe(true);
   await expect(page.getByText('submitted ✓', { exact: true })).toBeVisible();
 });

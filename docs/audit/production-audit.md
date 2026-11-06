@@ -111,6 +111,7 @@ docker build --secret id=proxy_ca,src=/etc/ssl/certs/ca-certificates.crt \
 cargo check --locked -j 3
 cargo clippy --locked -j 3
 cargo test --locked -j 3
+cd .. # return to the desktop checkout root
 cargo-audit audit --file src-tauri/Cargo.lock --json
 
 # Backend, in /workspace/bestway/backend-django with requirements/dev.txt installed:
@@ -123,7 +124,7 @@ pytest tests/test_mock_attempts.py tests/test_mock_practice.py tests/test_mock_r
 
 ## Changes and regression coverage
 
-The implementation commits contain the complete changed-file list (`git show --stat cda5cf7` and `git show --stat e0e3c49`). Changes cover `src/lib` session/API/OAuth/contracts/offline persistence, the login/exam/resume UI, native session/media modules, security lockfile patches, and isolated validation workflows. The existing Tauri application identifier, deep-link schemes and package version were not changed.
+The accompanying `changed-files.txt` contains the complete changed-file list; implementation commits are also inspectable with `git show --stat cda5cf7` and `git show --stat e0e3c49`. Changes cover `src/lib` session/API/OAuth/contracts/offline persistence, the login/exam/resume UI, native session/media modules, security lockfile patches, and isolated validation workflows. The existing Tauri application identifier, deep-link schemes and package version were not changed.
 
 New regression files: `src/lib/api-session.test.ts`, `src/lib/config.test.ts`, `src/lib/legacy-submission.test.ts`, `src/lib/offline-indexeddb.test.ts`, `src/components/ResumeExamModal.test.ts`, and `e2e/student.spec.ts`. Existing session/OAuth/offline/submission/mock/title/release tests and Rust session/media/encryption tests were extended.
 
