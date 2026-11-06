@@ -16,6 +16,7 @@
 //! logged.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 
@@ -38,6 +39,24 @@ pub struct SessionData {
     /// Cached `/auth/me` user JSON (lets boot render instantly/offline).
     #[serde(default)]
     pub profile_json: Option<String>,
+}
+
+/// The webview may use access tokens, but never reads persisted refresh tokens.
+#[derive(Serialize)]
+pub struct SessionSnapshot {
+    access_token: Option<String>,
+    device_id: Option<String>,
+    profile_json: Option<String>,
+}
+
+impl From<SessionData> for SessionSnapshot {
+    fn from(data: SessionData) -> Self {
+        Self {
+            access_token: data.access_token,
+            device_id: data.device_id,
+            profile_json: data.profile_json,
+        }
+    }
 }
 
 impl SessionData {
@@ -152,23 +171,24 @@ fn write_file_store(dir: &Path, data: &SessionData) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let raw = serde_json::to_vec(data).map_err(std::io::Error::other)?;
     let tmp = dir.join(format!("{SESSION_FILE}.tmp"));
-    std::fs::write(&tmp, raw)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
     }
+    let mut file = options.open(&tmp)?;
+    use std::io::Write;
+    file.write_all(&raw)?;
+    file.sync_all()?;
+    drop(file);
     std::fs::rename(&tmp, session_file(dir))?;
     Ok(())
 }
 
 fn remove_file_store(dir: &Path) {
     let _ = std::fs::remove_file(session_file(dir));
-}
-
-/// Load order: keyring -> file fallback (which then re-seeds keyring).
-pub fn load_from_disk(app_dir: &Path) -> (SessionData, bool) {
-    load_from_disk_for(app_dir, KEYRING_SERVICE, KEYRING_ACCOUNT)
 }
 
 fn load_from_disk_for(app_dir: &Path, service: &str, account: &str) -> (SessionData, bool) {
@@ -185,18 +205,22 @@ fn load_from_disk_for(app_dir: &Path, service: &str, account: &str) -> (SessionD
     }
 }
 
-fn save_to_disk_for(app_dir: &Path, data: &SessionData, service: &str, account: &str) {
+fn save_to_disk_for(
+    app_dir: &Path,
+    data: &SessionData,
+    service: &str,
+    account: &str,
+) -> Result<(), String> {
     let raw = serde_json::to_string(data).unwrap_or_default();
     match keyring::Entry::new(service, account).and_then(|e| e.set_password(&raw)) {
         Ok(()) => {
             // Keyring won: drop any stale file copy so only one store holds tokens.
             remove_file_store(app_dir);
+            Ok(())
         }
         Err(e) => {
             eprintln!("[session] keyring write failed, file fallback: {e}");
-            if let Err(io) = write_file_store(app_dir, data) {
-                eprintln!("[session] file fallback write failed: {io}");
-            }
+            write_file_store(app_dir, data).map_err(|io| format!("SESSION_STORAGE_FAILED: {io}"))
         }
     }
 }
@@ -214,6 +238,7 @@ fn clear_disk_for(app_dir: &Path, service: &str, account: &str) {
 
 pub struct SessionStore {
     mem: StdMutex<SessionData>,
+    generation: AtomicU64,
     /// Serializes refresh: exactly one POST /auth/refresh at a time.
     refresh_lock: tauri::async_runtime::Mutex<()>,
     /// Resolved in `setup` (needs the app handle); temp dir until then.
@@ -231,9 +256,11 @@ impl Default for SessionStore {
 impl SessionStore {
     pub fn new() -> Self {
         let fallback = std::env::temp_dir();
-        let (data, _) = load_from_disk(&fallback);
+        // Never read a shared temporary session.json before app setup.
+        let data = SessionData::default();
         Self {
             mem: StdMutex::new(data),
+            generation: AtomicU64::new(0),
             refresh_lock: tauri::async_runtime::Mutex::new(()),
             app_dir: StdMutex::new(fallback),
             keyring_service: KEYRING_SERVICE.to_string(),
@@ -266,23 +293,58 @@ impl SessionStore {
         self.mem.lock().map(|g| g.clone()).unwrap_or_default()
     }
 
-    pub fn store(&self, data: SessionData) {
-        if let Ok(mut g) = self.mem.lock() {
-            *g = data.clone();
+    #[cfg(test)]
+    pub fn store(&self, data: SessionData) -> Result<(), String> {
+        self.store_session(data, false)
+    }
+
+    fn store_session(&self, mut data: SessionData, preserve_refresh: bool) -> Result<(), String> {
+        let mut current = self.mem.lock().map_err(|_| "SESSION_STORE_UNAVAILABLE")?;
+        if preserve_refresh {
+            data.refresh_token = current.refresh_token.clone();
         }
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        *current = data;
         save_to_disk_for(
             &self.dir(),
-            &data,
+            &current,
             &self.keyring_service,
             &self.keyring_account,
-        );
+        )
+    }
+
+    fn store_if_current(&self, data: SessionData, expected_generation: u64) -> Result<(), String> {
+        let mut current = self.mem.lock().map_err(|_| "SESSION_STORE_UNAVAILABLE")?;
+        if self.generation.load(Ordering::SeqCst) != expected_generation {
+            return Err("SESSION_CHANGED".into());
+        }
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        *current = data;
+        save_to_disk_for(
+            &self.dir(),
+            &current,
+            &self.keyring_service,
+            &self.keyring_account,
+        )
+    }
+
+    pub fn update_profile(&self, profile_json: Option<String>) -> Result<(), String> {
+        let mut current = self.mem.lock().map_err(|_| "SESSION_STORE_UNAVAILABLE")?;
+        current.profile_json = profile_json;
+        save_to_disk_for(
+            &self.dir(),
+            &current,
+            &self.keyring_service,
+            &self.keyring_account,
+        )
     }
 
     pub fn clear(&self) {
-        if let Ok(mut g) = self.mem.lock() {
-            *g = SessionData::default();
+        if let Ok(mut current) = self.mem.lock() {
+            self.generation.fetch_add(1, Ordering::SeqCst);
+            *current = SessionData::default();
+            clear_disk_for(&self.dir(), &self.keyring_service, &self.keyring_account);
         }
-        clear_disk_for(&self.dir(), &self.keyring_service, &self.keyring_account);
     }
 
     /// Refresh the pair. `expected_access` is the caller's current access
@@ -297,7 +359,10 @@ impl SessionStore {
         let url = auth_endpoint(base_url, "refresh")?;
         let _guard = self.refresh_lock.lock().await;
 
-        let current = self.snapshot();
+        let (current, generation) = {
+            let current = self.mem.lock().map_err(|_| "SESSION_STORE_UNAVAILABLE")?;
+            (current.clone(), self.generation.load(Ordering::SeqCst))
+        };
         if should_reuse_stored(current.access_token.as_deref(), expected_access.as_deref()) {
             return current.access_token.ok_or_else(|| "NO_SESSION".to_string());
         }
@@ -356,7 +421,7 @@ impl SessionStore {
             profile_json: current.profile_json.clone(),
         };
         // Persist BEFORE returning: a crash after this point keeps the pair.
-        self.store(next);
+        self.store_if_current(next, generation)?;
         Ok(access.to_string())
     }
 }
@@ -367,14 +432,25 @@ impl SessionStore {
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn session_get(store: tauri::State<'_, SessionStore>) -> SessionData {
-    store.snapshot()
+pub fn session_get(store: tauri::State<'_, SessionStore>) -> SessionSnapshot {
+    store.snapshot().into()
 }
 
 #[tauri::command]
-pub fn session_set(store: tauri::State<'_, SessionStore>, data: SessionData) -> Result<(), String> {
-    store.store(data);
-    Ok(())
+pub fn session_set(
+    store: tauri::State<'_, SessionStore>,
+    data: SessionData,
+    preserve_refresh: Option<bool>,
+) -> Result<(), String> {
+    store.store_session(data, preserve_refresh.unwrap_or(false))
+}
+
+#[tauri::command]
+pub fn session_update_profile(
+    store: tauri::State<'_, SessionStore>,
+    profile_json: Option<String>,
+) -> Result<(), String> {
+    store.update_profile(profile_json)
 }
 
 #[tauri::command]
@@ -389,7 +465,7 @@ impl SessionStore {
     pub async fn logout(&self, base_url: &str) -> Result<(), String> {
         // Wait for a rotation to persist before revoking/clearing the latest pair.
         let _guard = self.refresh_lock.lock().await;
-        let destination = auth_endpoint(base_url, "logout");
+        let destination = auth_endpoint(base_url, "logout-refresh");
         if let (Ok(url), Some(rt)) = (&destination, self.snapshot().refresh_token) {
             if let Ok(client) = reqwest::Client::builder()
                 .timeout(Duration::from_secs(10))
@@ -458,6 +534,7 @@ mod tests {
             // to this synthetic service, account and freshly created directory.
             SessionStore {
                 mem: StdMutex::new(data),
+                generation: AtomicU64::new(0),
                 refresh_lock: tauri::async_runtime::Mutex::new(()),
                 app_dir: StdMutex::new(self.dir.clone()),
                 keyring_service: self.service.clone(),
@@ -511,7 +588,7 @@ mod tests {
         let data = synthetic_session();
         write_file_store(&fixture.dir, &data).unwrap();
         let store = fixture.store(SessionData::default());
-        store.store(data.clone());
+        store.store(data.clone()).unwrap();
         assert!(
             !session_file(&fixture.dir).exists(),
             "native write must replace the fallback"
@@ -649,6 +726,66 @@ mod tests {
             );
             assert!(store.snapshot().is_empty());
         });
+    }
+
+    #[test]
+    fn webview_snapshot_does_not_expose_refresh_tokens() {
+        let snapshot = serde_json::to_value(SessionSnapshot::from(synthetic_session())).unwrap();
+        assert!(snapshot.get("refresh_token").is_none());
+        assert_eq!(snapshot["access_token"], "synthetic-access");
+    }
+
+    #[test]
+    fn session_updates_preserve_refresh_only_when_explicitly_requested() {
+        let fixture = SessionFixture::new();
+        let store = fixture.store(synthetic_session());
+        let mut update = synthetic_session();
+        update.refresh_token = None;
+        store.store_session(update.clone(), true).unwrap();
+        assert_eq!(
+            store.snapshot().refresh_token,
+            synthetic_session().refresh_token
+        );
+        store.store_session(update, false).unwrap();
+        assert!(store.snapshot().refresh_token.is_none());
+    }
+
+    #[test]
+    fn late_refresh_cannot_restore_a_cleared_or_replaced_session() {
+        let fixture = SessionFixture::new();
+        let store = fixture.store(synthetic_session());
+        let generation = store.generation.load(Ordering::SeqCst);
+        store.clear();
+        assert_eq!(
+            store
+                .store_if_current(synthetic_session(), generation)
+                .unwrap_err(),
+            "SESSION_CHANGED"
+        );
+        assert!(store.snapshot().is_empty());
+        let generation = store.generation.load(Ordering::SeqCst);
+        let mut replacement = synthetic_session();
+        replacement.access_token = Some("new-login".into());
+        store.store(replacement.clone()).unwrap();
+        assert!(store
+            .store_if_current(synthetic_session(), generation)
+            .is_err());
+        assert_eq!(store.snapshot(), replacement);
+    }
+
+    #[test]
+    fn metadata_update_preserves_the_rotated_pair() {
+        let fixture = SessionFixture::new();
+        let store = fixture.store(synthetic_session());
+        store.update_profile(Some("new-profile".into())).unwrap();
+        assert_eq!(
+            store.snapshot().refresh_token,
+            synthetic_session().refresh_token
+        );
+        assert_eq!(
+            store.snapshot().profile_json.as_deref(),
+            Some("new-profile")
+        );
     }
 
     #[test]

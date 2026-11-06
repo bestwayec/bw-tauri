@@ -1,48 +1,33 @@
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::PathBuf;
+use std::path::Path;
 use tauri::http::{header, Request, Response, StatusCode};
 
 use crate::encryption::{self, BwayHeader};
 
 const CHUNK_SIZE: u64 = 2 * 1024 * 1024; // 2 MB slice buffer
 
-pub fn handle_bway_protocol(
+pub fn handle_bway_protocol(request: &Request<Vec<u8>>, root: &Path) -> Response<Vec<u8>> {
+    handle_bway_protocol_with_key(request, root, encryption::get_or_derive_machine_key)
+}
+
+fn handle_bway_protocol_with_key(
     request: &Request<Vec<u8>>,
+    root: &Path,
+    resolve_key: impl FnOnce() -> Result<[u8; 32], String>,
 ) -> Response<Vec<u8>> {
     let uri = request.uri();
     let raw_path = uri.path();
 
-    // Decode percent-encoded characters using url::form_urlencoded
-    let decoded_path: String = url::form_urlencoded::parse(raw_path.as_bytes())
-        .map(|(k, _)| k.into_owned())
-        .collect::<Vec<String>>()
-        .join("");
-    let path_to_use = if decoded_path.is_empty() {
-        raw_path.to_string()
-    } else {
-        decoded_path
+    let file_path = match crate::offline_media::media_path(root, raw_path) {
+        Ok(path) => path,
+        Err(_) => {
+            return Response::builder()
+                .status(StatusCode::FORBIDDEN)
+                .body(b"Media path unavailable".to_vec())
+                .unwrap()
+        }
     };
-
-    // Normalize Windows / POSIX path prefix
-    let normalized = path_to_use.trim_start_matches('/');
-    #[cfg(target_os = "windows")]
-    let file_path = if normalized.len() > 2 && normalized.chars().nth(1) == Some(':') {
-        PathBuf::from(normalized)
-    } else {
-        PathBuf::from(format!("/{}", normalized))
-    };
-
-    #[cfg(not(target_os = "windows"))]
-    let file_path = PathBuf::from(format!("/{}", normalized));
-
-    if !file_path.exists() || !file_path.is_file() {
-        return Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-            .body(b"File not found".to_vec())
-            .unwrap();
-    }
 
     let mut file = match File::open(&file_path) {
         Ok(f) => f,
@@ -80,7 +65,7 @@ pub fn handle_bway_protocol(
             }
         };
 
-        let key = match encryption::get_or_derive_machine_key() {
+        let key = match resolve_key() {
             Ok(k) => k,
             Err(e) => {
                 return Response::builder()
@@ -120,20 +105,10 @@ pub fn handle_bway_protocol(
         .and_then(|v| v.to_str().ok());
 
     if let Some(range_val) = range_header {
-        if let Some(bytes_range) = range_val.strip_prefix("bytes=") {
-            let parts: Vec<&str> = bytes_range.split('-').collect();
-            let start = parts
-                .first()
-                .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(0);
-
-            let end = parts
-                .get(1)
-                .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or_else(|| (start + CHUNK_SIZE - 1).min(total_size.saturating_sub(1)));
-
-            let end = end.min(total_size.saturating_sub(1));
-            let length = if end >= start { end - start + 1 } else { 0 };
+        if let Some((start, end)) =
+            crate::offline_media::byte_range(range_val, total_size, CHUNK_SIZE)
+        {
+            let length = end - start + 1;
 
             if let Some((bway_hdr, key)) = &bway_context {
                 // On-the-fly AES-256-CTR partial content decryption
@@ -193,19 +168,29 @@ pub fn handle_bway_protocol(
                 }
             }
         }
+        return Response::builder()
+            .status(StatusCode::RANGE_NOT_SATISFIABLE)
+            .header(header::CONTENT_RANGE, format!("bytes */{total_size}"))
+            .body(Vec::new())
+            .unwrap();
     }
 
-    // Fallback: Non-range requests (read initial slice or full file)
+    // Keep every response within the same memory budget. Browser media
+    // clients use byte ranges; a whole-file request cannot allocate gigabytes.
+    if total_size > CHUNK_SIZE {
+        return Response::builder()
+            .status(StatusCode::RANGE_NOT_SATISFIABLE)
+            .header(header::ACCEPT_RANGES, "bytes")
+            .header(header::CONTENT_RANGE, format!("bytes */{total_size}"))
+            .body(b"Use a byte-range request for large media".to_vec())
+            .unwrap();
+    }
+
+    // Small non-range requests return the complete file.
     if let Some((bway_hdr, key)) = &bway_context {
         let read_len = CHUNK_SIZE.min(total_size) as usize;
-        let decrypted = encryption::read_and_decrypt_range(
-            &mut file,
-            bway_hdr,
-            key,
-            0,
-            read_len,
-        )
-        .unwrap_or_default();
+        let decrypted = encryption::read_and_decrypt_range(&mut file, bway_hdr, key, 0, read_len)
+            .unwrap_or_default();
 
         return Response::builder()
             .status(StatusCode::OK)
@@ -238,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_bway_protocol_range_decryption() {
-        let key = encryption::get_or_derive_machine_key().expect("derive machine key");
+        let key = [73u8; 32];
         let original = b"Sample video plaintext data for HTTP 206 protocol streaming test".to_vec();
 
         let temp_dir = std::env::temp_dir();
@@ -258,10 +243,14 @@ mod tests {
             .body(Vec::new())
             .unwrap();
 
-        let resp = handle_bway_protocol(&req);
+        let resp = handle_bway_protocol_with_key(&req, &temp_dir, || Ok(key));
         assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
         assert_eq!(
-            resp.headers().get("content-range").unwrap().to_str().unwrap(),
+            resp.headers()
+                .get("content-range")
+                .unwrap()
+                .to_str()
+                .unwrap(),
             format!("bytes 7-20/{}", original.len())
         );
 

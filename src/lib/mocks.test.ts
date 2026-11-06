@@ -7,8 +7,20 @@ import {
   startMockExam,
   submitSkillsFor,
   targetSectionOf,
+  uploadMockSpeaking,
   type MockStartResult,
 } from "./mocks";
+
+describe('speaking upload acknowledgement', () => {
+  it.each([null, { saved: false, audioUrl: '/audio' }, { saved: true }, { saved: true, audioUrl: '' }])('rejects an unconfirmed upload: %j', async (receipt) => {
+    vi.mocked(post).mockResolvedValueOnce(receipt);
+    await expect(uploadMockSpeaking('a', 'q', new Blob(['audio']))).rejects.toMatchObject({ code: 'SCHEMA_MISMATCH' });
+  });
+  it('accepts the Django saved/audioUrl receipt', async () => {
+    vi.mocked(post).mockResolvedValueOnce({ saved: true, audioUrl: '/v1/mock/attempts/a/answers/q/audio' });
+    await expect(uploadMockSpeaking('a', 'q', new Blob(['audio']))).resolves.toMatchObject({ saved: true });
+  });
+});
 
 vi.mock("./api", () => ({ get: vi.fn(), post: vi.fn(), API_BASE_URL: "https://api.example.test/v1" }));
 

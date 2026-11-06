@@ -264,12 +264,6 @@ export async function exchangeCode(code: string, verifier: string, deviceId: str
     { token: null },
   );
   if (session?.accessToken) {
-    try {
-      localStorage.setItem("bestway.accessToken", session.accessToken);
-      if (session.refreshToken) localStorage.setItem("bestway.refreshToken", session.refreshToken);
-    } catch {
-      /* ignore */
-    }
     const profile = session.user?.id
       ? {
           id: session.user.id,
@@ -297,6 +291,7 @@ export interface AuthCallbackParams {
  * `bestway-exam:auth/callback?...` shape some platforms deliver.
  */
 export function parseAuthCallbackUrl(url: string): AuthCallbackParams {
+  if (!isDesktopCallbackUrl(url)) return { error: "Unrecognized callback URL" };
   try {
     const normalized = url.replace(/^([a-z][a-z0-9+.-]*):(?!\/\/)/i, "$1://");
     const u = new URL(normalized);
@@ -330,12 +325,11 @@ export function isDesktopCallbackUrl(url: string): boolean {
     const isAllowedScheme = protocol === "bestway-exam" || protocol === "bestway" || protocol === "bestwayapp";
     const path = `${u.host}${u.pathname}`.replace(/\/+$/, "").toLowerCase();
     return (
-      isAllowedScheme &&
+      isAllowedScheme && !u.username && !u.password &&
       (path === "auth/callback" || path === "auth" || path === "callback")
     );
   } catch {
-    const lower = url.trim().toLowerCase();
-    return lower.startsWith("bestway-exam:") || lower.startsWith("bestway:") || lower.startsWith("bestwayapp:");
+    return false;
   }
 }
 
@@ -361,6 +355,15 @@ export function parseManualCallbackInput(
     return { code, state: stored.state };
   }
   return parseAuthCallbackUrl(trimmed);
+}
+
+/** The same state/expiry check applies to code and legacy token callbacks. */
+export function callbackStateError(params: AuthCallbackParams, pending: BrowserLoginState | null): string | null {
+  if (!pending || !Number.isFinite(pending.createdAt) || Date.now() - pending.createdAt > OAUTH_STATE_TTL_MS) {
+    return 'Login session expired. Start browser login again.';
+  }
+  if (!params.state || params.state !== pending.state) return 'State mismatch — possible CSRF. Start again.';
+  return null;
 }
 
 export type DeepLinkUnlisten = () => void;

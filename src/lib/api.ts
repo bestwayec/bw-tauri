@@ -1,3 +1,4 @@
+import { attemptSignatureHeaders, rememberAttemptSignature } from "./attempt-signature";
 import { enforceSecureOrigin } from "./secure-storage";
 import { API_BASE_URL } from "./config";
 import { getSessionAccessToken, useSessionStore } from "./session-store";
@@ -13,7 +14,7 @@ export { API_BASE_URL, isApiMisconfigured, isLoopbackUrl, isProdBuild } from "./
  * - No Next.js proxy — Tauri talks straight to the backend.
  * - Refresh is single-flight and Rust-owned; the session is wiped ONLY on
  *   definitive backend verdicts, never on network errors.
- * - Network: 15s default timeout (10s auth), https-enforce warning outside loopback.
+ * - Network: 15s default timeout (10s auth), HTTPS required except for loopback development.
  */
 
 export interface ApiMeta {
@@ -57,16 +58,6 @@ export function getAccessTokenCached(): string | null {
   return getSessionAccessToken();
 }
 
-/** Sync in-memory read for hot paths. Returns stored refreshToken from localStorage if present. */
-export function getRefreshTokenCached(): string | null {
-  try {
-    if (typeof localStorage !== "undefined") {
-      return localStorage.getItem("bestway.refreshToken");
-    }
-  } catch {}
-  return null;
-}
-
 export async function getAccessToken(): Promise<string | null> {
   return getSessionAccessToken();
 }
@@ -87,17 +78,9 @@ export async function setSession(
   profile?: import("./session-store").StoredProfile | null,
 ): Promise<void> {
   if (accessToken === null) {
-    try {
-      localStorage.removeItem("bestway.accessToken");
-      localStorage.removeItem("bestway.refreshToken");
-    } catch {}
     await useSessionStore.getState().wipeLocal();
     return;
   }
-  try {
-    localStorage.setItem("bestway.accessToken", accessToken);
-    if (refreshToken) localStorage.setItem("bestway.refreshToken", refreshToken);
-  } catch {}
   await useSessionStore.getState().setSession({ accessToken, refreshToken, profile });
 }
 
@@ -176,39 +159,44 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   const isMultipart = typeof FormData !== 'undefined' && body instanceof FormData;
   const hasJsonBody = body !== undefined && typeof body !== "string" && !isMultipart;
 
-  const isAuthEndpoint = isAuthPath(path);
+  const isAuthEndpoint = isAuthPath(cleanPath);
   const timeoutMs = requestedTimeout ?? (isAuthEndpoint ? AUTH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const abortFromCaller = () => controller.abort();
   // Honor caller signal if provided.
   if (callerSignal) {
     if (callerSignal.aborted) controller.abort();
-    else callerSignal.addEventListener("abort", () => controller.abort(), { once: true });
+    else callerSignal.addEventListener("abort", abortFromCaller, { once: true });
   }
 
   let res: Response;
+  let text: string;
   try {
     res = await fetch(url, {
       ...rest,
+      redirect: "error",
       signal: controller.signal,
       headers: {
+        ...attemptSignatureHeaders(cleanPath),
         ...(hasJsonBody ? { "Content-Type": "application/json" } : {}),
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...(headers ?? {}),
       },
       body: body === undefined || typeof body === "string" || isMultipart ? body : JSON.stringify(body),
     });
+    text = await res.text();
   } catch (e) {
-    clearTimeout(timer);
     if (e instanceof DOMException && e.name === "AbortError") {
       throw { code: "HTTP_TIMEOUT", message: `Request timed out after ${timeoutMs}ms`, status: 408 } as ApiError;
     }
     throw e;
+  } finally {
+    clearTimeout(timer);
+    callerSignal?.removeEventListener("abort", abortFromCaller);
   }
-  clearTimeout(timer);
 
-  const text = await res.text();
   const payload: unknown = text ? safeJsonParse(text) : null;
 
   if (!res.ok) {
@@ -218,29 +206,15 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     // Skip for auth endpoints themselves to avoid infinite loops.
     // The store wipes ONLY on definitive verdicts; transient failures keep
     // the session and fall through to the original error below.
-    if ((res.status === 401 || err.code === "SESSION_EXPIRED") && !_retried && !isAuthEndpoint) {
-      const storedRefreshToken = getRefreshTokenCached();
-      if (storedRefreshToken) {
-        try {
-          const refreshRes = await post<{ accessToken: string; refreshToken?: string }>(
-            "/auth/refresh",
-            { refreshToken: storedRefreshToken },
-            { token: null, _retried: true },
-          );
-          if (refreshRes?.accessToken) {
-            await setSession(refreshRes.accessToken, refreshRes.refreshToken ?? storedRefreshToken);
-            return request<T>(path, { ...options, _retried: true, token: refreshRes.accessToken });
-          }
-        } catch {
-          await clearSession();
-          throw err;
-        }
-      }
+    if ((res.status === 401 || err.code === "SESSION_EXPIRED") && !_retried && !isAuthEndpoint && token === undefined) {
       try {
-        const freshToken = await refresh();
+        // A concurrent request may already have rotated this access token.
+        const current = getAccessTokenCached();
+        const freshToken = current && current !== accessToken ? current : await refresh();
         return request<T>(path, { ...options, _retried: true, token: freshToken });
       } catch {
-        await clearSession();
+        // Only the session owner can decide whether a refresh verdict is final.
+        // Timeouts, 5xx and REFRESH_IN_PROGRESS must preserve the valid session.
         throw err;
       }
     }
@@ -249,7 +223,9 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
   // Backend wraps data as ApiResponse<T>; unwrap to T for callers.
   if (payload && typeof payload === "object" && "data" in (payload as Record<string, unknown>)) {
-    return (payload as ApiResponse<T>).data;
+    const data = (payload as ApiResponse<T>).data;
+    rememberAttemptSignature(data);
+    return data;
   }
   return payload as T;
 }
@@ -294,6 +270,7 @@ export async function downloadBlob(
   const accessToken = getAccessTokenCached();
   const res = await fetch(url, {
     method: "GET",
+    redirect: "error",
     headers: {
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     },
@@ -357,10 +334,6 @@ export async function login(phone: string, password: string): Promise<AuthSessio
   const normalizedPhone = normalizePhone(phone);
   const session = await post<AuthSession>("/auth/login", { phone: normalizedPhone, password }, { token: null });
   if (session?.accessToken) {
-    try {
-      localStorage.setItem("bestway.accessToken", session.accessToken);
-      if (session.refreshToken) localStorage.setItem("bestway.refreshToken", session.refreshToken);
-    } catch {}
     await useSessionStore.getState().setSession({
       accessToken: session.accessToken,
       refreshToken: session.refreshToken ?? null,

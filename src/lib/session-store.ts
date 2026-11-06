@@ -14,6 +14,7 @@ import {
   rustSessionClear,
   rustSessionGet,
   rustSessionSet,
+  rustSessionUpdateProfile,
 } from "./tauri-session";
 
 /**
@@ -131,6 +132,7 @@ interface SessionState {
 let inflightRefresh: Promise<string> | null = null;
 let proactiveTimer: number | null = null;
 let onlineHooked = false;
+let sessionGeneration = 0;
 
 function clearProactive() {
   if (proactiveTimer !== null) {
@@ -165,6 +167,7 @@ async function rawPost<T>(path: string, body: unknown, token: string | null, tim
   try {
     const res = await fetch(`${API_BASE_URL}${path}`, {
       method: "POST",
+      redirect: "error",
       signal: ctrl.signal,
       headers: {
         "Content-Type": "application/json",
@@ -203,6 +206,7 @@ async function rawGetMe(token: string): Promise<StoredProfile> {
   const timer = setTimeout(() => ctrl.abort(), 15_000);
   try {
     const res = await fetch(`${API_BASE_URL}/auth/me`, {
+      redirect: "error",
       headers: { Authorization: `Bearer ${token}` },
       signal: ctrl.signal,
     });
@@ -242,15 +246,14 @@ function parseProfile(json: string | null): StoredProfile | null {
 }
 
 export const useSessionStore = create<SessionState>()((set, get) => {
-  async function persist(accessToken: string | null, refreshToken: string | null | undefined, profile: StoredProfile | null) {
-    const { deviceId } = get();
+  async function persist(accessToken: string | null, refreshToken: string | null | undefined, profile: StoredProfile | null, deviceId = get().deviceId) {
     if (isTauriRuntime()) {
       await rustSessionSet({
         access_token: accessToken,
-        refresh_token: refreshToken ?? (await rustSessionGet())?.refresh_token ?? null,
+        refresh_token: refreshToken ?? null,
         device_id: deviceId,
         profile_json: profile ? JSON.stringify(profile) : null,
-      });
+      }, refreshToken === undefined);
     } else if (accessToken === null) {
       await secureRemoveItemAsync(ACCESS_KEY);
       await secureRemoveItemAsync(REFRESH_KEY);
@@ -321,6 +324,13 @@ export const useSessionStore = create<SessionState>()((set, get) => {
             /* storage failure is non-fatal */
           }
         }
+        // A successful native read/migration owns the credentials now. Remove
+        // stale legacy copies even when an existing Rust session won priority.
+        if (access) {
+          await secureRemoveItemAsync(ACCESS_KEY);
+          await secureRemoveItemAsync(REFRESH_KEY);
+          await secureRemoveItemAsync(PROFILE_KEY);
+        }
       } else {
         try {
           const [storedAccess, storedProfile] = await Promise.all([
@@ -345,40 +355,48 @@ export const useSessionStore = create<SessionState>()((set, get) => {
     },
 
     setSession: async (input) => {
+      const generation = ++sessionGeneration;
       const deviceId = input.deviceId ?? get().deviceId;
+      const profile = input.profile === undefined ? get().profile : input.profile;
+      // Do not announce a successful sign-in before the rotating pair has
+      // reached its durable owner. A reload immediately after login is safe.
+      await persist(input.accessToken, input.refreshToken, profile, deviceId);
+      if (generation !== sessionGeneration) throw toError("SESSION_CHANGED", "Session changed while saving");
       set({
         accessToken: input.accessToken,
         deviceId,
-        profile: input.profile ?? get().profile,
+        profile,
         status: "ready",
         online: typeof navigator === "undefined" ? true : navigator.onLine,
       });
-      await persist(input.accessToken, input.refreshToken, get().profile).catch(() => undefined);
       scheduleProactive(input.accessToken);
     },
 
     wipeLocal: async () => {
+      sessionGeneration++;
       clearProactive();
       set({ accessToken: null, profile: null, status: "logged-out" });
       try {
         if (isTauriRuntime()) await rustSessionClear();
-        else {
-          await secureRemoveItemAsync(ACCESS_KEY);
-          await secureRemoveItemAsync(REFRESH_KEY);
-          await secureRemoveItemAsync(PROFILE_KEY);
-        }
+      } catch { /* native storage may be unavailable; still clear legacy copies */ }
+      try {
+        await secureRemoveItemAsync(ACCESS_KEY);
+        await secureRemoveItemAsync(REFRESH_KEY);
+        await secureRemoveItemAsync(PROFILE_KEY);
       } catch {
         /* wipe is best-effort */
       }
     },
 
     logout: async () => {
+      // Revoke the latest rotated pair, then wipe; never race browser refresh.
+      await inflightRefresh?.catch(() => undefined);
       try {
         if (isTauriRuntime()) await rustAuthLogout(API_BASE_URL);
         else {
           const rt = await secureGetItemAsync(REFRESH_KEY).catch(() => null);
           if (rt) {
-            await rawPost("/auth/logout", { refreshToken: rt }, null, 10_000).catch(() => undefined);
+            await rawPost("/auth/logout-refresh", { refreshToken: rt }, null, 10_000).catch(() => undefined);
           }
         }
       } finally {
@@ -390,11 +408,12 @@ export const useSessionStore = create<SessionState>()((set, get) => {
       if (inflightRefresh) return inflightRefresh;
       inflightRefresh = (async (): Promise<string> => {
         const expected = get().accessToken;
+        const generation = sessionGeneration;
         try {
           if (isTauriRuntime()) {
             const fresh = await rustAuthRefresh(API_BASE_URL, expected);
+            if (generation !== sessionGeneration) throw toError("SESSION_CHANGED", "Session changed during refresh");
             set({ accessToken: fresh, online: true });
-            await persist(fresh, undefined, get().profile).catch(() => undefined);
             scheduleProactive(fresh);
             return fresh;
           }
@@ -404,7 +423,7 @@ export const useSessionStore = create<SessionState>()((set, get) => {
           try {
             data = await rawPost("/auth/refresh", { refreshToken: rt }, null, 10_000);
           } catch (e) {
-            if (isDefinitiveLogout(verdictOf(e))) {
+            if (generation === sessionGeneration && isDefinitiveLogout(verdictOf(e))) {
               await secureRemoveItemAsync(ACCESS_KEY).catch(() => undefined);
               await secureRemoveItemAsync(REFRESH_KEY).catch(() => undefined);
               await secureRemoveItemAsync(PROFILE_KEY).catch(() => undefined);
@@ -412,13 +431,15 @@ export const useSessionStore = create<SessionState>()((set, get) => {
             }
             throw e;
           }
+          if (generation !== sessionGeneration) throw toError("SESSION_CHANGED", "Session changed during refresh");
+          if (!data?.accessToken || typeof data.accessToken !== "string") throw toError("SCHEMA_MISMATCH", "Refresh returned no access token");
           await get().setSession({
             accessToken: data.accessToken,
             refreshToken: data.refreshToken ?? rt,
           });
           return data.accessToken;
         } catch (e) {
-          if (isTauriRuntime() && isDefinitiveLogout(verdictOf(e))) {
+          if (generation === sessionGeneration && isTauriRuntime() && isDefinitiveLogout(verdictOf(e))) {
             // Another instance may have rotated already — re-read once and
             // adopt instead of wiping a live session.
             try {
@@ -443,9 +464,11 @@ export const useSessionStore = create<SessionState>()((set, get) => {
 
     revalidate: async () => {
       const token = get().accessToken;
+      const generation = sessionGeneration;
       if (!token) return;
       try {
         const user = await rawGetMe(token);
+        if (generation !== sessionGeneration) return;
         if (user.role && !isAllowedClientRole(user.role)) {
           await get().wipeLocal();
           return;
@@ -458,8 +481,10 @@ export const useSessionStore = create<SessionState>()((set, get) => {
           activeProgram: user.activeProgram,
         };
         set({ profile, online: true });
-        await persist(token, undefined, profile).catch(() => undefined);
+        if (isTauriRuntime()) await rustSessionUpdateProfile(JSON.stringify(profile)).catch(() => undefined);
+        else await persist(get().accessToken, undefined, profile).catch(() => undefined);
       } catch (e) {
+        if (generation !== sessionGeneration) return;
         if (isDefinitiveLogout(verdictOf(e))) {
           await get().wipeLocal();
         } else {
@@ -471,15 +496,7 @@ export const useSessionStore = create<SessionState>()((set, get) => {
   };
 });
 
-/** Sync in-memory access token for hot paths (request headers) with localStorage fallback. */
+/** Request credentials come only from the initialized session owner. */
 export function getSessionAccessToken(): string | null {
-  const inMemory = useSessionStore.getState().accessToken;
-  if (inMemory) return inMemory;
-  try {
-    if (typeof localStorage !== "undefined") {
-      const stored = localStorage.getItem("bestway.accessToken");
-      if (stored) return stored;
-    }
-  } catch {}
-  return null;
+  return useSessionStore.getState().accessToken;
 }

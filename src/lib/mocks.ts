@@ -140,6 +140,7 @@ export interface MockShapedExam {
 
 export interface MockStartResult {
   attemptId: string;
+  sessionSignature?: string;
   resumed: boolean;
   mode: MockAttemptMode;
   simulatorMode?: "cdi" | "dtm" | null;
@@ -350,11 +351,15 @@ export async function uploadMockSpeaking(
 ): Promise<{ saved: boolean; audioUrl: string; audioDurationMs?: number }> {
   const form = new FormData();
   form.append("audio", blob, filename);
-  return post<{ saved: boolean; audioUrl: string; audioDurationMs?: number }>(
+  const receipt = await post<{ saved: boolean; audioUrl: string; audioDurationMs?: number }>(
     `/mock/attempts/${encodeURIComponent(attemptId)}/speaking/${encodeURIComponent(questionId)}`,
     form,
     { timeoutMs: 60_000 },
   );
+  if (receipt?.saved !== true || typeof receipt.audioUrl !== 'string' || !receipt.audioUrl.trim()) {
+    throw { code: 'SCHEMA_MISMATCH', message: 'The server did not confirm the recording was saved.', status: 502 };
+  }
+  return receipt;
 }
 
 export interface WritingOcrResponse {
@@ -379,6 +384,7 @@ export async function uploadMockWritingOcr(
     form,
     { timeoutMs: 60_000 },
   );
+
 }
 
 export async function deleteMockExam(examId: string): Promise<void> {

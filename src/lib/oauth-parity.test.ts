@@ -1,12 +1,26 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAuthorizeUrl,
+  callbackStateError,
+  parseAuthCallbackUrl,
   isDesktopCallbackUrl,
   parseManualCallbackInput,
   type BrowserLoginState,
 } from "./oauth";
 
 describe("oauth dual scheme and 1-click login", () => {
+  it.each(['bestway-exam://', 'bestway-exam://user:pass@auth/callback?token=x', 'https://evil.test/auth/callback?token=x', 'bestway://evil/path?token=x'])('rejects malformed or foreign callbacks: %s', url => {
+    expect(isDesktopCallbackUrl(url)).toBe(false);
+    expect(parseAuthCallbackUrl(url).token).toBeUndefined();
+  });
+  it.each([{ token: 'legacy-token' }, { code: 'exchange-code' }])('requires matching unexpired state for every callback type: %j', payload => {
+    const pending: BrowserLoginState = { state: 'expected', verifier: 'verifier', deviceId: 'device', createdAt: Date.now() };
+    expect(callbackStateError(payload, pending)).toMatch(/State mismatch/);
+    expect(callbackStateError({ ...payload, state: 'wrong' }, pending)).toMatch(/State mismatch/);
+    expect(callbackStateError({ ...payload, state: 'expected' }, pending)).toBeNull();
+    expect(callbackStateError({ ...payload, state: 'expected' }, { ...pending, createdAt: 0 })).toMatch(/expired/);
+    expect(callbackStateError({ ...payload, state: 'expected' }, null)).toMatch(/expired/);
+  });
   it("recognizes both bestway-exam and bestway callback schemes", () => {
     expect(isDesktopCallbackUrl("bestway-exam://auth/callback?code=123&state=abc")).toBe(true);
     expect(isDesktopCallbackUrl("bestway://auth/callback?code=123&state=abc")).toBe(true);

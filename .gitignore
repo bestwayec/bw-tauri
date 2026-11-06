@@ -20,3 +20,6 @@ Thumbs.db
 .gradle/
 **/build/
 *.keystore
+
+playwright-report/
+test-results/
