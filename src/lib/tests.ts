@@ -128,11 +128,23 @@ export function saveAnswer(
   );
 }
 
-export function submitAttempt(attemptId: string): Promise<{
+export async function submitAttempt(attemptId: string): Promise<{
   status: string;
   autoScore: number;
 }> {
-  return post(`/tests/attempts/${encodeURIComponent(attemptId)}/submit`, {});
+  const path = `/tests/attempts/${encodeURIComponent(attemptId)}`;
+  let result: { status: string; autoScore: number };
+  try { result = await post(`${path}/submit`, {}); }
+  catch (error) {
+    // Django legacy_tests.submit rejects repeat submits. Confirm the persisted
+    // result before treating a retry after a lost response as successful.
+    if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'ATTEMPT_FINISHED') throw error;
+    result = await get(path);
+  }
+  if (!result || !['grading', 'completed'].includes(result.status) || !Number.isFinite(result.autoScore)) {
+    throw { code: 'SCHEMA_MISMATCH', message: 'The server did not confirm exam submission.', status: 502 };
+  }
+  return result;
 }
 
 /**

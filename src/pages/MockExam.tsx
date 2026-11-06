@@ -174,7 +174,7 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
     {scopedNotice && <p role="status" className="my-2 rounded-lg bg-white/5 p-3 text-xs text-white/60">{scopedNotice}</p>}
     {recoveryError && <p role="alert" className="my-2 rounded-lg bg-amber-400/10 p-3 text-sm">{recoveryError}</p>}
     <p role="status" className="my-2 rounded-lg bg-white/5 p-2 text-[11px] text-white/50">
-      Integrity monitoring is on — focus and window changes are logged, and a webcam snapshot is taken at random intervals.
+      Focus and window changes are logged.{!integrity.skipped ? ' Camera snapshots are enabled at random intervals with your consent.' : ''}
       {securityEvent?.kind === "webcam_snapshot" ? ` Last check: ${new Date(securityEvent.at).toLocaleTimeString()}.` : ""}
       {integrity.skipped ? " Camera check skipped for this attempt." : ""}
     </p>
@@ -210,6 +210,7 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
       }}
       onSpeakBlob={(qid, blob) => void handleBlob(qid, blob)}
       speakNote={(qid) => uploadNotes[qid] ?? null}
+      proctoring={!integrity.skipped}
       onSecurityEvent={setSecurityEvent}
       onExit={onExit}
       onBack={onBackToSections}

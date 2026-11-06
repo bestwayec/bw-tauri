@@ -6,12 +6,13 @@ import {
   jwtExpMs,
   useSessionStore,
 } from "./session-store";
-import type { RustSessionData } from "./tauri-session";
+import type { RustSessionSnapshot } from "./tauri-session";
 
 vi.mock("./tauri-session", () => ({
   isTauriRuntime: vi.fn(() => true),
-  rustSessionGet: vi.fn(async (): Promise<RustSessionData | null> => null),
+  rustSessionGet: vi.fn(async (): Promise<RustSessionSnapshot | null> => null),
   rustSessionSet: vi.fn(async () => undefined),
+  rustSessionUpdateProfile: vi.fn(async () => undefined),
   rustSessionClear: vi.fn(async () => undefined),
   rustAuthRefresh: vi.fn(async () => "fresh-access"),
   rustAuthLogout: vi.fn(async () => undefined),
@@ -87,7 +88,6 @@ describe("definitive verdict handling", () => {
     vi.mocked(rustAuthRefresh).mockRejectedValue("SESSION_EXPIRED");
     vi.mocked(rustSessionGet).mockResolvedValue({
       access_token: "stale",
-      refresh_token: "rt",
       device_id: "dev-1",
       profile_json: null,
     });
@@ -101,7 +101,6 @@ describe("definitive verdict handling", () => {
     vi.mocked(rustAuthRefresh).mockRejectedValue("SESSION_EXPIRED");
     vi.mocked(rustSessionGet).mockResolvedValue({
       access_token: "rotated-by-other",
-      refresh_token: "rt2",
       device_id: "dev-1",
       profile_json: null,
     });
@@ -121,7 +120,6 @@ describe("boot + migration", () => {
   it("migrates legacy encrypted storage into Rust, then deletes it", async () => {
     vi.mocked(rustSessionGet).mockResolvedValue({
       access_token: null,
-      refresh_token: null,
       device_id: null,
       profile_json: null,
     });
@@ -137,7 +135,6 @@ describe("boot + migration", () => {
   it("renders cached profile immediately and stays signed in when me() fails", async () => {
     vi.mocked(rustSessionGet).mockResolvedValue({
       access_token: "cached",
-      refresh_token: "rt",
       device_id: "dev-1",
       profile_json: JSON.stringify({ id: "stu-1", role: "student" }),
     });
@@ -156,7 +153,6 @@ describe("boot + migration", () => {
   it("allows teacher and admin roles without wiping local session", async () => {
     vi.mocked(rustSessionGet).mockResolvedValue({
       access_token: "teacher-token",
-      refresh_token: "rt-t",
       device_id: "dev-1",
       profile_json: JSON.stringify({ id: "teacher-1", role: "teacher" }),
     });

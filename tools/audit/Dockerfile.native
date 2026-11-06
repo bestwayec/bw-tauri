@@ -1,0 +1,8 @@
+FROM node:24-bookworm
+RUN --mount=type=secret,id=proxy_ca,required=true \
+    apt-get -o Acquire::https::CaInfo=/run/secrets/proxy_ca update && \
+    DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::https::CaInfo=/run/secrets/proxy_ca install -y --no-install-recommends \
+      build-essential pkg-config libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+      librsvg2-dev patchelf libssl-dev libxdo-dev && \
+    rm -rf /var/lib/apt/lists/*
+WORKDIR /workspace/bw-tauri/src-tauri

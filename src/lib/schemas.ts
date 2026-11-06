@@ -140,6 +140,7 @@ export const MockShapedSectionSchema = z.object({
 
 export const MockStartResultSchema = z.object({
   attemptId: z.string(),
+  sessionSignature: z.string().optional(),
   resumed: z.boolean(),
   mode: z.enum(["practice", "timed"]),
   simulatorMode: z.enum(["cdi", "dtm"]).nullable().optional(),
@@ -178,7 +179,7 @@ export const MockStartResultSchema = z.object({
 });
 
 export const MockSubmitResultSchema = z.object({
-  status: z.enum(["in_progress", "grading", "completed"]),
+  status: z.enum(["grading", "completed"]),
   rawScores: z.record(z.string(), z.object({ score: z.number(), max: z.number() })),
   sectionBands: z.record(z.string(), z.number()).nullable(),
   overallBand: nullableNumber,

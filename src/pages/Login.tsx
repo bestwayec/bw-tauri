@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { API_BASE_URL, clearSession, get, isApiMisconfigured, login, normalizePhone, setSession, type MeResponse } from "@/lib/api";
 import {
   clearBrowserLoginState,
+  callbackStateError,
   listenDeepLink,
   listenSingleInstance,
   parseAuthCallbackUrl,
@@ -51,28 +52,33 @@ export default function Login({ onLogin }: Props) {
 
   async function handleCallback(url: string, s: BrowserLoginState | null) {
     const p = parseAuthCallbackUrl(url);
+    const stateError = callbackStateError(p, s);
+    if (stateError) { setError(stateError); setBusy("idle"); return; }
     if (p.token) {
       setBusy("exchange");
       setError(null);
       try {
-        await clearBrowserLoginState();
-        await setSession(p.token, p.refresh ?? null);
-        const meRes = await get<MeResponse>("/auth/me", { token: p.token });
+        // Validate before replacing an existing session. Tokens belong in the
+        // Authorization header, never the URL query string.
+        const meRes = await get<MeResponse>("/auth/me", undefined, { token: p.token });
         const user = meRes?.user;
         const role = String(user?.role ?? "");
         const ALLOWED_ROLES = ["student", "teacher", "instructor", "admin", "super_admin"];
         if (!ALLOWED_ROLES.includes(role)) {
-          await clearSession();
           setError(`Access denied: unauthorized role (${role || "none"}).`);
           setBusy("idle");
           return;
         }
         if (!user?.id) {
-          await clearSession();
           setError("Sign-in failed. Please try again.");
           setBusy("idle");
           return;
         }
+        await setSession(p.token, p.refresh ?? null, {
+          id: user.id, name: typeof user.name === "string" ? user.name : null,
+          phone: typeof user.phone === "string" ? user.phone : null, role,
+        });
+        await clearBrowserLoginState();
         onLoginRef.current({
           id: user.id,
           name: typeof user.name === "string" ? user.name : null,
@@ -230,6 +236,8 @@ export default function Login({ onLogin }: Props) {
     }
     const s = pendingRef.current ?? (await readBrowserLoginState());
     const p = parseManualCallbackInput(trimmed, s);
+    const stateError = callbackStateError(p, s);
+    if (stateError) { setError(stateError); return; }
     if (p.error && !p.code) {
       setError(p.error);
       return;

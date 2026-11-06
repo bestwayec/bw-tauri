@@ -92,7 +92,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 fn hex_decode(s: &str) -> Result<Vec<u8>, ()> {
-    if s.len() % 2 != 0 {
+    if !s.is_ascii() || s.len() % 2 != 0 {
         return Err(());
     }
     (0..s.len())
@@ -241,8 +241,8 @@ pub fn encrypt_stream_to_file<R: Read>(
     rand::rngs::OsRng.fill_bytes(&mut iv);
 
     let header = BwayHeader::new(total_len, iv);
-    let mut out_file = File::create(dest_path)
-        .map_err(|e| format!("Failed to create destination file: {e}"))?;
+    let mut out_file =
+        File::create(dest_path).map_err(|e| format!("Failed to create destination file: {e}"))?;
 
     out_file
         .write_all(&header.to_bytes())
@@ -288,27 +288,47 @@ pub fn encrypt_stream_to_file<R: Read>(
     Ok(bytes_written)
 }
 
+fn download_url(raw: &str, allow_loopback: bool) -> Result<url::Url, String> {
+    let parsed = url::Url::parse(raw).map_err(|_| "UNSAFE_MEDIA_URL")?;
+    let loopback = match parsed.host() {
+        Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    };
+    if raw.chars().any(char::is_control)
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || !(parsed.scheme() == "https" || allow_loopback && parsed.scheme() == "http" && loopback)
+    {
+        return Err("UNSAFE_MEDIA_URL".into());
+    }
+    Ok(parsed)
+}
+
 /// Download an HTTP video stream and encrypt it directly to disk chunk-by-chunk.
 /// Memory footprint stays under ~128 KB regardless of whether video is 50MB or 4GB.
-pub async fn download_and_encrypt_video(
-    url: &str,
-    dest_path: &Path,
-) -> Result<u64, String> {
+pub async fn download_and_encrypt_video(url: &str, dest_path: &Path) -> Result<u64, String> {
+    let destination = download_url(url, cfg!(debug_assertions))?;
     let key = get_or_derive_machine_key()?;
 
     let client = reqwest::Client::builder()
+        .https_only(destination.scheme() == "https")
         .timeout(std::time::Duration::from_secs(7200)) // 2 hour budget for large video downloads
         .build()
         .map_err(|e| format!("HTTP client build failed: {e}"))?;
 
     let mut response = client
-        .get(url)
+        .get(destination)
         .send()
         .await
         .map_err(|e| format!("Download request failed: {e}"))?;
 
     if !response.status().is_success() {
-        return Err(format!("Download failed with status: {}", response.status()));
+        return Err(format!(
+            "Download failed with status: {}",
+            response.status()
+        ));
     }
 
     let total_len = response.content_length().unwrap_or(0);
@@ -317,8 +337,8 @@ pub async fn download_and_encrypt_video(
     rand::rngs::OsRng.fill_bytes(&mut iv);
 
     let header = BwayHeader::new(total_len, iv);
-    let mut out_file = File::create(dest_path)
-        .map_err(|e| format!("Failed to create destination file: {e}"))?;
+    let mut out_file =
+        File::create(dest_path).map_err(|e| format!("Failed to create destination file: {e}"))?;
 
     out_file
         .write_all(&header.to_bytes())
@@ -352,9 +372,7 @@ pub async fn download_and_encrypt_video(
         out_file
             .write_all(&updated_header.to_bytes())
             .map_err(|e| format!("Header update failed: {e}"))?;
-        out_file
-            .flush()
-            .map_err(|e| format!("Flush failed: {e}"))?;
+        out_file.flush().map_err(|e| format!("Flush failed: {e}"))?;
     }
 
     Ok(bytes_written)
@@ -404,6 +422,26 @@ pub mod tests {
     use std::io::Cursor;
 
     #[test]
+    fn corrupt_unicode_keyring_data_is_rejected_without_panicking() {
+        assert!(hex_decode("😀").is_err());
+        assert!(hex_decode("éé").is_err());
+    }
+
+    #[test]
+    fn video_downloads_require_tls_except_development_loopback() {
+        assert!(download_url("https://cdn.example.test/video.mp4", false).is_ok());
+        assert!(download_url("http://127.0.0.1:3101/video.mp4", true).is_ok());
+        for raw in [
+            "http://cdn.example.test/video.mp4",
+            "file:///tmp/video",
+            "https://user:pass@cdn.example.test/video",
+            "https://cdn.example.test/video\n",
+        ] {
+            assert!(download_url(raw, false).is_err());
+        }
+    }
+
+    #[test]
     fn test_bway_header_roundtrip() {
         let iv = [1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
         let original_len = 1024 * 1024 * 500; // 500 MB
@@ -438,14 +476,8 @@ pub mod tests {
         let header = BwayHeader::parse(&header_buf).expect("Parse header");
         assert_eq!(header.original_len, original_data.len() as u64);
 
-        let decrypted = read_and_decrypt_range(
-            &mut file,
-            &header,
-            &key,
-            0,
-            original_data.len(),
-        )
-        .expect("Decryption should succeed");
+        let decrypted = read_and_decrypt_range(&mut file, &header, &key, 0, original_data.len())
+            .expect("Decryption should succeed");
 
         assert_eq!(decrypted, original_data);
 
@@ -456,7 +488,9 @@ pub mod tests {
     fn test_random_access_seeking_decryption() {
         let key = [99u8; 32];
         // 256 KB test data
-        let original_data: Vec<u8> = (0..256 * 1024).map(|i| ((i * 31 + 7) % 256) as u8).collect();
+        let original_data: Vec<u8> = (0..256 * 1024)
+            .map(|i| ((i * 31 + 7) % 256) as u8)
+            .collect();
 
         let temp_dir = std::env::temp_dir();
         let test_file = temp_dir.join("test_seeking_video.bway");
@@ -471,8 +505,8 @@ pub mod tests {
         let header = BwayHeader::parse(&header_buf).expect("Parse header");
 
         // 1. Seek to arbitrary non-aligned offset (e.g., byte 12345, length 2048)
-        let slice1 = read_and_decrypt_range(&mut file, &header, &key, 12345, 2048)
-            .expect("Seek to 12345");
+        let slice1 =
+            read_and_decrypt_range(&mut file, &header, &key, 12345, 2048).expect("Seek to 12345");
         assert_eq!(slice1, original_data[12345..12345 + 2048]);
 
         // 2. Seek near the end of file
@@ -482,8 +516,8 @@ pub mod tests {
         assert_eq!(slice2, original_data[end_start..]);
 
         // 3. Single byte seek
-        let slice3 = read_and_decrypt_range(&mut file, &header, &key, 7777, 1)
-            .expect("Seek 1 byte");
+        let slice3 =
+            read_and_decrypt_range(&mut file, &header, &key, 7777, 1).expect("Seek 1 byte");
         assert_eq!(slice3, vec![original_data[7777]]);
 
         let _ = std::fs::remove_file(test_file);
@@ -507,14 +541,9 @@ pub mod tests {
         file.read_exact(&mut header_buf).expect("Read header");
         let header = BwayHeader::parse(&header_buf).expect("Parse header");
 
-        let decrypted_wrong = read_and_decrypt_range(
-            &mut file,
-            &header,
-            &key_wrong,
-            0,
-            original_data.len(),
-        )
-        .expect("Decryption runs");
+        let decrypted_wrong =
+            read_and_decrypt_range(&mut file, &header, &key_wrong, 0, original_data.len())
+                .expect("Decryption runs");
 
         assert_ne!(decrypted_wrong, original_data);
 

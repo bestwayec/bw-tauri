@@ -7,7 +7,7 @@
  * flushes them to the server, silently when the student is offline and
  * automatically as soon as the connection returns.
  */
-import { offlineDelete, offlineGet, offlineList, offlinePut, offlinePurge } from './offline-store';
+import { offlineDelete, offlineDeleteIfValue, offlineGet, offlineList, offlinePut, offlinePurge } from './offline-store';
 
 /** Background sync cadence while an attempt is open. */
 export const OFFLINE_SYNC_INTERVAL_MS = 10_000;
@@ -47,21 +47,23 @@ export async function readCachedExam<T = unknown>(attemptId: string): Promise<T 
   }
 }
 
+// Preserve keystroke order even when separate IndexedDB opens finish out of order.
+const answerWrites = new Map<string, Promise<boolean>>();
+
 /** Mirror one answer locally before it reaches the server. */
 export async function cacheAnswer(
   attemptId: string,
   questionId: string,
   response: string,
 ): Promise<boolean> {
-  try {
-    return await offlinePut(
-      answersNamespace(attemptId),
-      questionId,
-      JSON.stringify({ questionId, response, at: Date.now() }),
-    );
-  } catch {
-    return false;
-  }
+  const key = `${attemptId}:${questionId}`;
+  const previous = answerWrites.get(key) ?? Promise.resolve(true);
+  const entry = JSON.stringify({ questionId, response, at: Date.now() });
+  const write = previous.catch(() => false).then(() => offlinePut(answersNamespace(attemptId), questionId, entry));
+  answerWrites.set(key, write);
+  try { return await write; }
+  catch { return false; }
+  finally { if (answerWrites.get(key) === write) answerWrites.delete(key); }
 }
 
 /** A locally mirrored answer that the server has not acknowledged yet. */
@@ -105,14 +107,18 @@ export async function pendingAnswerCount(attemptId: string): Promise<number> {
 /** Drop exactly the answers the server acknowledged; returns how many went. */
 export async function resolvePendingAnswers(
   attemptId: string,
-  syncedQuestionIds: string[],
+  acknowledged: Array<{ questionId: string; response: string }>,
 ): Promise<number> {
-  const synced = new Set(syncedQuestionIds);
+  const synced = new Map(acknowledged.map(answer => [answer.questionId, answer.response]));
   const pending = await offlineList(answersNamespace(attemptId));
   let removed = 0;
   for (const entry of pending) {
     if (!synced.has(entry.key)) continue;
-    if (await offlineDelete(answersNamespace(attemptId), entry.key)) removed++;
+    try {
+      const current = JSON.parse(entry.value) as MirroredAnswer;
+      if (current.response !== synced.get(entry.key)) continue;
+      if (await offlineDeleteIfValue(answersNamespace(attemptId), entry.key, entry.value)) removed++;
+    } catch { /* keep unreadable entries rather than delete unacknowledged data */ }
   }
   return removed;
 }
@@ -150,7 +156,7 @@ export async function flushOfflineSyncQueue(
   if (pending.length === 0) return 0;
   const payload = pending.map((item) => ({ questionId: item.questionId, response: item.response }));
   await sendBulk(payload);
-  await resolvePendingAnswers(attemptId, payload.map((p) => p.questionId));
+  await resolvePendingAnswers(attemptId, payload);
   return payload.length;
 }
 

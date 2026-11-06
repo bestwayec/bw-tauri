@@ -20,9 +20,14 @@ describe('answer acknowledgement before finalization', () => {
     acknowledge(); await finishing;
     expect(submit).toHaveBeenCalledOnce();
   });
-  it.each([{versioned:true,auto:true},{versioned:false,auto:false}])('preserves server expiry and IELTS behavior: %j', async (options) => {
+  it.each([{versioned:true,auto:true},{versioned:false,auto:false},{versioned:false,auto:true}])('preserves unsaved drafts rather than finalizing after a network failure: %j', async (options) => {
+    const submit = vi.fn();
+    await expect(flushBeforeSubmission(() => Promise.reject(new Error('offline')), options, vi.fn()).then(submit)).rejects.toThrow('offline');
+    expect(submit).not.toHaveBeenCalled();
+  });
+  it.each(['TEST_TIME_UP', 'MOCK_TIME_UP', 'MOCK_SECTION_TIME_UP'])('permits automatic finalization only after a backend deadline verdict: %s', async (code) => {
     const warning = vi.fn();
-    await expect(flushBeforeSubmission(() => Promise.reject(new Error('expired')), options, warning)).resolves.toBeUndefined();
+    await expect(flushBeforeSubmission(() => Promise.reject({ code }), { versioned: false, auto: true }, warning)).resolves.toBeUndefined();
     expect(warning).toHaveBeenCalledOnce();
   });
 });

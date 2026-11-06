@@ -184,6 +184,39 @@ export async function offlineDelete(namespace: string, key: string): Promise<boo
   }
 }
 
+/** Delete an acknowledged snapshot only if no newer write replaced it. */
+export async function offlineDeleteIfValue(namespace: string, key: string, expected: string): Promise<boolean> {
+  const storageKey = storeKey(namespace, key);
+  try {
+    if (offlineStoreBackend() === 'indexeddb') {
+      const db = await database();
+      return await new Promise<boolean>((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        let removed = false;
+        const store = tx.objectStore(STORE);
+        const read = store.get(storageKey);
+        read.onsuccess = () => {
+          if ((read.result as OfflineRecord | undefined)?.value === expected) {
+            store.delete(storageKey);
+            removed = true;
+          }
+        };
+        tx.oncomplete = () => { db.close(); resolve(removed); };
+        tx.onerror = tx.onabort = () => { db.close(); reject(tx.error); };
+      });
+    }
+    const store = localStore();
+    if (store) {
+      if (store.getItem(storageKey) !== expected) return false;
+      store.removeItem(storageKey);
+    } else {
+      if (memory.get(storageKey) !== expected) return false;
+      memory.delete(storageKey);
+    }
+    return true;
+  } catch { return false; }
+}
+
 /** Drop a whole namespace (e.g. when an attempt is finished). */
 export async function offlinePurge(namespace: string): Promise<void> {
   const entries = await offlineList(namespace).catch(() => []);

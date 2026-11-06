@@ -1,3 +1,4 @@
+import pkg from "../../package.json";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import TitleBar from "./TitleBar";
@@ -6,7 +7,7 @@ describe("Native Custom TitleBar Component", () => {
   it("renders app branding, version, and default window controls", () => {
     const html = renderToStaticMarkup(<TitleBar examActive={false} />);
     expect(html).toContain("BestWay Exam");
-    expect(html).toContain("v0.8.3");
+    expect(html).toContain(`v${pkg.version}`);
     expect(html).toContain("data-tauri-drag-region");
     expect(html).toContain('aria-label="Minimize"');
     expect(html).toContain('aria-label="Maximize"');

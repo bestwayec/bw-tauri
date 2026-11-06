@@ -32,14 +32,16 @@ async function invokeRaw<T>(cmd: string, args?: Record<string, unknown>): Promis
 }
 
 /** Null outside Tauri; the stored session (possibly empty) inside. */
-export async function rustSessionGet(): Promise<RustSessionData | null> {
+export type RustSessionSnapshot = Omit<RustSessionData, "refresh_token">;
+
+export async function rustSessionGet(): Promise<RustSessionSnapshot | null> {
   if (!isTauriRuntime()) return null;
-  return invokeRaw<RustSessionData>("session_get");
+  return invokeRaw<RustSessionSnapshot>("session_get");
 }
 
-export async function rustSessionSet(data: RustSessionData): Promise<void> {
+export async function rustSessionSet(data: RustSessionData, preserveRefresh = false): Promise<void> {
   if (!isTauriRuntime()) return;
-  await invokeRaw<null>("session_set", { data });
+  await invokeRaw<null>("session_set", { data, preserveRefresh });
 }
 
 export async function rustSessionClear(): Promise<void> {
@@ -55,4 +57,10 @@ export async function rustAuthRefresh(baseUrl: string, expectedAccess: string | 
 export async function rustAuthLogout(baseUrl: string): Promise<void> {
   if (!isTauriRuntime()) return;
   await invokeRaw<null>("auth_logout", { baseUrl });
+}
+
+/** Update metadata without writing a potentially stale token snapshot. */
+export async function rustSessionUpdateProfile(profileJson: string | null): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await invokeRaw<null>("session_update_profile", { profileJson });
 }

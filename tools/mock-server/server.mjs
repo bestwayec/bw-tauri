@@ -611,7 +611,7 @@ const server = http.createServer(async (req, res) => {
     }
     return ok(res, r);
   }
-  if (method === "POST" && path === "/v1/auth/logout") return ok(res, { revoked: true });
+  if (method === "POST" && ["/v1/auth/logout", "/v1/auth/logout-refresh"].includes(path)) return ok(res, { revoked: true });
   if (method === "POST" && path === "/v1/auth/desktop/exchange") {
     if (body.code !== "test-code") return fail(res, 400, "INVALID_DESKTOP_CODE", "Bad code");
     const pair = mintPair("stu-1");

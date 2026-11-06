@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
+import { useSessionStore } from "@/lib/session-store";
 import type { MockExamListItem, MockStartResult, MockSkill } from "@/lib/mocks";
 
 export interface ActiveMockSession {
+  studentId: string;
   mock: MockExamListItem;
   start: MockStartResult;
   chosen?: MockSkill;
@@ -16,7 +18,10 @@ export function persistActiveMockSession(
   chosen?: MockSkill
 ) {
   try {
+    const studentId = useSessionStore.getState().profile?.id;
+    if (!studentId) return;
     const session: ActiveMockSession = {
+      studentId,
       mock,
       start,
       chosen,
@@ -42,6 +47,10 @@ export function getActiveMockSession(): ActiveMockSession | null {
     if (!raw) return null;
     const session = JSON.parse(raw) as ActiveMockSession;
     if (!session?.mock?.id || !session?.start?.attemptId) return null;
+    // Never expose another student's cached questions/answers on a shared PC.
+    // Legacy unowned records remain on disk; the owner can resume via the
+    // authenticated exam start endpoint instead of an unverified local card.
+    if (!session.studentId || session.studentId !== useSessionStore.getState().profile?.id) return null;
     // Session is valid for up to 4 hours (240 minutes)
     if (Date.now() - (session.at || 0) > 4 * 60 * 60 * 1000) {
       clearActiveMockSession();

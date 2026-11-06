@@ -1,10 +1,11 @@
 mod battery;
 mod browser;
+mod encryption;
 mod lockdown;
 mod logger;
+mod offline_media;
 mod session;
 mod tray;
-mod encryption;
 mod video_stream;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -122,7 +123,6 @@ fn quit_app(app: tauri::AppHandle, state: tauri::State<'_, LockState>) -> Result
     Ok(())
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Download an encrypted offline video file to app data directory
 #[tauri::command]
 async fn download_offline_video(
@@ -134,10 +134,20 @@ async fn download_offline_video(
     let videos_dir = app_dir.join("offline_videos");
     std::fs::create_dir_all(&videos_dir).map_err(|e| e.to_string())?;
 
-    let clean_name = filename.trim().trim_end_matches(".bway");
-    let target_path = videos_dir.join(format!("{clean_name}.bway"));
+    let safe_name = offline_media::video_filename(&filename)?;
+    let target_path = videos_dir.join(safe_name);
 
-    encryption::download_and_encrypt_video(&url, &target_path).await?;
+    // Never replace a previously usable video with a truncated download.
+    let temporary = videos_dir.join(format!(
+        "{}.{}.part",
+        offline_media::video_filename(&filename)?,
+        rand::random::<u64>()
+    ));
+    if let Err(error) = encryption::download_and_encrypt_video(&url, &temporary).await {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error);
+    }
+    std::fs::rename(&temporary, &target_path).map_err(|e| e.to_string())?;
     Ok(target_path.to_string_lossy().to_string())
 }
 
@@ -169,6 +179,7 @@ fn setup_media_environment() {
     }
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     setup_media_environment();
 
@@ -213,8 +224,19 @@ pub fn run() {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
 
-    let builder = builder.register_uri_scheme_protocol("bway", |_ctx, request| {
-        video_stream::handle_bway_protocol(&request)
+    let builder = builder.register_uri_scheme_protocol("bway", |ctx, request| {
+        let root = ctx
+            .app_handle()
+            .path()
+            .app_data_dir()
+            .map(|dir| dir.join("offline_videos"));
+        match root {
+            Ok(root) => video_stream::handle_bway_protocol(&request, &root),
+            Err(_) => tauri::http::Response::builder()
+                .status(403)
+                .body(Vec::new())
+                .unwrap(),
+        }
     });
 
     builder
@@ -314,6 +336,7 @@ pub fn run() {
             quit_app,
             session::session_get,
             session::session_set,
+            session::session_update_profile,
             session::session_clear,
             session::auth_refresh,
             session::auth_logout,

@@ -32,7 +32,6 @@ import {
   cacheAnswer,
   cacheTimerSeconds,
   clearAttemptCache,
-  flushOfflineSyncQueue,
   readPendingAnswers,
   resolvePendingAnswers,
   startOfflineSync,
@@ -87,7 +86,7 @@ export interface ExamRunnerProps {
   roomPin?: string;
   /** Optional callback fired on lockdown cheat/focus-loss events. */
   onCheat?: (event: LockdownCheatEvent) => void;
-  /** Random webcam integrity snapshots while the exam runs. @default true */
+  /** Random webcam integrity snapshots after explicit camera consent. @default false */
   proctoring?: boolean;
   /** Every security event (snapshot, blocked camera, focus loss) as it is logged. */
   onSecurityEvent?: (entry: SecurityLogEntry) => void;
@@ -171,7 +170,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
   // missing camera must never interrupt the attempt.
   useProctorSnapshots({
     attemptId: p.attemptId,
-    active: (p.proctoring ?? true) && !!p.attemptId,
+    active: p.proctoring === true && !!p.attemptId,
     onEvent: p.onSecurityEvent,
   });
 
@@ -293,27 +292,27 @@ export default function ExamRunner(p: ExamRunnerProps) {
         /* private mode — memory only */
       }
     };
-    if (versioned) write();
-    else persistTimer.current = window.setTimeout(write, 500);
+    write();
   }
 
   // Offline-first restore: an answer given while the connection was down lives
   // only in the local mirror, so bring it back into the exam. The server
-  // snapshot always wins for questions it already knows about.
+  // snapshot is older than unacknowledged local edits.
   const recoveredRef = useRef(false);
   useEffect(() => {
     if (recoveredRef.current || !p.attemptId) return;
-    recoveredRef.current = true;
     let alive = true;
     void (async () => {
       try {
         const pending = await readPendingAnswers(p.attemptId);
-        if (!alive || pending.length === 0) return;
-        const server: Record<string, string> = p.initialAnswers ?? {};
+        if (!alive) return;
+        recoveredRef.current = true;
+        if (pending.length === 0) return;
         const restored: Record<string, string> = {};
         for (const item of pending) {
           if (versioned && !writableIds.has(item.questionId)) continue;
-          if (server[item.questionId] !== undefined) continue;
+          // Do not overwrite edits typed while IndexedDB recovery was pending.
+          if (dirty.current.has(item.questionId)) continue;
           restored[item.questionId] = item.response;
         }
         const ids = Object.keys(restored);
@@ -399,7 +398,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
       for (const item of payload) if (answersRef.current[item.questionId] === item.response) dirty.current.delete(item.questionId);
       persistQueue();
       // The server holds these now — drop the offline mirror entries.
-      void resolvePendingAnswers(p.attemptId, payload.map((item) => item.questionId)).catch(() => undefined);
+      void resolvePendingAnswers(p.attemptId, payload).catch(() => undefined);
       if (dirty.current.size === 0) {
         try {
           localStorage.removeItem(queueKey(p.attemptId));
@@ -422,7 +421,6 @@ export default function ExamRunner(p: ExamRunnerProps) {
 
   useEffect(() => {
     const handleOnline = () => {
-      void flushOfflineSyncQueue(p.attemptId, p.saveMany).catch(() => undefined);
       void flush().catch(() => undefined);
     };
     window.addEventListener("online", handleOnline);
@@ -430,6 +428,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
   }, [p.attemptId, p.saveMany, flush]);
 
   function setAnswer(qid: string, value: string, immediate = false) {
+    if (submittingRef.current || submittedRef.current) return;
     answersRef.current = { ...answersRef.current, [qid]: value };
     dirty.current.add(qid);
     persistQueue();
@@ -447,19 +446,9 @@ export default function ExamRunner(p: ExamRunnerProps) {
     if (allQuestions.some((q) => q.guidance)) { setSaveState('saving'); scheduleFlush(); return; }
     if (immediate) {
       setSaveState("saving");
-      void p
-        .saveOne(qid, value)
-        .then(() => {
-          if (answersRef.current[qid] === value) dirty.current.delete(qid);
-          persistQueue();
-          if (dirty.current.size === 0) setSaveState("saved");
-        })
-        .catch((e: unknown) => {
-          dirty.current.add(qid);
-          persistQueue();
-          setSaveState("offline");
-          if (!notifyExamAuthIssue(e)) setError(friendlyError(e));
-        });
+      void flush().catch((e: unknown) => {
+        if (!notifyExamAuthIssue(e)) setError(friendlyError(e));
+      });
     } else {
       dirty.current.add(qid);
       setSaveState("saving");

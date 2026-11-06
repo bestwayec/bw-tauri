@@ -6,6 +6,15 @@ import { validateRelease } from './validate-release.mjs';
 const versions = { packageVersion: '0.5.1-rc.2', tauriVersion: '0.5.1-rc.2', cargoVersion: '0.5.1-rc.2' };
 const env = { VITE_API_URL: 'https://api.example.test/v1', VITE_WEB_URL: 'https://example.test', GITHUB_REF_NAME: 'bestway-app-v0.5.1-rc.2' };
 
+test('signed updater uses the signed release manifest rather than unsigned manual-install API responses', () => {
+  // Django apps/core/views.py desktop_update_json and desktop_update_check
+  // currently return empty signatures. They must not shadow signed GitHub data.
+  const base = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+  assert.deepEqual(base.plugins.updater.endpoints, ['https://github.com/bestwayec/bw-tauri/releases/latest/download/latest.json']);
+  assert.equal(base.bundle.createUpdaterArtifacts, true);
+  assert.ok(base.plugins.updater.pubkey.length > 0);
+});
+
 test('default manual release needs no signing key and suppresses updater artifacts only through an overlay', () => {
   const release = validateRelease(env, versions);
   assert.equal(release.mode, 'manual_installer');
