@@ -129,6 +129,32 @@ function loadQueue(attemptId: string): { answers: Record<string, string>; dirty:
   }
 }
 
+/** Only unacknowledged local edits can supersede the server snapshot. */
+export function restoreAnswers(
+  initialAnswers: Record<string, string>,
+  queue: { answers: Record<string, string>; dirty: string[] },
+  writableIds?: ReadonlySet<string>,
+): Record<string, string> {
+  const merged = { ...initialAnswers };
+  for (const id of queue.dirty) {
+    const value = queue.answers[id];
+    if (typeof value === 'string' && (!writableIds || writableIds.has(id))) merged[id] = value;
+  }
+  return merged;
+}
+
+/** Keep retrying after the deadline until submission succeeds or the runner unmounts. */
+export function startDeadlineMonitor(onTick: () => number | null, onExpired: () => void): () => void {
+  let nextRetry = 0;
+  const id = window.setInterval(() => {
+    const remaining = onTick();
+    if (remaining == null || remaining > 0 || Date.now() < nextRetry) return;
+    nextRetry = Date.now() + 10_000;
+    onExpired();
+  }, 1000);
+  return () => window.clearInterval(id);
+}
+
 /**
  * Auth errors during an attempt must NEVER navigate away. Definitive session
  * verdicts surface a re-login modal over the exam (answers stay intact);
@@ -211,20 +237,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
     // Merge the persisted offline queue: only ids that were still unsaved
     // (dirty) overlay the server snapshot — saved answers are authoritative.
     try {
-      const q = loadQueue(p.attemptId);
-      const dirtySet = new Set(q.dirty);
-      const merged = { ...p.initialAnswers };
-      try {
-        const rawSession = sessionStorage.getItem(`examui.answers.${p.attemptId}`);
-        if (rawSession) {
-          const parsed = JSON.parse(rawSession);
-          if (parsed && typeof parsed === "object") Object.assign(merged, parsed);
-        }
-      } catch {}
-      for (const [qid, v] of Object.entries(q.answers)) {
-        if (dirtySet.has(qid) && typeof v === "string" && (!versioned || writableIds.has(qid))) merged[qid] = v;
-      }
-      return merged;
+      return restoreAnswers(p.initialAnswers, loadQueue(p.attemptId), versioned ? writableIds : undefined);
     } catch {
       return p.initialAnswers;
     }
@@ -435,13 +448,6 @@ export default function ExamRunner(p: ExamRunnerProps) {
     // Mirror every answer locally the moment it is typed, before any request:
     // this survives a reload or a crash with no network at all.
     void cacheAnswer(p.attemptId, qid, value).catch(() => undefined);
-    try {
-      sessionStorage.setItem(`examui.answer.${p.attemptId}.${qid}`, value);
-      sessionStorage.setItem(
-        `examui.answers.${p.attemptId}`,
-        JSON.stringify({ ...answersRef.current, [qid]: value })
-      );
-    } catch {}
     setAnswers((a) => (a[qid] === value ? a : { ...a, [qid]: value }));
     if (allQuestions.some((q) => q.guidance)) { setSaveState('saving'); scheduleFlush(); return; }
     if (immediate) {
@@ -517,24 +523,19 @@ export default function ExamRunner(p: ExamRunnerProps) {
 
   useEffect(() => {
     if (p.deadlineIso == null) return;
-    let nextRetry = 0;
     setRemaining(remainingMs(p.deadlineIso, offsetMs));
-    const id = window.setInterval(() => {
+    return startDeadlineMonitor(() => {
       const r = remainingMs(p.deadlineIso, offsetMs);
       setRemaining(r);
       if (r != null) {
         void cacheTimerSeconds(p.attemptId, Math.max(0, Math.floor(r / 1000))).catch(() => undefined);
       }
-      if (r != null && r <= 0) {
-        if (!versioned) window.clearInterval(id);
-        if (Date.now() < nextRetry) return;
-        nextRetry = Date.now() + 10000;
-        setTimeUp(true);
-        void doSubmit(true);
-      }
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [p.deadlineIso, offsetMs, doSubmit, versioned, p.attemptId]);
+      return r;
+    }, () => {
+      setTimeUp(true);
+      void doSubmit(true);
+    });
+  }, [p.deadlineIso, offsetMs, doSubmit, p.attemptId]);
 
   // ---- navigation ----
   function gotoPart(i: number, qGlobal?: number) {

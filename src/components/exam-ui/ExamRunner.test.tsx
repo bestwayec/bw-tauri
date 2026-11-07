@@ -1,9 +1,51 @@
 import { Children, isValidElement, type ReactElement } from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MultilevelListening } from '@/components/exam/multilevel-media';
 import ListeningEngine from './ListeningEngine';
-import { PartQuestions } from './ExamRunner';
+import { PartQuestions, restoreAnswers, startDeadlineMonitor } from './ExamRunner';
 import type { UIPart } from './model';
+
+describe('answer recovery', () => {
+  it('uses server answers for acknowledged edits and restores unsaved edits, including clears', () => {
+    const server = { saved: 'new server answer', pending: 'old answer', cleared: 'old answer' };
+    const queue = {
+      answers: { saved: 'stale local answer', pending: 'offline answer', cleared: '' },
+      dirty: ['pending', 'cleared'],
+    };
+    expect(restoreAnswers(server, queue)).toEqual({
+      saved: 'new server answer', pending: 'offline answer', cleared: '',
+    });
+  });
+
+  it('does not restore answers from another section of a versioned exam', () => {
+    expect(restoreAnswers({ other: 'server' }, {
+      answers: { current: 'unsaved', other: 'stale' }, dirty: ['current', 'other'],
+    }, new Set(['current']))).toEqual({ current: 'unsaved', other: 'server' });
+  });
+});
+
+describe('deadline submission', () => {
+  it('retries after a failed submission and stops when the runner unmounts', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('window', globalThis);
+    try {
+      const submit = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(undefined);
+      const stop = startDeadlineMonitor(() => 0, () => { void submit().catch(() => undefined); });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(submit).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(9000);
+      expect(submit).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(submit).toHaveBeenCalledTimes(2);
+      stop();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(submit).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+});
 
 function renderAudio(groupId: string, attemptId = 'attempt', multilevel = true) {
   const part: UIPart = {
