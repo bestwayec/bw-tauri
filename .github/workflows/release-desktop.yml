@@ -166,9 +166,13 @@ jobs:
         id: release-config
         env:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
-          # Keep manual downloads available without an updater signing key.
-          # Set the repository variable to signed_updater for signed updates.
-          DESKTOP_RELEASE_MODE: ${{ vars.DESKTOP_RELEASE_MODE || 'manual_installer' }}
+          # Signed updater by default: it produces the `.sig` files and the
+          # `latest.json` that `plugins.updater.endpoints` downloads. With the
+          # old manual_installer default no `latest.json` was ever published,
+          # so every installed app got 404 from the updater. Set the
+          # repository variable to manual_installer only for an emergency
+          # build without the signing key.
+          DESKTOP_RELEASE_MODE: ${{ vars.DESKTOP_RELEASE_MODE || 'signed_updater' }}
           VITE_API_URL: ${{ vars.VITE_API_URL }}
           VITE_WEB_URL: ${{ vars.VITE_WEB_URL }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

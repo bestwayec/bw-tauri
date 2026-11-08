@@ -93,7 +93,7 @@ export default function TopBar(p: Props) {
           role="timer"
           aria-label="Time remaining"
         >
-          {p.remainingMs == null ? "No limit" : p.timeUp ? "Time up" : fmtCountdown(p.remainingMs)}
+          {p.remainingMs == null ? "Practice · no time limit" : p.timeUp ? "Time up" : fmtCountdown(p.remainingMs)}
         </span>
         <span
           className={`exam-savestate exam-savestate-${p.saveState}`}
@@ -160,6 +160,7 @@ export default function TopBar(p: Props) {
         >
           {(
             [
+              { id: "app", label: "Dark", title: "Bestway dark theme (matches the app)" },
               { id: "standard", label: "Standard", title: "Standard light contrast" },
               { id: "dark", label: "High Contrast", title: "High-contrast black (#09090b) with yellow/white text" },
               { id: "grey", label: "Grey", title: "Soft grey contrast (#2d3139)" },

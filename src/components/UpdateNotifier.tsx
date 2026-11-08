@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { openInBrowser } from "@/lib/oauth";
-import { dismissVersion, installerUrlFor, type UpdateInfo } from "@/lib/version";
+import { dismissVersion, takeSignedUpdate, type UpdateInfo } from "@/lib/version";
 import { isSafeHttpUrl } from "@/lib/secure-storage";
+import { getAppLanguage, onUiPrefsChange, type AppLanguage } from "@/lib/ui-prefs";
 
 type Props = {
   update: UpdateInfo;
@@ -15,48 +16,49 @@ type Props = {
   deferInstall?: boolean;
 };
 
-type Status = "idle" | "checking" | "downloading" | "installing" | "opening" | "error";
+type Status = "idle" | "downloading" | "installing" | "opening" | "error";
 
-/**
- * Budget for the signed updater probe. A Tauri IPC call that never settles
- * (disabled plugin, wedged network stack) must not leave the button stuck on
- * "Checking…" forever — after this the manual installer path takes over.
- * Deliberately NOT applied to `downloadAndInstall`: a real install must never
- * be abandoned mid-flight.
- */
-const UPDATER_CHECK_TIMEOUT_MS = 8_000;
-
-/** Reject when `promise` has not settled within `ms`; otherwise pass it through. */
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Update check timed out after ${ms}ms`)), ms);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
-  });
-}
+const TEXT = {
+  uz: {
+    region: "Ilova yangilanishi mavjud",
+    dismiss: "Yangilanish xabarini yopish",
+    title: "Yangi versiya mavjud",
+    body: (latest: string, current: string) =>
+      `Bestway Exam ${latest} tayyor, sizda ${current} o'rnatilgan. Yuklab olish va yangilash uchun bosing.`,
+    deferred: "Imtihon davom etmoqda — yangilanish imtihondan keyin o'rnatiladi. Hozir hech narsa qayta ishga tushmaydi.",
+    action: "Yuklab olish va yangilash",
+    downloading: "Yuklanmoqda…",
+    installing: "O'rnatilmoqda…",
+    opening: "Ochilmoqda…",
+    failed: "Yangilanishni o'rnatib bo'lmadi. Keyinroq qayta urinib ko'ring.",
+    noDownload: "Bu yangilanish uchun yuklab olish manzili yo'q.",
+  },
+  en: {
+    region: "Application update available",
+    dismiss: "Dismiss update notification",
+    title: "New version available",
+    body: (latest: string, current: string) =>
+      `Bestway Exam ${latest} is ready, you're on ${current}. Click to download & update.`,
+    deferred: "An exam is in progress — the update will install after you finish. Nothing restarts meanwhile.",
+    action: "Download & update",
+    downloading: "Downloading…",
+    installing: "Installing…",
+    opening: "Opening…",
+    failed: "The update could not be installed. Please try again later.",
+    noDownload: "No download available for this update.",
+  },
+} satisfies Record<AppLanguage, unknown>;
 
 /**
  * Version-update toast, bottom-right (out of the way of the exam UI and the
- * toasts that live top-right) — same structure as the reference
- * Announcement card (leading icon, dismiss, title, description, full-width
- * secondary CTA), restyled to the app's dark + brand identity.
+ * toasts that live top-right), in the selected interface language.
  *
- * Update flow: tries the signed Tauri updater (`check()` →
- * `downloadAndInstall()` → relaunch) first so binary authenticity is
- * verified via `plugins.updater.pubkey`. The probe is bounded by
- * `UPDATER_CHECK_TIMEOUT_MS`, so a wedged IPC call falls through instead of
- * hanging on "Checking…". Falls back to a manual `openInBrowser(...)` when
- * the updater is unavailable (browser dev, offline, no update found,
- * timed out): the backend URL when it is safe, otherwise this release's
- * published installer — always gated by `isSafeHttpUrl`.
+ * The toast is only mounted for an update that `resolveDesktopUpdate`
+ * verified: either the signed updater found it (`source: "updater"`, the
+ * version shown is the one in `latest.json`, installed in place and checked
+ * against `plugins.updater.pubkey`), or the backend announced it and its
+ * installer URL answered HEAD with 2xx (`source: "installer"`, opened in the
+ * system browser). A missing installer never produces a toast.
  *
  * Dismissal plays a soft blur + scale-down exit via motion, persists the
  * dismissed version (same version never nags twice), then unmounts.
@@ -66,87 +68,72 @@ export default function UpdateNotifier({ update, onClose, deferInstall }: Props)
   const [status, setStatus] = useState<Status>("idle");
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lang, setLang] = useState<AppLanguage>(() => getAppLanguage());
+  useEffect(() => onUiPrefsChange(() => setLang(getAppLanguage())), []);
+  const t = TEXT[lang];
 
   const close = () => {
     dismissVersion(update.latest);
     setDismissed(true);
   };
 
-  const busy = status === "checking" || status === "downloading" || status === "installing" || status === "opening";
+  const busy = status === "downloading" || status === "installing" || status === "opening";
+  const manualUrl = update.downloadUrl && isSafeHttpUrl(update.downloadUrl) ? update.downloadUrl : null;
+  const signed = update.source === "updater" ? takeSignedUpdate() : null;
+  const canAct = Boolean(signed || manualUrl);
 
   const openManually = async (url: string) => {
-    if (!isSafeHttpUrl(url)) return;
     setStatus("opening");
     try {
       await openInBrowser(url);
-    } catch {
-      /* opener already fell back to a tab; nothing more to do */
-    } finally {
       setStatus("idle");
+    } catch (err) {
+      console.warn("[updater] Could not open the installer URL:", err);
+      setError(t.failed);
+      setStatus("error");
     }
   };
-
-  /** Backend download URL when it is safe, otherwise this release's installer. */
-  const manualUrl = installerUrlFor(update.latest, update.downloadUrl);
 
   const handleAction = async () => {
     if (busy) return;
     setError(null);
     setProgress(null);
-    // Prefer the signed in-place updater; keep manual open as fallback.
-    try {
-      setStatus("checking");
-      console.log("[updater] Checking for desktop updates...");
-      const updater = await import("@tauri-apps/plugin-updater");
-      const found = await withTimeout(updater.check(), UPDATER_CHECK_TIMEOUT_MS);
-      console.log("[updater] Updater check returned:", found);
-      if (found) {
+    if (signed) {
+      try {
         setStatus("downloading");
-        console.log(`[updater] Initiating self-replace update to version ${found.version}...`);
+        console.log(`[updater] Installing signed update ${signed.version}...`);
         let total = 0;
         let downloaded = 0;
-        await found.downloadAndInstall((e) => {
+        await signed.downloadAndInstall((e) => {
           if (e.event === "Started") {
             total = (e.data as { contentLength?: number })?.contentLength ?? 0;
             setProgress(0);
-            console.log(`[updater] Download started (${total} bytes)`);
           } else if (e.event === "Progress") {
-            const chunk = (e.data as { chunkLength?: number })?.chunkLength ?? 0;
-            downloaded += chunk;
-            if (total > 0) {
-              const pct = Math.min(99, Math.round((downloaded / total) * 100));
-              setProgress(pct);
-            } else {
-              setProgress((p) => Math.min(99, (p ?? 0) + 1));
-            }
+            downloaded += (e.data as { chunkLength?: number })?.chunkLength ?? 0;
+            if (total > 0) setProgress(Math.min(99, Math.round((downloaded / total) * 100)));
+            else setProgress((p) => Math.min(99, (p ?? 0) + 1));
           } else if (e.event === "Finished") {
             setProgress(100);
-            console.log("[updater] Download completed successfully");
           }
         });
         setStatus("installing");
-        console.log("[updater] Installing update and relaunching app...");
         const proc = await import("@tauri-apps/plugin-process");
         await proc.relaunch();
         return;
-      } else {
-        console.log("[updater] No newer version detected by in-place updater, checking fallback...");
+      } catch (err) {
+        console.error("[updater] Signed update failed:", err);
+        // A verified installer page is still a safe second route.
+        if (manualUrl) {
+          await openManually(manualUrl);
+          return;
+        }
+        setError(t.failed);
+        setStatus("error");
+        return;
       }
-    } catch (err) {
-      console.warn("[updater] In-place updater check or download failed:", err);
-      // Not in Tauri runtime, updater disabled, check failed or timed out —
-      // fall through to the manual download path below.
     }
-    // Fallback: manual download in the system browser (defense-in-depth:
-    // isSafeHttpUrl re-validated here even though version.ts already nulled
-    // unsafe URLs at fetch time).
     if (!manualUrl) {
-      setError("No download available for this update.");
-      setStatus("error");
-      return;
-    }
-    if (!isSafeHttpUrl(manualUrl)) {
-      setError("Blocked unsafe download URL.");
+      setError(t.noDownload);
       setStatus("error");
       return;
     }
@@ -154,22 +141,20 @@ export default function UpdateNotifier({ update, onClose, deferInstall }: Props)
   };
 
   const label =
-    status === "checking"
-      ? "Checking…"
-      : status === "downloading"
-        ? progress != null
-          ? `Downloading… ${progress}%`
-          : "Downloading…"
-        : status === "installing"
-          ? "Installing…"
-          : status === "opening"
-            ? "Opening…"
-            : "Download & update";
+    status === "downloading"
+      ? progress != null
+        ? `${t.downloading} ${progress}%`
+        : t.downloading
+      : status === "installing"
+        ? t.installing
+        : status === "opening"
+          ? t.opening
+          : t.action;
 
   return (
     <div
       role="region"
-      aria-label="Application update available"
+      aria-label={t.region}
       className="pointer-events-none fixed bottom-4 right-4 z-[70] w-[320px] max-w-[calc(100vw-2rem)]"
     >
       <AnimatePresence onExitComplete={onClose}>
@@ -212,7 +197,7 @@ export default function UpdateNotifier({ update, onClose, deferInstall }: Props)
 
               <button
                 type="button"
-                aria-label="Dismiss update notification"
+                aria-label={t.dismiss}
                 onClick={close}
                 className="absolute right-2.5 top-2.5 grid h-6 w-6 place-items-center rounded-md text-white/40 transition hover:bg-white/5 hover:text-white"
               >
@@ -233,19 +218,19 @@ export default function UpdateNotifier({ update, onClose, deferInstall }: Props)
               </button>
 
               <div className="flex w-full flex-col items-start">
-                <p className="w-full text-sm font-semibold text-white">New version available</p>
+                <p className="w-full text-sm font-semibold text-white">{t.title}</p>
                 <p className="mt-0.5 w-full text-[13px] leading-snug text-white/55">
-                  Click to download &amp; update — Bestway Exam {update.latest} is ready, you&apos;re on {update.current}.
+                  {t.body(update.latest, update.current)}
                 </p>
               </div>
             </div>
 
             {deferInstall ? (
               <p className="w-full text-xs leading-snug text-white/50">
-                An exam is in progress — the update will install after you finish. Nothing restarts meanwhile.
+                {t.deferred}
               </p>
             ) : (
-              (manualUrl || status !== "idle") && (
+              (canAct || status !== "idle") && (
                 <button
                   type="button"
                   onClick={() => void handleAction()}

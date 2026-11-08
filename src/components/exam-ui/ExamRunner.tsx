@@ -14,6 +14,7 @@ import PassagePane, { type PassageMarks } from "./PassagePane";
 import QuestionGroup from "./QuestionGroup";
 import SubmitConfirmModal from "./SubmitConfirmModal";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
+import { getExamTheme, setExamTheme } from "@/lib/ui-prefs";
 import TopBar, { type SaveState } from "./TopBar";
 import {
   isAnswered,
@@ -257,7 +258,16 @@ export default function ExamRunner(p: ExamRunnerProps) {
   const [flags, setFlags] = useState<Record<string, boolean>>(() => ({}));
   const [currentQ, setCurrentQ] = useState(0);
   const [fontSize, setFontSize] = useState(17);
-  const [contrastTheme, setContrastTheme] = useState<ContrastTheme>("standard");
+  // Follows the app theme (dark shell) unless the student picked another
+  // contrast; the choice is remembered for the next section.
+  const [contrastTheme, setContrastThemeState] = useState<ContrastTheme>(() => getExamTheme());
+  const setContrastTheme = useCallback((next: ContrastTheme | ((c: ContrastTheme) => ContrastTheme)) => {
+    setContrastThemeState((current) => {
+      const value = typeof next === "function" ? next(current) : next;
+      setExamTheme(value);
+      return value;
+    });
+  }, []);
   const dark = contrastTheme === "dark";
   const [simulatorMode, setSimulatorMode] = useState<SimulatorMode>(
     () => p.simulatorMode ?? (versioned ? "dtm" : "cdi"),

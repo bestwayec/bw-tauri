@@ -421,7 +421,8 @@ textarea.field {
 
 /* ============================================================
    IELTS exam shell — serious, high-contrast, no effects.
-   Light paper theme by default; dark via data-exam-theme="dark".
+   App-matching dark by default (data-exam-theme="app"); light paper,
+   high-contrast and grey are student-selectable.
    Scoped to .exam-shell so the dashboard keeps its own theme.
    ============================================================ */
 
@@ -465,6 +466,24 @@ textarea.field {
   --ex-flag: #fbbf24;
   --ex-danger: #f87171;
   --ex-field: #121215;
+}
+
+/* Default: same dark surface as the app shell (#0B0F17), brand emerald. */
+.exam-shell[data-exam-theme="app"],
+.exam-shell[data-contrast-theme="app"] {
+  --ex-bg: #0B0F17;
+  --ex-pane: #111827;
+  --ex-pane-2: #162033;
+  --ex-ink: #f3f4f6;
+  --ex-muted: #9ca3af;
+  --ex-line: #243044;
+  --ex-accent: #10b981;
+  --ex-accent-quiet: #34d399;
+  --ex-accent-ink: #ffffff;
+  --ex-flag: #fbbf24;
+  --ex-danger: #f87171;
+  --ex-field: #0f1623;
+  color-scheme: dark;
 }
 
 .exam-shell[data-exam-theme="grey"],
@@ -1963,4 +1982,32 @@ textarea.field {
   .exam-timer {
     font-size: 18px;
   }
+}
+
+/* Static wordmark used when WebGL is unavailable (BootSplash fallback).
+   Typography comes from the .boot-fallback-* rules in index.html. */
+.boot-fallback-static {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: min(366px, 31vw);
+  color: #fffdf0;
+  text-align: center;
+}
+
+/* Root crash screen (main.tsx): readable without any app CSS having loaded. */
+.app-crash {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px 16px;
+  background: var(--bg, #0B0F17);
+  color: #e5e7eb;
+  text-align: center;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }

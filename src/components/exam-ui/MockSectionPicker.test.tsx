@@ -37,8 +37,14 @@ function body(exam: PickerExam, mode: "practice" | "timed", handlers: { onStart:
 }
 
 describe("mock start picker", () => {
+  it("labels untimed practice sections instead of showing a duration that never runs", () => {
+    const html = render(fullMockExam, "practice");
+    expect(html).toContain("No time limit · practice");
+    expect(html).not.toContain("~60 min");
+  });
+
   it("offers the Full Mock and all four single sections with their durations", () => {
-    const html = render(fullMockExam);
+    const html = render(fullMockExam, "timed");
     expect(html).toContain('role="dialog"');
     expect(html).toContain("Full Mock Exam");
     expect(html).toContain("Listening → 📖 Reading → ✍️ Writing → 🗣️ Speaking");

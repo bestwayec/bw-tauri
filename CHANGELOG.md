@@ -1,5 +1,36 @@
 # Changelog — Bestway Exam desktop (`bw-tauri`)
 
+## v1.0.10
+
+### Updates
+- The update toast appears only for a verified update: the version the signed
+  updater finds in `latest.json` (installed in place), or a backend-announced
+  installer whose URL answers HEAD with 2xx. A missing installer (404) no
+  longer produces a toast that opens a "Not Found" page.
+- The toast follows the new interface language setting (O'zbek / English).
+- Releases now publish the signed `latest.json` and `.sig` files, and the
+  Android job no longer creates a separate APK-only "Latest" release that
+  hid them from the updater.
+
+### Boot and exams
+- No white or black flash when entering a section: the window, page and
+  runner share the app's dark background, and a skeleton shows while the
+  section loads. The runner opens in the dark theme and remembers the
+  student's contrast choice.
+- PCs without WebGL get a static splash and login background instead of a
+  black window; a root error screen replaces any whole-app crash.
+- A section with no questions shows one error card ("Savollarni yuklab
+  bo'lmadi") with "Qayta urinish" and "Orqaga".
+- Untimed practice sections are labelled "No time limit · practice";
+  "⏱ Timed" keeps the official section time.
+
+### Login and window
+- Browser login completes on Windows when the app is already running (the
+  deep-link callback was delivered as a string and dropped); one login code
+  is never exchanged twice.
+- Title bar Close and Maximize work (missing window permissions added).
+
+
 ## v0.4.0
 
 ### Never log the student out (Rust-owned session)

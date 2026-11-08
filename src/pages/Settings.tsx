@@ -2,6 +2,7 @@ import { useState } from "react";
 import pkg from "../../package.json";
 import { API_BASE_URL, isApiMisconfigured, isLoopbackUrl, isProdBuild, me } from "@/lib/api";
 import { getConfirmBeforeSubmit, setConfirmBeforeSubmit } from "@/lib/exam-prefs";
+import { getAppLanguage, setAppLanguage, type AppLanguage } from "@/lib/ui-prefs";
 
 type Props = {
   studentName: string | null;
@@ -45,6 +46,11 @@ function Toggle({
  */
 export default function Settings({ studentName, studentPhone, role, onLogout }: Props) {
   const [confirmSubmit, setConfirmSubmit] = useState(() => getConfirmBeforeSubmit());
+  const [language, setLanguage] = useState<AppLanguage>(() => getAppLanguage());
+  const chooseLanguage = (next: AppLanguage) => {
+    setLanguage(next);
+    setAppLanguage(next);
+  };
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testOk, setTestOk] = useState(false);
@@ -110,6 +116,31 @@ export default function Settings({ studentName, studentPhone, role, onLogout }: 
           <p className="mt-2 text-[11px] leading-relaxed text-white/30">
             Answers save automatically while you work — this only controls the final submit step.
           </p>
+          <div className="mt-3 flex items-center gap-3 rounded-xl bg-black/30 px-3.5 py-3 ring-1 ring-white/10">
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] font-semibold text-white">Til / Language</p>
+              <p className="mt-0.5 text-xs leading-relaxed text-white/40">
+                {language === "uz"
+                  ? "Yangilanish xabarlari o'zbek tilida ko'rsatiladi."
+                  : "Update notifications are shown in English."}
+              </p>
+            </div>
+            <div className="inline-flex rounded-lg bg-white/5 p-0.5 ring-1 ring-white/10" role="group" aria-label="Til / Language">
+              {(["uz", "en"] as const).map((code) => (
+                <button
+                  key={code}
+                  type="button"
+                  aria-pressed={language === code}
+                  onClick={() => chooseLanguage(code)}
+                  className={`rounded-md px-3 py-1 text-xs font-semibold uppercase transition ${
+                    language === code ? "bg-emerald-500 text-white" : "text-white/60 hover:text-white"
+                  }`}
+                >
+                  {code}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Account — real signed-in student data */}

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ExamRunner from "@/components/exam-ui/ExamRunner";
 import IntegrityCheck from "@/components/exam/IntegrityCheck";
+import ExamLoadError from "@/components/exam/ExamLoadError";
+import RunnerSkeleton from "@/components/exam-ui/RunnerSkeleton";
 import { proctorSupported, type SecurityLogEntry } from "@/lib/proctoring";
 import { cacheExamPayload, readCachedExam } from "@/lib/offline-exam";
 import { hasActiveRecording, hasPendingRecordings, recordingKey, recoverRecording } from '@/lib/durable-recordings';
@@ -12,6 +14,7 @@ import {
   MOCK_SKILL_LABEL,
   saveMockAnswer,
   singleSectionOf,
+  startMockExam,
   submitMockAttempt,
   submitSkillsFor,
   type MockShapedSection,
@@ -69,6 +72,9 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
   );
   const parts = useMemo(() => buildParts(section), [buildParts, section]);
   const [cachedParts, setCachedParts] = useState<UIPart[] | null>(null);
+  const [cacheChecked, setCacheChecked] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
 
   // Offline-first: the exam the student was given is cached locally the moment
   // the attempt opens, so a restart (or a network drop) never has to rebuild it
@@ -90,16 +96,21 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
   useEffect(() => {
     if (parts.some((part) => part.questions.length > 0)) {
       setCachedParts(null);
+      setCacheChecked(true);
       return;
     }
     let alive = true;
+    setCacheChecked(false);
     void readCachedExam<{ section?: MockShapedSection }>(attemptId)
       .then((cached) => {
         if (!alive || !cached?.section) return;
         const rebuilt = buildParts(cached.section);
         if (rebuilt.some((part) => part.questions.length > 0)) setCachedParts(rebuilt);
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (alive) setCacheChecked(true);
+      });
     return () => {
       alive = false;
     };
@@ -163,6 +174,37 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
         [qid]: `Upload or local cleanup failed (${friendlyError(e)}). Your take is retained; retry the saved recording below.`,
       }));
     } finally { uploading.current.delete(qid); }
+  }
+
+  const questionTotal = effectiveParts.reduce((n, part) => n + part.questions.length, 0);
+  if (questionTotal === 0) {
+    if (!cacheChecked) return <RunnerSkeleton />;
+    const retry = async () => {
+      setRetrying(true);
+      setRetryError(null);
+      try {
+        // Starting the same section again returns the in-progress attempt
+        // with a freshly shaped section from the server.
+        const next = await startMockExam(start.exam.id, {
+          mode: start.mode,
+          flow: start.flowMode,
+          section: start.flowMode === "full_test" ? undefined : skill,
+        });
+        onAdvance?.(next);
+      } catch (e) {
+        setRetryError(friendlyError(e));
+      } finally {
+        setRetrying(false);
+      }
+    };
+    return (
+      <ExamLoadError
+        detail={retryError ?? `${MOCK_SKILL_LABEL[skill]} · ${effectiveParts.length} qism, 0 savol`}
+        retrying={retrying}
+        onRetry={() => void retry()}
+        onBack={onBackToSections}
+      />
+    );
   }
 
   if (!integrity) {

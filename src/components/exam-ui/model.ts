@@ -58,7 +58,7 @@ export interface UIQuestion {
 }
 
 export type SimulatorMode = "cdi" | "dtm";
-export type ContrastTheme = "standard" | "dark" | "grey";
+export type ContrastTheme = "app" | "standard" | "dark" | "grey";
 
 export interface UIPart {
   key: string;
@@ -247,6 +247,8 @@ export function contrastThemePalette(theme: ContrastTheme): { bg: string; text: 
       return { bg: "#09090b", text: "#fef08a", label: "High Contrast" };
     case "grey":
       return { bg: "#2d3139", text: "#f8fafc", label: "Soft Grey" };
+    case "app":
+      return { bg: "#0B0F17", text: "#f3f4f6", label: "Bestway Dark" };
     case "standard":
     default:
       return { bg: "#f4f4f1", text: "#111111", label: "Standard" };

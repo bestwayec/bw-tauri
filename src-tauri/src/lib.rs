@@ -6,6 +6,7 @@ mod logger;
 mod offline_media;
 mod session;
 mod tray;
+mod update_probe;
 mod video_stream;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -179,6 +180,15 @@ fn setup_media_environment() {
     }
 }
 
+/// Second-instance argv entries that carry one of the app's deep-link schemes.
+#[cfg_attr(any(target_os = "android", target_os = "ios"), allow(dead_code))]
+fn is_callback_arg(arg: &str) -> bool {
+    let lower = arg.trim().to_ascii_lowercase();
+    ["bestway-exam:", "bestway:", "bestwayapp:"]
+        .iter()
+        .any(|scheme| lower.starts_with(scheme))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     setup_media_environment();
@@ -200,17 +210,16 @@ pub fn run() {
         }
         // OAuth callback arrives as second-instance argv on Win/Linux
         // (e.g. `bestway-app.exe bestway-exam://auth/callback?code=..`).
-        // Forward it so the frontend `onOpenUrl` + `single-instance`
-        // listeners can complete the exchange.
+        // The single-instance `deep-link` feature already hands these URLs to
+        // the deep-link plugin, which emits `deep-link://new-url` with the
+        // `string[]` payload `onOpenUrl` expects. Emitting that event by hand
+        // here sent a bare string and broke the listener, so only the
+        // app-owned `single-instance` event (always an array) is sent.
         let urls: Vec<String> = args
             .into_iter()
-            .filter(|a| a.starts_with("bestway-exam:"))
+            .filter(|a| is_callback_arg(a))
             .collect();
         if !urls.is_empty() {
-            for url in urls.clone() {
-                // Triggers JS `onOpenUrl` when deep-link plugin listens.
-                let _ = app.emit("deep-link://new-url", url);
-            }
             let _ = app.emit("single-instance", urls);
         }
     }));
@@ -341,7 +350,8 @@ pub fn run() {
             session::auth_refresh,
             session::auth_logout,
             download_offline_video,
-            get_offline_device_fingerprint
+            get_offline_device_fingerprint,
+            update_probe::probe_download_url
         ])
         .build(tauri::generate_context!())
         .expect("error while building Bestway Exam")
@@ -366,4 +376,19 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_callback_arg;
+
+    #[test]
+    fn forwards_only_app_scheme_arguments() {
+        assert!(is_callback_arg("bestway-exam://auth/callback?code=1&state=s"));
+        assert!(is_callback_arg("bestway://auth/callback?code=1"));
+        assert!(is_callback_arg("BestwayApp://auth?code=1"));
+        assert!(!is_callback_arg(r"C:\Program Files\Bestway App\bestway-app.exe"));
+        assert!(!is_callback_arg("--flag"));
+        assert!(!is_callback_arg("https://bestwayec.uz"));
+    }
 }
