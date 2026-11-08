@@ -24,7 +24,8 @@
         "resizable": true,
         "skipTaskbar": false,
         "contentProtected": true,
-        "devtools": false
+        "devtools": false,
+        "backgroundColor": "#0B0F17"
       }
     ],
     "security": {

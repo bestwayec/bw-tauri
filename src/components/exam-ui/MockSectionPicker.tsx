@@ -173,7 +173,11 @@ export function MockSectionBody({ exam, mode, onCancel, onStart, busy, error }: 
                       {MOCK_SKILL_LABEL[skill]} Only
                     </span>
                     <span className="mt-0.5 block text-[11px] text-white/40">
-                      {enabled ? `~${MOCK_SECTION_MINUTES[skill]} min` : "Not in this exam"}
+                      {!enabled
+                        ? "Not in this exam"
+                        : timed
+                          ? `~${MOCK_SECTION_MINUTES[skill]} min`
+                          : "No time limit · practice"}
                     </span>
                   </span>
                 </button>

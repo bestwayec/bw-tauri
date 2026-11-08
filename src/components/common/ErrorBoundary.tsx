@@ -5,6 +5,12 @@ interface Props {
   fallbackTitle?: string;
   fallbackMessage?: string;
   onReset?: () => void;
+  /**
+   * Rendered instead of the default red card when a child throws. Use it for
+   * decorative parts (WebGL splash, particles) where `null` or a static
+   * picture is the right fallback.
+   */
+  fallback?: ReactNode;
 }
 
 interface State {
@@ -33,6 +39,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public render() {
     if (this.state.hasError) {
+      if (this.props.fallback !== undefined) return this.props.fallback;
       return (
         <div className="flex min-h-[220px] w-full flex-col items-center justify-center rounded-2xl border border-red-500/20 bg-red-950/20 p-6 text-center text-slate-200">
           <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10 text-red-400">

@@ -114,14 +114,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.release_tag || github.ref_name }}
+        # Never create a release here. A release created by this job used the
+        # default branch as its commitish (so the desktop publish job refused
+        # it with "Release source commit mismatch"), and the extra
+        # `bestway-app-vX` release it created became GitHub's "Latest" with
+        # only an APK, which made releases/latest/download/latest.json 404 for
+        # every desktop updater. The desktop workflow owns the release; wait
+        # for its draft and attach the APK to it.
         run: |
-          gh release upload "$TAG" bestway-app.apk --clobber || gh release create "$TAG" bestway-app.apk --title "BestWay App $TAG" --notes "Release BestWay Android $TAG" || true
-          ALT_TAG=""
-          if [[ "$TAG" == v* ]]; then
-            ALT_TAG="bestway-app-$TAG"
-          elif [[ "$TAG" == bestway-app-v* ]]; then
-            ALT_TAG="${TAG#bestway-app-}"
-          fi
-          if [ -n "$ALT_TAG" ]; then
-            gh release upload "$ALT_TAG" bestway-app.apk --clobber || gh release create "$ALT_TAG" bestway-app.apk --title "BestWay App $ALT_TAG" --notes "Release BestWay Android $ALT_TAG" || true
-          fi
+          for attempt in $(seq 1 60); do
+            if gh release view "$TAG" --json tagName >/dev/null 2>&1; then
+              gh release upload "$TAG" bestway-app.apk --clobber
+              echo "Attached APK to $TAG"
+              exit 0
+            fi
+            echo "Waiting for the desktop release $TAG (attempt $attempt/60)..."
+            sleep 60
+          done
+          echo "::error::Release $TAG was not created by the desktop workflow within 60 minutes; APK kept as a workflow artifact" >&2
+          exit 1

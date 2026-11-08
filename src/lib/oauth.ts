@@ -257,7 +257,30 @@ export interface DesktopExchangeResponse {
   refreshToken: string;
 }
 
-export async function exchangeCode(code: string, verifier: string, deviceId: string) {
+/**
+ * One-time codes already sent to `/auth/desktop/exchange` in this app run.
+ * The same callback can arrive up to three times (cold-start `getCurrent`,
+ * `onOpenUrl`, and the Windows `single-instance` forward) and a second POST
+ * with a consumed code fails and overwrites the success with an error, so
+ * every caller of the same code shares the first exchange.
+ */
+const exchanges = new Map<string, Promise<DesktopExchangeResponse>>();
+
+export function exchangeCode(code: string, verifier: string, deviceId: string): Promise<DesktopExchangeResponse> {
+  const key = code.trim();
+  const inFlight = exchanges.get(key);
+  if (inFlight) return inFlight;
+  const run = exchangeCodeOnce(key, verifier, deviceId);
+  exchanges.set(key, run);
+  return run;
+}
+
+/** Test hook: forget consumed codes. */
+export function resetExchangedCodesForTests(): void {
+  exchanges.clear();
+}
+
+async function exchangeCodeOnce(code: string, verifier: string, deviceId: string): Promise<DesktopExchangeResponse> {
   const session = await post<DesktopExchangeResponse>(
     "/auth/desktop/exchange",
     { code, verifier, deviceId },
@@ -369,6 +392,17 @@ export function callbackStateError(params: AuthCallbackParams, pending: BrowserL
 export type DeepLinkUnlisten = () => void;
 
 /**
+ * Deep-link event payloads differ between plugin versions and emit paths:
+ * `string[]` from the plugin, a bare `string` from older native code, or
+ * nothing. Iterating a bare string walked its characters and lost the
+ * login callback, so every listener normalizes through here.
+ */
+export function deepLinkUrls(payload: unknown): string[] {
+  const list = Array.isArray(payload) ? payload : typeof payload === "string" ? [payload] : [];
+  return list.filter((u): u is string => typeof u === "string" && isDesktopCallbackUrl(u));
+}
+
+/**
  * Cold-start links: URLs that launched the app (before any listener ran).
  * Returns them (empty when none / outside Tauri).
  */
@@ -376,10 +410,8 @@ export async function readInitialDeepLink(): Promise<string[]> {
   try {
     const mod = await import("@tauri-apps/plugin-deep-link");
     if (typeof mod.getCurrent !== "function") return [];
-    const raw: unknown = await mod.getCurrent();
     // Plugin versions differ: string[] | string | null.
-    const urls: string[] = Array.isArray(raw) ? raw : typeof raw === "string" && raw ? [raw] : [];
-    return urls.filter((u) => typeof u === "string" && isDesktopCallbackUrl(u));
+    return deepLinkUrls(await mod.getCurrent());
   } catch {
     return [];
   }
@@ -410,8 +442,8 @@ export async function waitForDeepLink(timeoutMs = 120_000): Promise<string> {
       finish(() => reject(new Error("Timed out waiting for browser login. Paste the full callback URL manually.")));
     }, timeoutMs);
 
-    void Promise.resolve(mod.onOpenUrl((urls) => {
-      const hit = (urls ?? []).find((u) => typeof u === "string" && isDesktopCallbackUrl(u));
+    void Promise.resolve(mod.onOpenUrl((urls: unknown) => {
+      const hit = deepLinkUrls(urls)[0];
       if (hit) finish(() => resolve(hit));
     })).then(
       (u) => {
@@ -433,10 +465,8 @@ export async function waitForDeepLink(timeoutMs = 120_000): Promise<string> {
 
 export function listenDeepLink(cb: (url: string) => void): Promise<DeepLinkUnlisten> {
   return import("@tauri-apps/plugin-deep-link").then((mod) =>
-    mod.onOpenUrl((urls) => {
-      for (const u of urls ?? []) {
-        if (typeof u === "string" && isDesktopCallbackUrl(u)) cb(u);
-      }
+    mod.onOpenUrl((urls: unknown) => {
+      for (const u of deepLinkUrls(urls)) cb(u);
     }),
   );
 }
@@ -444,15 +474,13 @@ export function listenDeepLink(cb: (url: string) => void): Promise<DeepLinkUnlis
 /**
  * Windows/Linux second-instance fallback: when the app is already running,
  * the OS launches a second process with the callback URL as argv. Rust
- * forwards it via the `single-instance` event (see src-tauri/src/main.rs).
+ * forwards it via the `single-instance` event (see src-tauri/src/lib.rs).
  * Without this, warm-start logins hang forever on "Waiting for browser…".
  */
 export function listenSingleInstance(cb: (url: string) => void): Promise<DeepLinkUnlisten> {
   return import("@tauri-apps/api/event").then((mod) =>
-    mod.listen<string[]>("single-instance", (e) => {
-      for (const u of e.payload ?? []) {
-        if (typeof u === "string" && isDesktopCallbackUrl(u)) cb(u);
-      }
+    mod.listen<unknown>("single-instance", (e) => {
+      for (const u of deepLinkUrls(e.payload)) cb(u);
     }),
   );
 }

@@ -21,15 +21,16 @@ const GroupsResults = lazy(() => import("@/pages/GroupsResults"));
 const CenterOverview = lazy(() => import("@/pages/CenterOverview"));
 const StudentResults = lazy(() => import("@/pages/StudentResults"));
 const BootSplash = lazy(() => import("@/components/BootSplash"));
-const Particles = lazy(() => import("@/components/Particles"));
 import Sidebar, { MobileNavigation } from "@/components/Sidebar";
 import TitleBar from "@/components/TitleBar";
+import LoginBackdrop from "@/components/LoginBackdrop";
+import RunnerSkeleton from "@/components/exam-ui/RunnerSkeleton";
+import { ErrorBoundary } from "@/components/common/ErrorBoundary";
+import { hasWebGL } from "@/lib/webgl";
 import UpdateNotifier from "@/components/UpdateNotifier";
-import UpdateModal from "@/components/UpdateModal";
-import { useAutoUpdater } from "@/hooks/useAutoUpdater";
 import ExitConfirmModal from "@/components/ExitConfirmModal";
 import ReauthModal from "@/components/ReauthModal";
-import { checkForUpdate, getDismissedVersion, type UpdateInfo } from "@/lib/version";
+import { getDismissedVersion, resolveDesktopUpdate, type UpdateInfo } from "@/lib/version";
 import ClickSpark from "@/components/ClickSpark";
 import CrashRecovery from "@/components/CrashRecovery";
 import ResumeExamModal, { persistActiveMockSession, clearActiveMockSession } from "@/components/ResumeExamModal";
@@ -119,7 +120,6 @@ function OnlineDot() {
 
 export default function App() {
   const queryClient = useQueryClient();
-  const autoUpdater = useAutoUpdater(true);
   const programs = usePrograms();
   const [route, setRoute] = useState<Route>("login");
   const [student, setStudent] = useState<Student | null>(null);
@@ -176,6 +176,7 @@ export default function App() {
       typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   );
+  const [webgl] = useState(() => hasWebGL());
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const updateChecked = useRef(false);
   const updateTimer = useRef<number | null>(null);
@@ -185,7 +186,7 @@ export default function App() {
     updateTimer.current = window.setTimeout(() => {
       updateTimer.current = null;
       void (async () => {
-        const info = await checkForUpdate();
+        const info = await resolveDesktopUpdate();
         if (info && getDismissedVersion() !== info.latest) setUpdate(info);
       })();
     }, 3000);
@@ -373,25 +374,7 @@ export default function App() {
         <div className="flex flex-col h-screen overflow-hidden bg-bg text-white">
           <TitleBar examActive={false} />
           <div className="relative flex-1 overflow-y-auto">
-            {!reduceMotion && (
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-0 opacity-85 [mask-image:radial-gradient(ellipse_85%_75%_at_50%_45%,black_30%,transparent_100%)]"
-            >
-              <Suspense fallback={null}>
-                <Particles
-                  particleCount={220}
-                  particleSpread={10}
-                  speed={0.15}
-                  particleColors={["#10B981", "#34D399", "#059669"]}
-                  alphaParticles
-                  particleBaseSize={150}
-                  sizeRandomness={0.8}
-                  cameraDistance={20}
-                />
-              </Suspense>
-            </div>
-          )}
+            <LoginBackdrop webgl={webgl} reduceMotion={reduceMotion} />
           <main className="relative flex min-h-full items-center justify-center p-6">
             <div className="w-full max-w-md">
               <Suspense fallback={null}>
@@ -402,9 +385,11 @@ export default function App() {
           </div>
         </div>
         {showSplash && (
-          <Suspense fallback={null}>
-            <BootSplash exiting={introLeaving} />
-          </Suspense>
+          <ErrorBoundary fallback={null}>
+            <Suspense fallback={null}>
+              <BootSplash exiting={introLeaving} webgl={webgl} />
+            </Suspense>
+          </ErrorBoundary>
         )}
         <CrashRecovery />
       </>
@@ -444,7 +429,7 @@ export default function App() {
           <div className="flex min-h-0 flex-1 flex-col">
             <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <div className="flex min-h-0 flex-1 flex-col">
-                <Suspense fallback={null}>
+                <Suspense fallback={<RunnerSkeleton />}>
                   {activeRoute === "runner" && activeTest && activeStart && (
                     <TestRunner
                       test={activeTest}
@@ -561,11 +546,12 @@ export default function App() {
     </div>
     {update && <UpdateNotifier update={update} onClose={() => setUpdate(null)} deferInstall={examActive} />}
     <ResumeExamModal onResume={handleStartMock} isExamActive={examActive} />
-    <UpdateModal updater={autoUpdater} examActive={examActive} />
     {showSplash && (
-      <Suspense fallback={null}>
-        <BootSplash exiting={introLeaving} />
-      </Suspense>
+      <ErrorBoundary fallback={null}>
+        <Suspense fallback={null}>
+          <BootSplash exiting={introLeaving} webgl={webgl} />
+        </Suspense>
+      </ErrorBoundary>
     )}
     <ExitConfirmModal open={showExitConfirm} onCancel={handleCancelExit} onConfirm={handleConfirmExit} />
     <ReauthModal open={showReauth} phone={student?.phone ?? null} onDone={() => setShowReauth(false)} />

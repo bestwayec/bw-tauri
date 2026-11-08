@@ -13,7 +13,11 @@
       html, body {
         margin: 0;
         height: 100%;
-        background: #0b0d08;
+        /* Same as --bg (styles.css) and the window backgroundColor
+           (tauri.conf.json) so no white or off-black frame shows between
+           window creation, hydration, fullscreen changes and route loads. */
+        background: #0B0F17;
+        color-scheme: dark;
       }
       #root { min-height: 100%; }
       .boot-fallback {
@@ -26,7 +30,7 @@
         gap: 0;
         background:
           radial-gradient(340px 340px at 50% 38%, rgba(137, 243, 54, 0.16), transparent 70%),
-          #0b0d08;
+          #0B0F17;
         color: #fffdf0;
         font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
         text-align: center;
