@@ -105,7 +105,7 @@ jobs:
           sha256sum bestway-app.apk
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bestway-app-apk
           path: bestway-app.apk
