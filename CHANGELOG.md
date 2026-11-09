@@ -1,5 +1,18 @@
 # Changelog — Bestway Exam desktop (`bw-tauri`)
 
+## v1.0.11
+
+### Dashboard
+- The score predictor no longer invents values. Without a scored full mock
+  it shows a dash instead of a 6.5 band / 51 point estimate, hides the CEFR
+  badge and confidence, draws no sample bars and lists no hard-coded weak
+  modules. Weak modules come only from the server's analysis of the
+  student's own answers.
+- The dashboard banner asks for a first full mock instead of showing an
+  estimated level.
+- Works with the web API change where single-section practice never
+  produces an overall prediction (bestwayec/bestway, mobile exam fixes).
+
 ## v1.0.10
 
 ### Updates
