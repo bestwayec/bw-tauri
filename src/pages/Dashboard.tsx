@@ -396,11 +396,15 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
           <div className="space-y-2 md:col-span-8">
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.2)]">
-                ✨ Estimated Level: {cefrBadge} ({program === "MULTILEVEL" ? `${prediction.predictedMultilevelScore}/75 pts` : `Band ${prediction.predictedBand}`})
+                {prediction.hasEvidence
+                  ? <>✨ Estimated Level: {cefrBadge} ({program === "MULTILEVEL" ? `${prediction.predictedMultilevelScore}/75 pts` : `Band ${prediction.predictedBand}`})</>
+                  : <>Daraja hali aniqlanmagan — birinchi to&apos;liq mockni topshiring</>}
               </span>
-              <span className="text-xs text-slate-400">
-                Confidence: {prediction.confidencePct}% · {prediction.attemptsCount} attempts analysed
-              </span>
+              {prediction.hasEvidence && (
+                <span className="text-xs text-slate-400">
+                  Confidence: {prediction.confidencePct}% · {prediction.attemptsCount} attempts analysed
+                </span>
+              )}
             </div>
             <h2 className="text-2xl font-black tracking-tight text-white sm:text-3xl">
               {program === "MULTILEVEL"
