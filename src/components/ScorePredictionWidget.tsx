@@ -23,11 +23,13 @@ export interface ScorePredictionPayload {
   targetProgressPct: number;
   confidencePct: number;
   attemptsCount: number;
+  /** False until at least one scored full mock exists: nothing is predicted. */
+  hasEvidence: boolean;
   history: PredictionAttemptPoint[];
   weakModules: Array<{
     module: string;
     skill: "listening" | "reading" | "writing" | "speaking";
-    accuracyPct: number;
+    accuracyPct: number | null;
     recommendation: string;
   }>;
 }
@@ -122,29 +124,13 @@ export function computeFallbackPrediction(
     targetBand,
     targetMultilevelScore,
     targetProgressPct,
-    confidencePct: history.length >= 3 ? 88 : history.length > 0 ? 72 : 60,
+    confidencePct: history.length >= 3 ? 88 : history.length > 0 ? 72 : 0,
     attemptsCount: scored.length,
+    hasEvidence: history.length > 0,
     history,
-    weakModules: [
-      {
-        module: "Reading Matching Headings",
-        skill: "reading",
-        accuracyPct: 58,
-        recommendation: "Focus on paragraph topic sentences before scanning options.",
-      },
-      {
-        module: "Listening Part 3 (Multiple Choice)",
-        skill: "listening",
-        accuracyPct: 62,
-        recommendation: "Track speaker agreement and distractor transitions.",
-      },
-      {
-        module: "Writing Task 2 Cohesion",
-        skill: "writing",
-        accuracyPct: 66,
-        recommendation: "Use clearer topic sentences and concession clauses.",
-      },
-    ],
+    // Local attempt summaries carry no per-module answers, so no weak module
+    // can be named honestly here; the server analysis supplies them.
+    weakModules: [],
   };
 }
 
@@ -223,13 +209,13 @@ function normalizeServerPrediction(
             return {
               module: w,
               skill: (idx % 2 === 0 ? "reading" : "listening") as "reading" | "listening",
-              accuracyPct: 60,
+              accuracyPct: null,
               recommendation: "Practice targeted timed drills.",
             };
           }
           const obj = (w ?? {}) as Record<string, unknown>;
           return {
-            module: String(obj.module ?? obj.title ?? obj.name ?? "Reading Matching"),
+            module: String(obj.module ?? obj.title ?? obj.name ?? obj.label ?? "—"),
             skill: (obj.skill as "reading" | "listening" | "writing" | "speaking") ?? "reading",
             accuracyPct:
               typeof obj.accuracyPercent === "number"
@@ -238,14 +224,22 @@ function normalizeServerPrediction(
                   ? obj.accuracyPct
                   : typeof obj.accuracy === "number"
                     ? obj.accuracy
-                    : 60,
+                    : null,
             recommendation: String(obj.recommendation ?? obj.tip ?? "Practice targeted timed drills."),
           };
         })
-      : fallback.weakModules;
+      : [];
+
+  // The server is authoritative: it reports no prediction until a full mock
+  // has been scored (single-section practice never produces one).
+  const analysed = typeof raw.attemptsAnalyzed === "number" ? raw.attemptsAnalyzed : null;
+  const serverHasScore = typeof rawMl.predictedScore === "number" || typeof rawIelts.predictedBand === "number";
+  const hasEvidence = analysed != null ? analysed > 0 && serverHasScore : fallback.hasEvidence;
 
   return {
     ...fallback,
+    hasEvidence,
+    attemptsCount: analysed ?? fallback.attemptsCount,
     predictedBand: band,
     predictedMultilevelScore: mlScore,
     cefrLevel,
@@ -291,20 +285,8 @@ export default function ScorePredictionWidget({ program, attempts, onPracticeWea
     ? normalizeServerPrediction(overviewQuery.data.prediction as unknown as Record<string, unknown>, fallback)
     : query.data;
   const data = livePrediction ?? fallback;
-  const chartPoints =
-    data.history.length > 0
-      ? data.history
-      : [
-          { attemptId: "s1", title: "Diagnostic", date: "", ieltsBand: 5.5, multilevelScore: 42 },
-          { attemptId: "s2", title: "Mock 1", date: "", ieltsBand: 6.0, multilevelScore: 48 },
-          {
-            attemptId: "s3",
-            title: "Current Est.",
-            date: "",
-            ieltsBand: data.predictedBand,
-            multilevelScore: data.predictedMultilevelScore,
-          },
-        ];
+  // Only real attempts are charted; no sample bars are invented.
+  const chartPoints = data.hasEvidence ? data.history : [];
 
   return (
     <div
@@ -317,11 +299,13 @@ export default function ScorePredictionWidget({ program, attempts, onPracticeWea
             <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/35 bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-300">
               AI Band & CEFR Predictor
             </span>
-            <span
-              className={`rounded-full border px-2.5 py-0.5 text-[11px] font-extrabold ${CEFR_BADGE_STYLE[data.cefrLevel]}`}
-            >
-              CEFR {data.cefrLevel}
-            </span>
+            {data.hasEvidence && (
+              <span
+                className={`rounded-full border px-2.5 py-0.5 text-[11px] font-extrabold ${CEFR_BADGE_STYLE[data.cefrLevel]}`}
+              >
+                CEFR {data.cefrLevel}
+              </span>
+            )}
           </div>
           <h2 className="mt-1.5 text-base font-extrabold text-white">
             Dual-Scale Exam Score Forecast
@@ -336,14 +320,14 @@ export default function ScorePredictionWidget({ program, attempts, onPracticeWea
           <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3.5 py-2 text-center">
             <p className="text-[10px] font-bold uppercase tracking-wider text-sky-300/80">IELTS Band</p>
             <p className="text-2xl font-black tabular-nums text-white">
-              {data.predictedBand.toFixed(1)}
+              {data.hasEvidence ? data.predictedBand.toFixed(1) : "—"}
               <span className="text-xs font-medium text-white/40"> / 9.0</span>
             </p>
           </div>
           <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2 text-center">
             <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-300/80">Multi-Level</p>
             <p className="text-2xl font-black tabular-nums text-emerald-400">
-              {data.predictedMultilevelScore}
+              {data.hasEvidence ? data.predictedMultilevelScore : "—"}
               <span className="text-xs font-medium text-white/40"> / 75 ball</span>
             </p>
           </div>
@@ -356,12 +340,12 @@ export default function ScorePredictionWidget({ program, attempts, onPracticeWea
           <span className="font-semibold text-white/75">
             Target Progress ({program === "MULTILEVEL" ? `${data.targetMultilevelScore} ball (C1)` : `Band ${data.targetBand.toFixed(1)}`})
           </span>
-          <span className="font-mono font-bold text-emerald-400">{data.targetProgressPct}%</span>
+          <span className="font-mono font-bold text-emerald-400">{data.hasEvidence ? `${data.targetProgressPct}%` : "—"}</span>
         </div>
         <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-white/10">
           <div
             className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-500"
-            style={{ width: `${data.targetProgressPct}%` }}
+            style={{ width: `${data.hasEvidence ? data.targetProgressPct : 0}%` }}
           />
         </div>
       </div>
@@ -372,8 +356,11 @@ export default function ScorePredictionWidget({ program, attempts, onPracticeWea
         <div className="rounded-xl border border-white/10 bg-black/25 p-3.5">
           <div className="flex items-center justify-between">
             <p className="text-xs font-bold text-white/80">Recent Progression (Last {chartPoints.length} Attempts)</p>
-            <span className="text-[10px] text-white/40">Confidence {data.confidencePct}%</span>
+            {data.hasEvidence && <span className="text-[10px] text-white/40">Confidence {data.confidencePct}%</span>}
           </div>
+          {chartPoints.length === 0 && (
+            <p className="mt-3 text-xs text-white/55">Hali to&apos;liq mock natijasi yo&apos;q. Birinchi to&apos;liq imtihondan keyin prognoz chiqadi.</p>
+          )}
           <div className="mt-3 flex h-24 items-end gap-2.5 pt-2">
             {chartPoints.map((pt, i) => {
               const pct = Math.max(15, Math.min(100, Math.round((pt.multilevelScore / 75) * 100)));
@@ -411,6 +398,9 @@ export default function ScorePredictionWidget({ program, attempts, onPracticeWea
               </button>
             )}
           </div>
+          {data.weakModules.length === 0 && (
+            <p className="mt-2.5 text-xs text-white/55">Zaif bo&apos;limlar sizning javoblaringizdan aniqlanadi — hozircha ma&apos;lumot yetarli emas.</p>
+          )}
           <ul className="mt-2.5 space-y-2">
             {data.weakModules.slice(0, 3).map((w) => (
               <li
@@ -422,7 +412,7 @@ export default function ScorePredictionWidget({ program, attempts, onPracticeWea
                   <p className="truncate text-[11px] text-white/45">{w.recommendation}</p>
                 </div>
                 <span className="shrink-0 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 font-mono text-[11px] font-bold text-amber-300">
-                  {w.accuracyPct}%
+                  {w.accuracyPct == null ? "—" : `${w.accuracyPct}%`}
                 </span>
               </li>
             ))}

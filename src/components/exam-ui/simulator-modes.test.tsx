@@ -228,7 +228,16 @@ describe("Score Prediction CEFR Scale (0–75 ball) & Dual-Scale Conversion", ()
     );
     expect(pred.predictedMultilevelScore).toBe(62);
     expect(pred.cefrLevel).toBe("C1");
-    expect(pred.weakModules.length).toBeGreaterThan(0);
+    expect(pred.hasEvidence).toBe(true);
+    // No invented weak modules: local summaries carry no per-module answers.
+    expect(pred.weakModules).toEqual([]);
+  });
+
+  it("predicts nothing when there is no scored attempt", () => {
+    const pred = computeFallbackPrediction([], "MULTILEVEL");
+    expect(pred.hasEvidence).toBe(false);
+    expect(pred.weakModules).toEqual([]);
+    expect(pred.history).toEqual([]);
   });
 });
 
