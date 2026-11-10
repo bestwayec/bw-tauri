@@ -2,6 +2,7 @@ import { gapNumbersIn } from "@/components/exam/GappedContent";
 import { materialOwnerId, normalizeKind } from "@/lib/exam-types";
 import {
   mockGroupAudioUrl,
+  normalizeMockSection,
   resolveMockMediaUrl,
   type MockShapedQuestion,
   type MockShapedSection,
@@ -261,46 +262,54 @@ export function mockSectionToParts(
   attemptId: string,
   timed: boolean,
 ): UIPart[] {
-  const rawGroups = (section?.groups || (section as any)?.parts || []);
-  const groups = [...rawGroups].sort((a: any, b: any) => (a.sortOrder ?? a.order ?? 0) - (b.sortOrder ?? b.order ?? 0));
+  const norm = normalizeMockSection(section);
+  const groups = norm.groups;
   let n = 0;
   return groups.map((g: any, gi: number) => {
     const rawQuestions = (g?.questions || []);
     const questions: UIQuestion[] = [...rawQuestions]
-      .sort((a: any, b: any) => (a.sortOrder ?? a.order ?? 0) - (b.sortOrder ?? b.order ?? 0) || (a.number ?? 0) - (b.number ?? 0))
+      .sort((a: any, b: any) => (a.sortOrder ?? a.order ?? 0) - (b.sortOrder ?? b.order ?? 0) || (a.number ?? a.question_number ?? 0) - (b.number ?? b.question_number ?? 0))
       .map((q) => ({ ...toUIQuestion(q), number: ++n }));
     const startSec = parseAudioStartSec(g.audioStartSec, g.stimulusRef);
     return {
       key: g.id || g.key || `part-${gi + 1}`,
-      label: (section?.skill === 'speaking' || section?.skill === 'writing') && questions[0]?.guidance
+      label: (norm.skill === 'speaking' || norm.skill === 'writing') && questions[0]?.guidance
         ? questions[0].guidance.displayLabel ?? `Part ${questions[0].guidance.taskKey}`
-        : g.contentLayout === 'multi_extract' ? `Extract ${gi + 1}` : (g.label || partLabel(section?.skill || 'listening', gi)),
+        : g.contentLayout === 'multi_extract' ? `Extract ${gi + 1}` : (g.label || partLabel(norm.skill || 'listening', gi)),
       title: g.title ?? null,
       instructions: g.instructions ?? null,
       passageText: g.passageText ?? g.contentHtml ?? null,
       contentHtml: g.contentHtml ?? g.passageText ?? null,
       contentLayout: g.contentLayout ?? null,
       optionsReusable: g.optionsReusable,
-      audioUrl: mockGroupAudioUrl(g, attemptId, timed && section?.skill === "listening") ?? g.audioUrl ?? null,
+      audioUrl: mockGroupAudioUrl(g, attemptId, timed && norm.skill === "listening") ?? g.audioUrl ?? null,
       ...(startSec != null ? { audioStartSec: startSec } : {}),
       ...(g.stimulusRef ? { stimulusRef: g.stimulusRef } : {}),
       imageUrl: g.imageUrl ? resolveMockMediaUrl(g.imageUrl) : null,
-      strictAudio: timed && section?.skill === "listening" && !!(mockGroupAudioUrl(g, attemptId, true) || g.audioUrl || g.audioKey),
-      ...(questions[0]?.guidance && timed && section?.skill === 'listening' ? { multilevelAudio: { attemptId, groupId: g.id } } : {}),
+      strictAudio: timed && norm.skill === "listening" && !!(mockGroupAudioUrl(g, attemptId, true) || g.audioUrl || g.audioKey),
+      ...(questions[0]?.guidance && timed && norm.skill === 'listening' ? { multilevelAudio: { attemptId, groupId: g.id } } : {}),
       questions,
     };
   });
 }
 
 function toUIQuestion(q: any): Omit<UIQuestion, "number"> {
+  let options: string[] | null = null;
+  const rawOpts = q.options ?? (q.payload?.options ?? null);
+  if (Array.isArray(rawOpts)) {
+    options = rawOpts.map((opt) => (typeof opt === "string" ? opt : (opt as any)?.text ?? (opt as any)?.label ?? (opt as any)?.value ?? String(opt)));
+  } else if (rawOpts && typeof rawOpts === "object") {
+    options = Object.values(rawOpts).map((v) => (typeof v === "string" ? v : String(v)));
+  }
+
   return {
-    id: q.id,
-    kind: mockKindOf(q.kind || q.type || q.questionType),
-    prompt: q.prompt ?? q.text ?? "",
-    options: q.options ?? (q.payload?.options ?? null),
-    points: q.points ?? 1,
-    wordLimit: q.wordLimit ?? (q.payload?.wordLimit ?? null),
-    answerRule: q.answerRule ?? q.payload?.answerRule,
+    id: String(q.id ?? q._id ?? q.question_id ?? ""),
+    kind: mockKindOf(q.kind || q.type || q.question_type || q.questionType),
+    prompt: q.prompt ?? q.text ?? q.question ?? "",
+    options,
+    points: q.points ?? q.maxScore ?? q.max_score ?? 1,
+    wordLimit: q.wordLimit ?? (q.word_limit ?? (q.payload?.wordLimit ?? null)),
+    answerRule: q.answerRule ?? q.answer_rule ?? q.payload?.answerRule,
     guidance: q.guidance ?? q.payload?.guidance,
   };
 }

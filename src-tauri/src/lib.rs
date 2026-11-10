@@ -295,6 +295,7 @@ pub fn run() {
                     // keep running in the background instead of exiting.
                     api.prevent_close();
                     if locked {
+                        let _ = window.emit("exam:close-requested", ());
                         let _ = window.show();
                         let _ = window.set_focus();
                     } else if let Err(e) = window.hide() {

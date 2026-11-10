@@ -3,7 +3,7 @@ import { useBlobMedia } from "@/lib/media";
 import { getVolume, setVolume } from "@/lib/volume";
 import { fmtCountdown, parseAudioStartSec } from "./model";
 
-const REVIEW_SEC = 120;
+const REVIEW_SEC = 45;
 
 type Props = {
   /** Remote group audio URL (may include ?attemptId= for replay counting). */
@@ -55,9 +55,12 @@ export default function ListeningEngine({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [started, setStarted] = useState(false);
   const [ended, setEnded] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
   const [reviewLeft, setReviewLeft] = useState<number | null>(null);
   const [vol, setVol] = useState(() => getVolume());
   const doneRef = useRef(false);
+  const lastTimeRef = useRef(0);
   const onEndedRef = useRef(onEnded);
   onEndedRef.current = onEnded;
   const onReviewRef = useRef(onReviewComplete);
@@ -68,8 +71,11 @@ export default function ListeningEngine({
   useEffect(() => {
     setStarted(false);
     setEnded(false);
+    setCurrentTime(0);
+    setDuration(0);
     setReviewLeft(null);
     doneRef.current = false;
+    lastTimeRef.current = 0;
   }, [src]);
 
   // When switching parts on a shared single audio track (or when startSec changes),
@@ -117,12 +123,41 @@ export default function ListeningEngine({
   function handleEnded() {
     setEnded(true);
     onEndedRef.current?.();
-    if (strict) setReviewLeft(REVIEW_SEC);
+    if (strict) setReviewLeft(REVIEW_SEC); // Official 45s review buffer before auto-transition
   }
 
   function handleLoadedMetadata() {
+    if (audioRef.current && audioRef.current.duration && !isNaN(audioRef.current.duration)) {
+      setDuration(audioRef.current.duration);
+    }
     if (resolvedStartSec != null && audioRef.current) {
       seekAudioToPartStart(audioRef.current, resolvedStartSec);
+    }
+  }
+
+  function handleTimeUpdate() {
+    if (!audioRef.current) return;
+    const cur = audioRef.current.currentTime;
+    setCurrentTime(cur);
+    lastTimeRef.current = cur;
+    if (audioRef.current.duration && !isNaN(audioRef.current.duration)) {
+      setDuration(audioRef.current.duration);
+    }
+  }
+
+  // Anti-tamper: prevent pausing while playing in strict mode
+  function handlePause() {
+    if (strict && started && !ended && audioRef.current) {
+      void audioRef.current.play().catch(() => undefined);
+    }
+  }
+
+  // Anti-tamper: prevent manual seeking in strict mode
+  function handleSeeking() {
+    if (strict && started && !ended && audioRef.current) {
+      if (Math.abs(audioRef.current.currentTime - lastTimeRef.current) > 2) {
+        audioRef.current.currentTime = lastTimeRef.current;
+      }
     }
   }
 
@@ -175,6 +210,8 @@ export default function ListeningEngine({
     );
   }
 
+  const progressPct = duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0;
+
   return (
     <div className="exam-audio exam-audio-strict">
       {/* Hidden element: no native controls means no pause/seek UI. */}
@@ -185,6 +222,9 @@ export default function ListeningEngine({
         preload="auto"
         controlsList="nodownload noplaybackrate"
         onLoadedMetadata={handleLoadedMetadata}
+        onTimeUpdate={handleTimeUpdate}
+        onPause={handlePause}
+        onSeeking={handleSeeking}
         onEnded={handleEnded}
         onContextMenu={(e) => e.preventDefault()}
       >
@@ -198,11 +238,33 @@ export default function ListeningEngine({
           </span>
         )}
       </div>
-      <div className="exam-audio-row">
-        <button type="button" onClick={() => void playOnce()} disabled={started} className="exam-btn-primary">
-          {started ? (ended ? "Played once" : "Playing… (once only)") : "▶ Play audio (once only)"}
+
+      {/* Real-time Tamper-Proof Progress Bar */}
+      <div className="w-full my-2 pointer-events-none select-none">
+        <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden border border-white/5">
+          <div
+            className="bg-emerald-500 h-full transition-all duration-150 ease-linear rounded-full shadow-[0_0_8px_rgba(16,185,129,0.5)]"
+            style={{ width: `${progressPct}%` }}
+          />
+        </div>
+        <div className="flex justify-between items-center text-[10px] font-mono text-white/60 mt-1">
+          <span>{fmtCountdown(currentTime * 1000)}</span>
+          <span>{duration > 0 ? fmtCountdown(duration * 1000) : "--:--"}</span>
+        </div>
+      </div>
+
+      <div className="exam-audio-row flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={() => void playOnce()}
+          disabled={started}
+          className={`exam-btn-primary px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            started ? "opacity-60 cursor-not-allowed" : "shadow-lg shadow-emerald-500/20 active:scale-95"
+          }`}
+        >
+          {started ? (ended ? "Audio completed (played once)" : "Playing… (tamper-proof)") : "▶ Play audio (strictly once)"}
         </button>
-        <label className="exam-vol">
+        <label className="exam-vol flex items-center gap-1.5 text-xs text-white/70">
           🔊
           <input
             type="range"
@@ -215,13 +277,16 @@ export default function ListeningEngine({
           />
         </label>
         {reviewLeft != null && reviewLeft > 0 && (
-          <span className="exam-review" aria-live="polite">
-            Review: {fmtCountdown(reviewLeft * 1000)}
+          <span
+            className="exam-review px-3 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-mono font-bold animate-pulse"
+            aria-live="polite"
+          >
+            Review: {fmtCountdown(reviewLeft * 1000)} (Auto-next)
           </span>
         )}
       </div>
-      <p className="exam-audio-note">
-        In this timed section the recording plays <strong>once only</strong>.
+      <p className="exam-audio-note text-[11px] text-white/50 mt-1">
+        In this official section, the recording plays <strong>strictly once</strong>. Seeking and pausing are disabled.
       </p>
     </div>
   );

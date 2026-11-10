@@ -539,7 +539,12 @@ textarea.field {
   font-variant-numeric: tabular-nums;
 }
 .exam-timer-urgent {
-  color: var(--ex-danger);
+  color: #f59e0b;
+  animation: pulse-urgent 1.2s infinite alternate ease-in-out;
+}
+@keyframes pulse-urgent {
+  0% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0.65; transform: scale(1.04); }
 }
 .exam-savestate {
   font-size: 11px;
@@ -659,8 +664,28 @@ textarea.field {
   padding: 16px;
 }
 .exam-divider {
+  width: 6px;
   cursor: col-resize;
   background: var(--ex-line);
+  position: relative;
+  transition: background-color 0.15s ease;
+  user-select: none;
+  z-index: 10;
+}
+.exam-divider:hover,
+.exam-divider:active {
+  background: #10b981;
+}
+.exam-divider::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.4);
+  border-radius: 2px;
 }
 .exam-single {
   min-height: 0;

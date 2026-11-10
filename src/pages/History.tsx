@@ -17,10 +17,12 @@ function statusBadge(status: AttemptSummary["status"]) {
   if (status === "completed")
     return "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30";
   if (status === "grading") return "bg-amber-400/10 text-amber-200 ring-amber-400/30";
+  if (status === "in_progress") return "bg-amber-400/15 text-amber-300 ring-amber-400/30";
   return "bg-sky-400/10 text-sky-200 ring-sky-400/30";
 }
 
 function scoreText(a: AttemptSummary): string {
+  if (a.status === "in_progress") return "In Progress";
   if (a.totalScore != null) return `${a.totalScore} pts`;
   if (a.autoScore != null) return `${a.autoScore} pts (auto)`;
   if (a.status === "grading") return "grading…";
@@ -98,7 +100,7 @@ export default function History({ refreshKey = 0, onStats }: Props) {
         )}
       </div>
 
-      <div className="mt-4"><MockAssessmentHistory key={program} program={program} refreshKey={refreshKey} /></div>
+      <div className="mt-4"><MockAssessmentHistory key={program} program={program} refreshKey={refreshKey} hideHeader /></div>
       <h2 className="mt-5 font-bold text-slate-100">Practice test attempts</h2><p className="mt-1 text-xs text-slate-400">Practice points are separate from full mock {program === 'IELTS' ? 'bands' : '/75 estimates'}.</p>
 
       {loading && (

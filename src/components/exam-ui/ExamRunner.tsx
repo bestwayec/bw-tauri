@@ -400,10 +400,18 @@ export default function ExamRunner(p: ExamRunnerProps) {
 
   const part = p.parts[partIdx] ?? null;
   const viewportWidth = useViewportWidth();
-  // Reading gets the familiar two-pane CBT view on a wide window, and stacks the
-  // passage above the questions when the window is too narrow for two readable
-  // columns. In DTM mode, Listening/Reading both use vertical split-screen.
-  const layout = examLayout(!!part?.passageText, viewportWidth, simulatorMode);
+  const isMapMatching = Boolean(
+    part?.imageUrl &&
+      (part.questions.some((q) => q.kind === "map_label") ||
+        part.label.toLowerCase().includes("part 4") ||
+        part.label.toLowerCase().includes("map")),
+  );
+  const hasPassageOrSplitMaterial = Boolean(
+    part?.passageText ||
+      isMapMatching ||
+      (p.skill === "writing" && part?.instructions),
+  );
+  const layout = examLayout(hasPassageOrSplitMaterial, viewportWidth, simulatorMode);
   const split = layout === "split";
 
   // ---- autosave (debounced per answer, bulk flush, offline queue) ----
@@ -528,8 +536,12 @@ export default function ExamRunner(p: ExamRunnerProps) {
   /** Manual submit opens the confirmation summary; the timer submits directly. */
   const requestSubmit = useCallback(() => {
     if (submittingRef.current || submittedRef.current) return;
+    if (total === 0) {
+      setError("Savollar mavjud emas yoki yuklanmadi (0/0). Topshirish imkonsiz.");
+      return;
+    }
     setConfirmOpen(true);
-  }, []);
+  }, [total]);
 
   useEffect(() => {
     if (p.deadlineIso == null) return;
@@ -662,6 +674,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
         candidateName={p.candidateName}
         sectionTitle={p.sectionTitle}
         partLabel={part.label}
+        skill={p.skill}
         remainingMs={remaining}
         timeUp={timeUp}
         volumeVisible={p.showVolume}
@@ -680,12 +693,39 @@ export default function ExamRunner(p: ExamRunnerProps) {
         saveState={saveState}
         onHelp={() => setHelpOpen(true)}
         onExit={p.onExit}
+        onSubmit={requestSubmit}
+        partsNav={{
+          parts: p.parts.map((prt, i) => ({ label: prt.label, active: i === partIdx })),
+          onSelect: (idx) => gotoPart(idx),
+        }}
       />
 
       {timeUp && (
         <p className="exam-timeup" role="alert">
           Time is up — submitting now. Your saved answers are safe.
         </p>
+      )}
+
+      {part?.audioUrl && (
+        <div className="shrink-0 border-b border-[var(--ex-line)] bg-[var(--ex-pane)] px-4 py-2 z-20">
+          {part.multilevelAudio ? (
+            <MultilevelListening
+              key={`${part.multilevelAudio.attemptId}:${part.multilevelAudio.groupId}`}
+              prepare={() => post<MediaPhase>(`/mock/attempts/${part.multilevelAudio!.attemptId}/listening/${part.multilevelAudio!.groupId}/prepare`, {})}
+              play={() => post<MediaPhase>(`/mock/attempts/${part.multilevelAudio!.attemptId}/listening/${part.multilevelAudio!.groupId}/play`, {})}
+              load={() => fetchAuthenticatedMedia(part.audioUrl!)}
+            />
+          ) : (
+            <ListeningEngine
+              src={part.audioUrl}
+              title={part.title ?? part.label}
+              strict={part.strictAudio}
+              {...(part.audioStartSec != null ? { audioStartSec: part.audioStartSec } : {})}
+              {...(part.stimulusRef != null ? { stimulusRef: part.stimulusRef } : {})}
+              onReviewComplete={() => stepPart(1)}
+            />
+          )}
+        </div>
       )}
 
       {p.skill === "speaking" && <MicCheck />}
@@ -712,6 +752,19 @@ export default function ExamRunner(p: ExamRunnerProps) {
                     noteOpen={noteOpen}
                     onToggleNote={() => setNoteOpen((v) => !v)}
                   />
+                ) : isMapMatching && part.imageUrl ? (
+                  <div className="flex flex-col items-center justify-center p-4">
+                    <BlobImage
+                      src={part.imageUrl}
+                      alt="Map / Diagram"
+                      className="exam-figure max-h-[75vh] w-auto object-contain rounded-xl border border-white/10"
+                    />
+                    {part.instructions && (
+                      <p className="exam-group-instr mt-3" style={{ fontSize }}>
+                        {part.instructions}
+                      </p>
+                    )}
+                  </div>
                 ) : (
                   <div className="space-y-3">
                     {part.instructions && (
@@ -763,6 +816,8 @@ export default function ExamRunner(p: ExamRunnerProps) {
                   flags={flags}
                   uploadNotes={uploadNotes}
                   fontSize={fontSize}
+                  hideAudio={Boolean(part?.audioUrl)}
+                  isMapMatching={isMapMatching}
                   onAnswer={setAnswer}
                   onToggleFlag={toggleFlagById}
                   onSpeakBlob={p.onSpeakBlob}
@@ -807,6 +862,8 @@ export default function ExamRunner(p: ExamRunnerProps) {
               flags={flags}
               uploadNotes={uploadNotes}
               fontSize={fontSize}
+              hideAudio={Boolean(part?.audioUrl)}
+              isMapMatching={false}
               onAnswer={setAnswer}
               onToggleFlag={toggleFlagById}
               onSpeakBlob={p.onSpeakBlob}
@@ -858,6 +915,13 @@ export default function ExamRunner(p: ExamRunnerProps) {
         total={total}
         flagged={flaggedArr.filter(Boolean).length}
         unansweredNumbers={allQuestions.filter((_, i) => !answeredArr[i]).map((q) => q.number)}
+        questions={allQuestions.map((q, i) => ({
+          number: q.number,
+          globalIndex: i,
+          answered: Boolean(answeredArr[i]),
+          flagged: Boolean(flaggedArr[i]),
+        }))}
+        onJumpToQuestion={(_num, idx) => jumpQ(idx)}
         submitting={submitting}
         submitLabel={p.submitLabel}
         onCancel={() => setConfirmOpen(false)}
@@ -935,6 +999,8 @@ export function PartQuestions(props: {
   flags: Record<string, boolean>;
   uploadNotes: Record<string, string>;
   fontSize: number;
+  hideAudio?: boolean;
+  isMapMatching?: boolean;
   onAnswer: (qid: string, value: string, immediate?: boolean) => void;
   onToggleFlag: (qid: string) => void;
   onSpeakBlob?: (qid: string, blob: Blob) => void;
@@ -944,7 +1010,7 @@ export function PartQuestions(props: {
   const questionsById = new Map(part.questions.map((q) => [q.id, q]));
   return (
     <div>
-      {part.audioUrl && (
+      {!props.hideAudio && part.audioUrl && (
         part.multilevelAudio ? <MultilevelListening
           key={`${part.multilevelAudio.attemptId}:${part.multilevelAudio.groupId}`}
           prepare={() => post<MediaPhase>(`/mock/attempts/${part.multilevelAudio!.attemptId}/listening/${part.multilevelAudio!.groupId}/prepare`, {})}
@@ -958,7 +1024,7 @@ export function PartQuestions(props: {
           {...(part.stimulusRef != null ? { stimulusRef: part.stimulusRef } : {})}
         />
       )}
-      {part.imageUrl && !part.questions.some((q) => q.kind === "map_label") && (
+      {part.imageUrl && !props.isMapMatching && !part.questions.some((q) => q.kind === "map_label") && (
         <BlobImage src={part.imageUrl} alt="" className="exam-figure" />
       )}
       {props.gapped && part.contentHtml && (

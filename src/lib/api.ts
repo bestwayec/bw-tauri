@@ -145,15 +145,21 @@ function isAuthPath(path: string): boolean {
 }
 
 function normalizeApiPath(path: string): string {
-  if (path.startsWith("/api/v1/")) return path.slice("/api/v1".length);
-  if (path.startsWith("/v1/")) return path.slice("/v1".length);
-  return path.startsWith("/") ? path : `/${path}`;
+  if (path.startsWith("http://") || path.startsWith("https://")) {
+    return path;
+  }
+  let clean = path;
+  if (clean.startsWith("/api/v1/")) clean = clean.slice("/api/v1".length);
+  else if (clean.startsWith("/api/")) clean = clean.slice("/api".length);
+  else if (clean.startsWith("/v1/")) clean = clean.slice("/v1".length);
+  return clean.startsWith("/") ? clean : `/${clean}`;
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { query, body, token, headers, _retried, timeoutMs: requestedTimeout, signal: callerSignal, ...rest } = options as RequestOptions & { signal?: AbortSignal };
   const cleanPath = normalizeApiPath(path);
-  const url = `${API_BASE_URL}${cleanPath}${buildQuery(query)}`;
+  const isAbsolute = cleanPath.startsWith("http://") || cleanPath.startsWith("https://");
+  const url = isAbsolute ? `${cleanPath}${buildQuery(query)}` : `${API_BASE_URL}${cleanPath}${buildQuery(query)}`;
 
   const accessToken = token !== undefined ? token : getAccessTokenCached();
   const isMultipart = typeof FormData !== 'undefined' && body instanceof FormData;
@@ -176,7 +182,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   try {
     res = await fetch(url, {
       ...rest,
-      redirect: "error",
+      redirect: "follow",
       signal: controller.signal,
       headers: {
         ...attemptSignatureHeaders(cleanPath),
@@ -190,6 +196,9 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") {
       throw { code: "HTTP_TIMEOUT", message: `Request timed out after ${timeoutMs}ms`, status: 408 } as ApiError;
+    }
+    if (e instanceof TypeError && (e.message.includes("fetch") || e.message.includes("NetworkError") || e.message.includes("Load failed"))) {
+      throw { code: "NETWORK_ERROR", message: "Failed to connect to backend server. Check connection.", status: 0 } as ApiError;
     }
     throw e;
   } finally {
@@ -266,11 +275,12 @@ export async function downloadBlob(
   query?: QueryParams,
 ): Promise<{ blob: Blob; filename?: string }> {
   const cleanPath = normalizeApiPath(path);
-  const url = `${API_BASE_URL}${cleanPath}${buildQuery(query)}`;
+  const isAbsolute = cleanPath.startsWith("http://") || cleanPath.startsWith("https://");
+  const url = isAbsolute ? `${cleanPath}${buildQuery(query)}` : `${API_BASE_URL}${cleanPath}${buildQuery(query)}`;
   const accessToken = getAccessTokenCached();
   const res = await fetch(url, {
     method: "GET",
-    redirect: "error",
+    redirect: "follow",
     headers: {
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     },
