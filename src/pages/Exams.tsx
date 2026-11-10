@@ -376,7 +376,7 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
         </div>
       )}
 
-      {!loading && testsError && mocksError && (
+      {!loading && testsError && mocksError && allMocks.length === 0 && (
         <div className="mt-4 space-y-3" role="alert">
           <SourceErrorCard
             source="Mock exams"
@@ -386,7 +386,7 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
         </div>
       )}
 
-      {!loading && !(testsError && mocksError) && allMocks.length === 0 && (
+      {!loading && (!(testsError && mocksError) || allMocks.length > 0) && allMocks.length === 0 && (
         <div className="mt-4 rounded-2xl border border-emerald-500/15 bg-[#111827] p-8 text-center">
           <p className="mx-auto grid h-12 w-12 place-items-center rounded-2xl border border-emerald-500/25 bg-emerald-500/10 text-xl">
             🎯

@@ -3,9 +3,10 @@ import { APP_VERSION } from "@/lib/version";
 
 export interface TitleBarProps {
   examActive?: boolean;
+  onCloseRequest?: () => void;
 }
 
-export default function TitleBar({ examActive = false }: TitleBarProps) {
+export default function TitleBar({ examActive = false, onCloseRequest }: TitleBarProps) {
   const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [isMaximized, setIsMaximized] = useState(false);
 
@@ -60,6 +61,7 @@ export default function TitleBar({ examActive = false }: TitleBarProps) {
 
   const handleClose = async () => {
     if (examActive) {
+      onCloseRequest?.();
       return;
     }
     try {
@@ -104,7 +106,7 @@ export default function TitleBar({ examActive = false }: TitleBarProps) {
 
       <div className="flex items-center gap-3">
         <div
-          className="flex items-center gap-1.5 text-[11px] text-white/50"
+          className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10 text-[11px] text-white/70"
           title={online ? "Online" : "Offline"}
         >
           <span
@@ -112,7 +114,7 @@ export default function TitleBar({ examActive = false }: TitleBarProps) {
               online ? "bg-emerald-400 shadow-[0_0_8px_#34d399]" : "bg-amber-400 shadow-[0_0_8px_#fbbf24]"
             }`}
           />
-          <span className="hidden sm:inline text-[10px] font-medium uppercase tracking-wider text-white/60">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-white/70">
             {online ? "Online" : "Offline"}
           </span>
         </div>

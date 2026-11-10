@@ -40,13 +40,15 @@ import { useSessionStore } from "@/lib/session-store";
 import { tryTauriInvoke } from "@/hooks/useLockdown";
 import { usePrograms } from '@/lib/programs';
 import type { StartResult, TestListItem } from "@/lib/tests";
-import { targetSectionOf } from "@/lib/mocks";
-import type {
-  MockExamListItem,
-  MockShapedSection,
-  MockSkill,
-  MockStartResult,
-  MockSubmitResult,
+import {
+  normalizeMockSection,
+  normalizeMockSkill,
+  targetSectionOf,
+  type MockExamListItem,
+  type MockShapedSection,
+  type MockSkill,
+  type MockStartResult,
+  type MockSubmitResult,
 } from "@/lib/mocks";
 
 export type Route =
@@ -94,29 +96,6 @@ const TITLES: Record<Exclude<Route, "login">, string> = {
   studentResults: "Student Results",
 };
 
-function OnlineDot() {
-  const [online, setOnline] = useState(
-    () => (typeof navigator === "undefined" ? true : navigator.onLine),
-  );
-  useEffect(() => {
-    const up = () => setOnline(true);
-    const down = () => setOnline(false);
-    window.addEventListener("online", up);
-    window.addEventListener("offline", down);
-    return () => {
-      window.removeEventListener("online", up);
-      window.removeEventListener("offline", down);
-    };
-  }, []);
-  return (
-    <span className="flex items-center gap-1.5 text-[11px] text-white/45">
-      <span
-        className={`h-2 w-2 rounded-full ${online ? "bg-[#10B981] shadow-[0_0_8px_#10B981]" : "bg-red-400"}`}
-      />
-      {online ? "Online" : "Offline"}
-    </span>
-  );
-}
 
 export default function App() {
   const queryClient = useQueryClient();
@@ -266,6 +245,54 @@ export default function App() {
     return () => window.removeEventListener("exam:reauth-required", onReauth);
   }, []);
 
+  useEffect(() => {
+    const isExamActive =
+      route === "runner" ||
+      route === "mockSections" ||
+      route === "mockRunner" ||
+      route === "locked";
+    if (!isExamActive) return;
+
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "F5" || ((e.ctrlKey || e.metaKey) && (e.key === "r" || e.key === "R"))) {
+        e.preventDefault();
+        return;
+      }
+      if (
+        (e.altKey && (e.key === "F4" || e.keyCode === 115)) ||
+        ((e.ctrlKey || e.metaKey) && (e.key === "w" || e.key === "W"))
+      ) {
+        e.preventDefault();
+        setShowExitConfirm(true);
+      }
+    };
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+
+    window.addEventListener("keydown", handleKey, { capture: true });
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    let unlistenClose: (() => void) | null = null;
+    void (async () => {
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        unlistenClose = await listen("exam:close-requested", () => {
+          setShowExitConfirm(true);
+        });
+      } catch {
+        /* outside Tauri runtime */
+      }
+    })();
+
+    return () => {
+      window.removeEventListener("keydown", handleKey, { capture: true });
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      unlistenClose?.();
+    };
+  }, [route]);
+
   const handleStartExam = (test: TestListItem, start: StartResult) => {
     setActiveTest(test);
     setActiveStart(start);
@@ -285,7 +312,10 @@ export default function App() {
     setActiveMock(mock);
     setActiveMockStart(start);
     const wanted = targetSectionOf(start, chosen);
-    const section = wanted ? start.exam.sections.find((s) => s.skill === wanted) ?? null : null;
+    const rawSection = wanted
+      ? start.exam.sections.find((s) => normalizeMockSkill(s.skill ?? (s as any).section_type ?? (s as any).sectionType) === wanted) ?? null
+      : null;
+    const section = rawSection ? normalizeMockSection(rawSection) : null;
     setActiveMockSection(section);
     setLastMockResult(null);
     setLastScore(null);
@@ -399,7 +429,7 @@ export default function App() {
   return (
     <>
     <div className="flex flex-col h-screen overflow-hidden">
-      <TitleBar examActive={examActive} />
+      <TitleBar examActive={examActive} onCloseRequest={() => setShowExitConfirm(true)} />
       <div className="app-bg app-grid flex flex-1 min-h-0 overflow-hidden text-white">
       {showChrome && (
         <Sidebar
@@ -413,14 +443,11 @@ export default function App() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         {showChrome && (
-          <div className="flex shrink-0 items-center gap-3 border-b border-emerald-500/15 bg-[#0B0F17]/90 px-6 py-3 backdrop-blur-xl 2xl:px-10">
+          <div className="flex shrink-0 items-center justify-between border-b border-emerald-500/15 bg-[#0B0F17]/90 px-6 py-3 backdrop-blur-xl 2xl:px-10">
             <p className="text-[11px] text-white/35">
               Bestway Exam <span className="mx-1 text-white/20">/</span>{" "}
               <span className="font-semibold text-white/75">{TITLES[activeRoute]}</span>
             </p>
-            <div className="ml-auto">
-              <OnlineDot />
-            </div>
           </div>
         )}
         {showChrome && <MobileNavigation route={activeRoute} role={student?.role} onNavigate={navigate} />}
@@ -458,7 +485,24 @@ export default function App() {
                       onExit={handleExitExam}
                       onBackToSections={() => navigate("mockSections")}
                       onFinish={handleFinishMock}
-                      onAdvance={(next) => { setActiveMockStart(next); setActiveMockSection(next.exam.sections.find((s) => s.skill === next.currentSkill) ?? null); }}
+                      onAdvance={(next) => {
+                        const normalizedSections = next.exam.sections.map(normalizeMockSection);
+                        const normalizedNext: MockStartResult = {
+                          ...next,
+                          exam: {
+                            ...next.exam,
+                            sections: normalizedSections,
+                          },
+                        };
+                        setActiveMockStart(normalizedNext);
+                        const nextTarget =
+                          normalizedSections.find(
+                            (s) => normalizeMockSkill(s.skill) === normalizeMockSkill(next.currentSkill),
+                          ) ??
+                          normalizedSections[0] ??
+                          null;
+                        setActiveMockSection(nextTarget);
+                      }}
                     />
                   )}
                   {activeRoute === "locked" && <Locked onBack={handleBackToExams} />}

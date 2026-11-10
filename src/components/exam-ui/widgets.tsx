@@ -103,20 +103,26 @@ export function MatchingWidget({
   fontSize,
   taken,
 }: WidgetProps & { taken: string[] }) {
+  const defaultOpts = ["A", "B", "C", "D", "E", "F", "G", "H"];
+  const options = q.options && q.options.length > 0 ? q.options : defaultOpts;
   return (
     <select
       value={value}
       onChange={(e) => onChange(e.target.value, true)}
       aria-label={`Answer for question ${q.number}`}
-      className="exam-select"
+      className="exam-select rounded-lg border border-white/10 bg-[#0B0F17] px-3 py-2 text-white font-medium focus:border-emerald-500 focus:outline-none"
       style={{ fontSize }}
     >
-      <option value="">— Choose —</option>
-      {(q.options ?? []).map((o, i) => (
-        <option key={i} value={o} disabled={taken.includes(o) && value !== o}>
-          {String.fromCharCode(65 + i)}. {o}
-        </option>
-      ))}
+      <option value="">— Choose matching option (A–H) —</option>
+      {options.map((o, i) => {
+        const letter = String.fromCharCode(65 + i);
+        const label = o.startsWith(`${letter}.`) || o === letter ? o : `${letter}. ${o}`;
+        return (
+          <option key={i} value={o} disabled={taken.includes(o) && value !== o}>
+            {label}
+          </option>
+        );
+      })}
     </select>
   );
 }
@@ -150,8 +156,10 @@ export function ShortWidget({ q, value, onChange, fontSize }: WidgetProps) {
 }
 
 import WritingImageOcr from "./WritingImageOcr";
+import { cacheAnswer } from "@/lib/offline-exam";
+import { useEffect, useRef } from "react";
 
-/** Essay editor with live word count, handwriting image upload, and OCR extraction. */
+/** Essay editor with live word count, minimum target indicators, 3s auto-save, and handwriting OCR. */
 export function EssayWidget({
   q,
   value,
@@ -160,10 +168,44 @@ export function EssayWidget({
   minWords,
   attemptId,
 }: WidgetProps & { minWords: number | null; attemptId?: string }) {
+  const targetWords = minWords ?? (/task\s*2|part\s*2|essay/i.test(`${q.prompt}`) ? 250 : 150);
   const words = countWords(value);
-  const low = minWords != null && words < minWords;
+  const isTargetMet = words >= targetWords;
+  const lastSavedValue = useRef(value);
+
+  // Auto-save to IndexedDB & localStorage every 3 seconds if modified
+  useEffect(() => {
+    if (!attemptId || !q.id) return;
+    const interval = window.setInterval(() => {
+      if (value !== lastSavedValue.current) {
+        lastSavedValue.current = value;
+        try {
+          localStorage.setItem(`examui.essay.${attemptId}.${q.id}`, value);
+          void cacheAnswer(attemptId, q.id, value).catch(() => undefined);
+        } catch {
+          /* private mode fallback */
+        }
+      }
+    }, 3000);
+    return () => window.clearInterval(interval);
+  }, [attemptId, q.id, value]);
+
+  // Crash / reload recovery fallback: restore if local value was empty
+  useEffect(() => {
+    if (!value && attemptId && q.id) {
+      try {
+        const cached = localStorage.getItem(`examui.essay.${attemptId}.${q.id}`);
+        if (cached && cached.trim()) {
+          onChange(cached, false);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [attemptId, q.id, value, onChange]);
+
   return (
-    <div>
+    <div className="space-y-2">
       <WritingImageOcr
         attemptId={attemptId}
         questionId={q.id}
@@ -179,17 +221,35 @@ export function EssayWidget({
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        rows={10}
+        rows={12}
         spellCheck={false}
         autoCorrect="off"
         autoCapitalize="off"
         aria-label={`Answer for question ${q.number}`}
-        className="exam-essay"
+        className="exam-essay w-full rounded-xl border border-white/10 bg-black/20 p-4 font-mono text-white/90 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-all leading-relaxed"
         style={{ fontSize }}
+        placeholder="Type your essay response here…"
       />
-      <p className={`exam-count${low ? " exam-count-low" : ""}`}>
-        {words} words{q.guidance?.wordMax ? ` / guidance ${minWords}–${q.guidance.wordMax}` : minWords != null ? ` / ${minWords}+ needed` : ''}
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+        <div className="flex items-center gap-2">
+          <span
+            className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition-all ${
+              isTargetMet
+                ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                : "bg-amber-500/15 text-amber-400 border-amber-500/30"
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full ${isTargetMet ? "bg-emerald-400" : "bg-amber-400 animate-pulse"}`} />
+            {words} / {targetWords} words {isTargetMet ? "— Target met ✓" : `(${targetWords - words} more needed)`}
+          </span>
+          <span className="text-[11px] text-white/40 hidden sm:inline">
+            (Task 1: 150 words min · Task 2: 250 words min)
+          </span>
+        </div>
+        <p className={`exam-count text-xs font-mono text-white/50`}>
+          Auto-saved every 3s
+        </p>
+      </div>
     </div>
   );
 }

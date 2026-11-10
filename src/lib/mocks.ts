@@ -288,6 +288,419 @@ export interface MockStartOptions {
  * `skills` — because the backend accepts any of them and older deployments
  * read only one of these fields.
  */
+export function normalizeMockSkill(raw: unknown): MockSkill {
+  if (typeof raw === "string") {
+    const s = raw.toLowerCase().trim();
+    if (s.includes("listen")) return "listening";
+    if (s.includes("read")) return "reading";
+    if (s.includes("writ")) return "writing";
+    if (s.includes("speak")) return "speaking";
+  }
+  return "reading";
+}
+
+export function normalizeQuestionType(t: string | undefined | null): MockQuestionType {
+  const s = String(t ?? "").toLowerCase().trim();
+  switch (s) {
+    case "single_choice":
+    case "multiple_choice":
+    case "mcq":
+      return "multiple_choice";
+    case "multi_select":
+    case "multiselect":
+    case "multi-select":
+      return "multi_select";
+    case "true_false_notgiven":
+    case "true_false_ng":
+    case "true_false":
+    case "tfng":
+      return "true_false_notgiven";
+    case "yes_no_notgiven":
+    case "yes_no_ng":
+    case "ynng":
+      return "yes_no_notgiven";
+    case "matching":
+    case "speaker_matching":
+    case "matching_statements":
+      return "matching";
+    case "matching_headings":
+      return "matching_headings";
+    case "map_labelling":
+    case "map_labeling":
+    case "map_dropdown":
+    case "map_matching":
+    case "map_label":
+      return "map_labelling";
+    case "sentence_completion":
+    case "gap_fill":
+    case "in_text_blank":
+    case "completion":
+      return "sentence_completion";
+    case "note_completion":
+      return "note_completion";
+    case "summary_completion":
+      return "summary_completion";
+    case "table_completion":
+      return "table_completion";
+    case "short_answer":
+      return "short_answer";
+    case "essay_task1":
+    case "essay":
+      return "essay_task1";
+    case "essay_task2":
+      return "essay_task2";
+    case "speaking":
+    case "speaking_task":
+    case "speaking_prompt":
+      return "speaking_task";
+    default:
+      if (s.includes("map")) return "map_labelling";
+      if (s.includes("match")) return "matching";
+      if (s.includes("sentence")) return "sentence_completion";
+      if (s.includes("summary")) return "summary_completion";
+      if (s.includes("note")) return "note_completion";
+      if (s.includes("table")) return "table_completion";
+      if (s.includes("choice")) return "multiple_choice";
+      if (s.includes("essay")) return "essay_task1";
+      if (s.includes("speak")) return "speaking_task";
+      return "short_answer";
+  }
+}
+
+export function normalizeMockQuestion(q: any, idx: number): MockShapedQuestion {
+  const rawType = q.type ?? q.question_type ?? q.questionType ?? "multiple_choice";
+  const num = typeof q.number === "number" ? q.number : typeof q.question_number === "number" ? q.question_number : (idx + 1);
+  const sort = typeof q.sortOrder === "number" ? q.sortOrder : typeof q.sort_order === "number" ? q.sort_order : typeof q.order === "number" ? q.order : idx;
+  const pts = typeof q.points === "number" ? q.points : typeof q.maxScore === "number" ? q.maxScore : typeof q.max_score === "number" ? q.max_score : 1;
+  const wordLimit = typeof q.wordLimit === "number" ? q.wordLimit : typeof q.word_limit === "number" ? q.word_limit : null;
+  const answerRule = q.answerRule ?? q.answer_rule ?? null;
+
+  let options: string[] | null = null;
+  const rawOpts = q.options ?? q.payload?.options ?? null;
+  if (Array.isArray(rawOpts)) {
+    options = rawOpts.map((opt) => {
+      if (typeof opt === "string") return opt;
+      if (typeof opt === "object" && opt !== null) {
+        return (opt as any).text ?? (opt as any).label ?? (opt as any).value ?? JSON.stringify(opt);
+      }
+      return String(opt);
+    });
+  } else if (rawOpts && typeof rawOpts === "object") {
+    options = Object.values(rawOpts).map((v) => (typeof v === "string" ? v : String(v)));
+  }
+
+  return {
+    id: String(q.id ?? q._id ?? q.question_id ?? `q-${num}-${idx}`),
+    number: num,
+    sortOrder: sort,
+    type: normalizeQuestionType(rawType),
+    prompt: String(q.prompt ?? q.text ?? q.question ?? ""),
+    options,
+    points: pts,
+    wordLimit,
+    answerRule: answerRule === "ONE_WORD" || answerRule === "ONE_WORD_AND_OR_NUMBER" ? answerRule : null,
+    guidance: q.guidance,
+  };
+}
+
+export function normalizeMockSection(rawSection: any, sectionIdx = 0): MockShapedSection {
+  if (!rawSection || typeof rawSection !== "object") {
+    return {
+      id: `sec-${sectionIdx}`,
+      skill: "reading",
+      title: "Reading",
+      sortOrder: sectionIdx,
+      durationMinutes: null,
+      instructions: null,
+      groups: [],
+    };
+  }
+
+  const skill = normalizeMockSkill(
+    rawSection.skill ?? rawSection.section_type ?? rawSection.sectionType ?? rawSection.type ?? rawSection.name
+  );
+
+  const rawGroups: any[] = Array.isArray(rawSection.groups)
+    ? rawSection.groups
+    : Array.isArray(rawSection.question_groups)
+    ? rawSection.question_groups
+    : Array.isArray(rawSection.questionGroups)
+    ? rawSection.questionGroups
+    : Array.isArray(rawSection.parts)
+    ? rawSection.parts
+    : [];
+
+  const rawFlatQuestions: any[] = Array.isArray(rawSection.questions)
+    ? rawSection.questions
+    : Array.isArray(rawSection.question_list)
+    ? rawSection.question_list
+    : Array.isArray(rawSection.items)
+    ? rawSection.items
+    : [];
+
+  let groupList: any[] = [...rawGroups];
+
+  if (groupList.length === 0 && rawFlatQuestions.length > 0) {
+    const partKeys = new Set<string | number>();
+    rawFlatQuestions.forEach((q) => {
+      const p = q.part_number ?? q.partNumber ?? q.part ?? q.group_id ?? q.groupId ?? q.question_group_id;
+      if (p != null) partKeys.add(p);
+    });
+
+    if (partKeys.size > 1) {
+      const sortedKeys = Array.from(partKeys);
+      groupList = sortedKeys.map((key, ki) => ({
+        id: `group-${key}`,
+        sortOrder: ki,
+        partNumber: ki + 1,
+        title: skill === "reading" ? `Passage ${ki + 1}` : `Part ${ki + 1}`,
+        instructions: null,
+        passageText: null,
+        contentHtml: null,
+        contentLayout: null,
+        hasAudio: skill === "listening",
+        audioUrl: null,
+        imageUrl: null,
+        audioDurationSec: null,
+        audioPlayLimit: 1,
+        questions: rawFlatQuestions.filter((q) => {
+          const p = q.part_number ?? q.partNumber ?? q.part ?? q.group_id ?? q.groupId ?? q.question_group_id;
+          return p === key;
+        }),
+      }));
+    } else if (skill === "listening" && rawFlatQuestions.length === 35) {
+      // Standard Multilevel Listening: 6 parts [8, 6, 6, 6, 4, 5]
+      const counts = [8, 6, 6, 6, 4, 5];
+      let offset = 0;
+      groupList = counts.map((count, pi) => {
+        const slice = rawFlatQuestions.slice(offset, offset + count);
+        offset += count;
+        return {
+          id: `group-part-${pi + 1}`,
+          sortOrder: pi,
+          partNumber: pi + 1,
+          title: `Part ${pi + 1}`,
+          instructions: null,
+          passageText: null,
+          contentHtml: null,
+          contentLayout: pi === 3 ? "map_matching" : null,
+          hasAudio: true,
+          audioUrl: null,
+          imageUrl: null,
+          audioDurationSec: null,
+          audioPlayLimit: 1,
+          questions: slice,
+        };
+      });
+    } else if (skill === "reading" && rawFlatQuestions.length === 35) {
+      // Standard Multilevel Reading: 5 parts [6, 8, 6, 8, 7]
+      const counts = [6, 8, 6, 8, 7];
+      let offset = 0;
+      groupList = counts.map((count, pi) => {
+        const slice = rawFlatQuestions.slice(offset, offset + count);
+        offset += count;
+        return {
+          id: `group-part-${pi + 1}`,
+          sortOrder: pi,
+          partNumber: pi + 1,
+          title: `Passage ${pi + 1}`,
+          instructions: null,
+          passageText: null,
+          contentHtml: null,
+          contentLayout: null,
+          hasAudio: false,
+          audioUrl: null,
+          imageUrl: null,
+          audioDurationSec: null,
+          audioPlayLimit: 1,
+          questions: slice,
+        };
+      });
+    } else {
+      groupList = [
+        {
+          id: `group-1`,
+          sortOrder: 0,
+          partNumber: 1,
+          title: skill === "reading" ? "Passage 1" : "Part 1",
+          instructions: rawSection.instructions ?? null,
+          passageText: rawSection.passageText ?? rawSection.passage_text ?? null,
+          contentHtml: rawSection.contentHtml ?? rawSection.content_html ?? null,
+          contentLayout: null,
+          hasAudio: skill === "listening",
+          audioUrl: rawSection.audioUrl ?? rawSection.audio_url ?? null,
+          imageUrl: rawSection.imageUrl ?? rawSection.image_url ?? null,
+          audioDurationSec: null,
+          audioPlayLimit: 1,
+          questions: rawFlatQuestions,
+        },
+      ];
+    }
+  }
+
+  const totalGroupQuestions = groupList.reduce(
+    (acc, g) => acc + (Array.isArray(g.questions) ? g.questions.length : Array.isArray(g.question_list) ? g.question_list.length : 0),
+    0
+  );
+
+  if (totalGroupQuestions === 0 && rawFlatQuestions.length > 0) {
+    let anyMatched = false;
+    groupList.forEach((g, gi) => {
+      const gid = g.id ?? g._id ?? g.key;
+      const pNum = g.partNumber ?? g.part_number ?? (gi + 1);
+      const matched = rawFlatQuestions.filter((q) => {
+        const qGid = q.group_id ?? q.groupId ?? q.question_group_id;
+        const qPart = q.part_number ?? q.partNumber ?? q.part;
+        return (qGid != null && String(qGid) === String(gid)) || (qPart != null && Number(qPart) === Number(pNum));
+      });
+      if (matched.length > 0) {
+        g.questions = matched;
+        anyMatched = true;
+      }
+    });
+
+    if (!anyMatched) {
+      if (skill === "listening" && groupList.length === 6 && rawFlatQuestions.length === 35) {
+        const counts = [8, 6, 6, 6, 4, 5];
+        let offset = 0;
+        groupList.forEach((g, pi) => {
+          const count = counts[pi] ?? 6;
+          g.questions = rawFlatQuestions.slice(offset, offset + count);
+          offset += count;
+        });
+      } else if (skill === "reading" && groupList.length === 5 && rawFlatQuestions.length === 35) {
+        const counts = [6, 8, 6, 8, 7];
+        let offset = 0;
+        groupList.forEach((g, pi) => {
+          const count = counts[pi] ?? 7;
+          g.questions = rawFlatQuestions.slice(offset, offset + count);
+          offset += count;
+        });
+      } else {
+        const perGroup = Math.ceil(rawFlatQuestions.length / (groupList.length || 1));
+        groupList.forEach((g, gi) => {
+          g.questions = rawFlatQuestions.slice(gi * perGroup, (gi + 1) * perGroup);
+        });
+      }
+    }
+  }
+
+  let globalQNum = 0;
+  const groups: MockShapedGroup[] = groupList
+    .sort((a, b) => (a.sortOrder ?? a.sort_order ?? a.order ?? 0) - (b.sortOrder ?? b.sort_order ?? b.order ?? 0))
+    .map((g, gi) => {
+      const gQuestionsRaw: any[] = Array.isArray(g.questions)
+        ? g.questions
+        : Array.isArray(g.question_list)
+        ? g.question_list
+        : Array.isArray(g.items)
+        ? g.items
+        : [];
+
+      const questions: MockShapedQuestion[] = gQuestionsRaw
+        .sort(
+          (a, b) =>
+            (a.sortOrder ?? a.sort_order ?? a.order ?? 0) - (b.sortOrder ?? b.sort_order ?? b.order ?? 0) ||
+            (a.number ?? a.question_number ?? 0) - (b.number ?? b.question_number ?? 0)
+        )
+        .map((q, qi) => {
+          globalQNum++;
+          const nq = normalizeMockQuestion(q, qi);
+          if (typeof q.number !== "number" && typeof q.question_number !== "number") {
+            nq.number = globalQNum;
+          }
+          return nq;
+        });
+
+      const audioUrl = g.audioUrl ?? g.audio_url ?? g.audio ?? null;
+      const imageUrl = g.imageUrl ?? g.image_url ?? g.image ?? null;
+      const hasAudio = Boolean(g.hasAudio ?? g.has_audio ?? audioUrl);
+
+      return {
+        id: String(g.id ?? g._id ?? g.key ?? `group-${gi + 1}`),
+        sortOrder: typeof g.sortOrder === "number" ? g.sortOrder : typeof g.sort_order === "number" ? g.sort_order : gi,
+        title: g.title ?? null,
+        instructions: g.instructions ?? null,
+        passageText: g.passageText ?? g.passage_text ?? g.text ?? null,
+        contentHtml: g.contentHtml ?? g.content_html ?? null,
+        contentLayout: g.contentLayout ?? g.content_layout ?? null,
+        optionsReusable: g.optionsReusable ?? g.options_reusable ?? null,
+        hasAudio,
+        audioUrl,
+        imageUrl,
+        partNumber: typeof g.partNumber === "number" ? g.partNumber : typeof g.part_number === "number" ? g.part_number : (gi + 1),
+        audioDurationSec: typeof g.audioDurationSec === "number" ? g.audioDurationSec : typeof g.audio_duration_sec === "number" ? g.audio_duration_sec : null,
+        audioStartSec: typeof g.audioStartSec === "number" ? g.audioStartSec : typeof g.audio_start_sec === "number" ? g.audio_start_sec : null,
+        stimulusRef: typeof g.stimulusRef === "string" ? g.stimulusRef : typeof g.stimulus_ref === "string" ? g.stimulus_ref : null,
+        audioPlayLimit: typeof g.audioPlayLimit === "number" ? g.audioPlayLimit : typeof g.audio_play_limit === "number" ? g.audio_play_limit : 1,
+        questions,
+      };
+    });
+
+  return {
+    id: String(rawSection.id ?? rawSection._id ?? `sec-${skill}`),
+    skill,
+    title: rawSection.title ?? (skill === "listening" ? "Listening" : skill === "reading" ? "Reading" : skill === "writing" ? "Writing" : "Speaking"),
+    sortOrder: typeof rawSection.sortOrder === "number" ? rawSection.sortOrder : typeof rawSection.sort_order === "number" ? rawSection.sort_order : sectionIdx,
+    durationMinutes: typeof rawSection.durationMinutes === "number" ? rawSection.durationMinutes : typeof rawSection.duration_minutes === "number" ? rawSection.duration_minutes : null,
+    instructions: rawSection.instructions ?? null,
+    groups,
+  };
+}
+
+export function normalizeMockStartResult(raw: any): MockStartResult {
+  if (!raw || typeof raw !== "object") return raw;
+  const data = raw.data ?? raw;
+  const examRaw = data.exam ?? {};
+  const rawSections: any[] = Array.isArray(examRaw.sections) ? examRaw.sections : [];
+
+  const sections = rawSections.map((s, idx) => normalizeMockSection(s, idx));
+  const questionCount = sections.reduce(
+    (sum, s) => sum + s.groups.reduce((gSum, g) => gSum + g.questions.length, 0),
+    0
+  );
+
+  const currentSkill = data.currentSkill ?? data.current_skill ?? (sections[0]?.skill ?? null);
+
+  return {
+    attemptId: String(data.attemptId ?? data.attempt_id ?? data.id ?? ""),
+    sessionSignature: data.sessionSignature ?? data.session_signature,
+    resumed: Boolean(data.resumed),
+    mode: data.mode === "timed" ? "timed" : "practice",
+    simulatorMode: data.simulatorMode ?? data.simulator_mode ?? null,
+    startedAt: String(data.startedAt ?? data.started_at ?? new Date().toISOString()),
+    deadlineAt: data.deadlineAt ?? data.deadline_at ?? null,
+    serverTime: String(data.serverTime ?? data.server_time ?? new Date().toISOString()),
+    durationMinutes: typeof data.durationMinutes === "number" ? data.durationMinutes : typeof data.duration_minutes === "number" ? data.duration_minutes : null,
+    flowMode: data.flowMode ?? data.flow_mode ?? data.flow ?? "single_skill",
+    currentSkill: currentSkill ? normalizeMockSkill(currentSkill) : null,
+    sectionDeadlines: data.sectionDeadlines ?? data.section_deadlines ?? null,
+    overallDeadlineAt: data.overallDeadlineAt ?? data.overall_deadline_at ?? null,
+    exam: {
+      id: String(examRaw.id ?? examRaw._id ?? ""),
+      type: examRaw.type === "ielts_academic" || examRaw.type === "ielts_general" || examRaw.type === "multilevel" ? examRaw.type : "multilevel",
+      specificationVersion: examRaw.specificationVersion ?? examRaw.specification_version,
+      speakingProfileVersion: examRaw.speakingProfileVersion ?? examRaw.speaking_profile_version ?? null,
+      speakingProfile: examRaw.speakingProfile ?? examRaw.speaking_profile,
+      title: String(examRaw.title ?? "Mock Exam"),
+      description: examRaw.description ?? null,
+      level: examRaw.level ?? null,
+      practiceLevel: examRaw.practiceLevel ?? examRaw.practice_level ?? null,
+      isPublished: examRaw.isPublished !== false && examRaw.is_published !== false,
+      isDemo: Boolean(examRaw.isDemo ?? examRaw.is_demo),
+      createdAt: String(examRaw.createdAt ?? examRaw.created_at ?? new Date().toISOString()),
+      updatedAt: String(examRaw.updatedAt ?? examRaw.updated_at ?? new Date().toISOString()),
+      questionCount: examRaw.questionCount ?? examRaw.question_count ?? questionCount,
+      sections,
+    },
+    annotations: Array.isArray(data.annotations) ? data.annotations : [],
+    savedAnswers: data.savedAnswers ?? data.saved_answers ?? {},
+    isSingleSection: data.isSingleSection ?? data.is_single_section,
+    singleSection: data.singleSection ? normalizeMockSkill(data.singleSection) : (data.single_section ? normalizeMockSkill(data.single_section) : undefined),
+    attemptTypeLabel: data.attemptTypeLabel ?? data.attempt_type_label,
+  };
+}
+
 export async function startMockExam(
   examId: string,
   opts?: MockStartOptions,
@@ -303,7 +716,8 @@ export async function startMockExam(
     payload.skills = [section];
   }
   const raw = await post<unknown>(`/mock/exams/${encodeURIComponent(examId)}/start`, payload);
-  return parseOrThrow("POST /mock/exams/:id/start", MockStartResultSchema, raw);
+  const normalized = normalizeMockStartResult(raw);
+  return parseOrThrow("POST /mock/exams/:id/start", MockStartResultSchema, normalized);
 }
 
 export function saveMockAnswer(

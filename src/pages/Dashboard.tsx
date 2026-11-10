@@ -169,8 +169,9 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
       mocksQuery.isLoading ||
       (primaryEmpty && (altTestsQuery.isLoading || altMocksQuery.isLoading)));
 
+  const hasCachedData = rawTests.length > 0 || rawMocks.length > 0 || (attemptsQuery.data?.length ?? 0) > 0;
   const error =
-    testsQuery.isError && attemptsQuery.isError && mocksQuery.isError
+    !hasCachedData && testsQuery.isError && attemptsQuery.isError && mocksQuery.isError
       ? "Could not load overview. Retrying automatically…"
       : null;
 

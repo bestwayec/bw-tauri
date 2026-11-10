@@ -122,6 +122,25 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
     return () => window.clearInterval(t);
   }, [prepRunning, prepLeft <= 0]); // eslint-disable-line react-hooks/exhaustive-deps -- boolean-coerced dep restarts timer exactly at zero; raw prepLeft would reset every tick
 
+  // Pre-warm microphone during prep so audio visualizer is active and confirms mic works
+  useEffect(() => {
+    if (!prepRunning || liveStream || streamRef.current) return;
+    let active = true;
+    void openMicrophone()
+      .then((stream) => {
+        if (active && alive.current) {
+          streamRef.current = stream;
+          setLiveStream(stream);
+        } else {
+          stream.getTracks().forEach((t) => t.stop());
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [prepRunning, liveStream]);
+
   // Speak countdown — auto-stops the recorder at zero.
   useEffect(() => {
     if (!speakRunning || speakLeft <= 0) return;
@@ -356,9 +375,9 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
             )}
           </div>
         </div>
-        {recState === "recording" && (
+        {(recState === "recording" || (prepRunning && liveStream)) && (
           <div className="mt-2 space-y-1">
-            <Waveform stream={liveStream} active bars={32} label="Practice recording" elapsedSeconds={recElapsed} />
+            <Waveform stream={liveStream} active bars={32} label={recState === "recording" ? "Practice recording" : "Microphone pre-check"} elapsedSeconds={recElapsed} />
             <p className="text-[10px] leading-relaxed text-white/40">Input processing: {processingSummary(inputTrack)}</p>
           </div>
         )}

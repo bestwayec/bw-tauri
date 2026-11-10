@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { openInBrowser } from "@/lib/oauth";
-import { dismissVersion, takeSignedUpdate, type UpdateInfo } from "@/lib/version";
+import { dismissVersion, probeDownloadUrl, takeSignedUpdate, type UpdateInfo } from "@/lib/version";
 import { isSafeHttpUrl } from "@/lib/secure-storage";
 import { getAppLanguage, onUiPrefsChange, type AppLanguage } from "@/lib/ui-prefs";
 
@@ -85,6 +85,13 @@ export default function UpdateNotifier({ update, onClose, deferInstall }: Props)
   const openManually = async (url: string) => {
     setStatus("opening");
     try {
+      const exists = await probeDownloadUrl(url);
+      if (!exists) {
+        console.warn("[updater] Installer URL returned 404/unreachable; suppressing browser open:", url);
+        setError(t.failed);
+        setStatus("error");
+        return;
+      }
       await openInBrowser(url);
       setStatus("idle");
     } catch (err) {
@@ -124,8 +131,11 @@ export default function UpdateNotifier({ update, onClose, deferInstall }: Props)
         console.error("[updater] Signed update failed:", err);
         // A verified installer page is still a safe second route.
         if (manualUrl) {
-          await openManually(manualUrl);
-          return;
+          const exists = await probeDownloadUrl(manualUrl);
+          if (exists) {
+            await openManually(manualUrl);
+            return;
+          }
         }
         setError(t.failed);
         setStatus("error");

@@ -184,10 +184,10 @@ export function MultilevelRecorder({ attemptId, questionId, timed, initialHasAud
     <p role="status">{recorded && ['idle', 'saved'].includes(status) ? `Recording uploaded${recordedSeconds != null ? ` · ${recordedSeconds}s` : ''}` : status} {phase && ['preparing', 'recording'].includes(status) && `${left}s remaining`}</p>
     {!pending && !(timed && recorded) && <>
       <button type="button" disabled={['checking','starting','preparing','recording','finalizing','uploading'].includes(status)} onClick={() => void preflight()}>Test microphone</button>
-      {status === 'ready' && <><meter aria-label="Microphone input level" min="0" max="1" value={level} /><p>Speak and check that the meter responds.</p>{stream.current && <Waveform stream={stream.current} active={false} label="Microphone input" />}{stream.current && <p className="text-[11px] opacity-70">{processingSummary(stream.current.getAudioTracks()[0] ?? null)}</p>}<button type="button" onClick={() => void start()}>Start response</button></>}
-      {status === 'recording' && <Waveform stream={stream.current} active bars={32} label="Response recording" />}
+      {status === 'ready' && <><meter aria-label="Microphone input level" min="0" max="1" value={level} /><p>Speak and check that the meter responds.</p>{stream.current && <Waveform stream={stream.current} active label="Microphone input" />}{stream.current && <p className="text-[11px] opacity-70">{processingSummary(stream.current.getAudioTracks()[0] ?? null)}</p>}<button type="button" onClick={() => void start()}>Start response</button></>}
+      {(status === 'recording' || status === 'preparing') && stream.current && <Waveform stream={stream.current} active bars={32} label="Response recording" />}
     </>}
-    {pending && <button type="button" disabled={status === 'uploading'} onClick={() => void send(pending)}>Retry upload of saved recording</button>}
-    {error && <p role="alert">{error}</p>}
+    {pending && <button type="button" disabled={status === 'uploading'} onClick={() => void send(pending)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-500">Qayta yuklash (Retry upload of saved recording)</button>}
+    {error && <p role="alert" className="text-xs font-medium text-red-400 bg-red-500/10 p-2 rounded-lg border border-red-500/20">{error}</p>}
   </div>;
 }

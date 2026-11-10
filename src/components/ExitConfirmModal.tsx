@@ -60,31 +60,31 @@ export default function ExitConfirmModal({ open, onCancel, onConfirm }: Props) {
             <ExitIcon />
           </span>
           <div className="min-w-0 flex-1">
-            <h2 id="exit-title" className="text-[16px] font-bold leading-tight text-white">
-              Leave exam?
+            <h2 id="exit-title" className="text-[17px] font-bold leading-tight text-white">
+              Imtihondan chiqmoqchimisiz?
             </h2>
-            <div id="exit-desc" className="mt-2 space-y-1 text-sm leading-relaxed text-white/60">
-              <p>Your answers have been saved.</p>
-              <p>You can resume this exam later from Dashboard or Exams.</p>
+            <div id="exit-desc" className="mt-2 space-y-1.5 text-sm leading-relaxed text-white/70">
+              <p className="font-medium text-emerald-400">Barcha javoblar serverga saqlanadi.</p>
+              <p className="text-xs text-white/50">Siz ushbu imtihonni keyinroq Dashboard yoki Imtihonlar bo'limidan davom ettirishingiz mumkin.</p>
             </div>
           </div>
         </div>
 
-        <div className="mt-6 flex items-center justify-end gap-2">
+        <div className="mt-6 flex items-center justify-end gap-3">
           <button
             ref={cancelRef}
             type="button"
             onClick={onCancel}
-            className="btn-ghost rounded-xl px-5 py-2.5 text-sm font-medium text-white/80 hover:text-white"
+            className="btn-ghost rounded-xl px-5 py-2.5 text-sm font-semibold text-white/90 hover:text-white hover:bg-white/10"
           >
-            Cancel
+            Imtihonda qolish
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="btn-brand rounded-xl px-5 py-2.5 text-sm font-bold"
+            className="btn-brand rounded-xl bg-red-600 hover:bg-red-500 text-white px-5 py-2.5 text-sm font-bold shadow-lg shadow-red-600/20 active:scale-95 transition-all"
           >
-            Exit exam
+            Chiqish
           </button>
         </div>
       </div>

@@ -1,4 +1,12 @@
-import { MOCK_SKILL_LABEL, MOCK_SKILLS, type MockShapedSection, type MockSkill, type MockStartResult } from "@/lib/mocks";
+import {
+  MOCK_SKILL_LABEL,
+  MOCK_SKILLS,
+  normalizeMockSection,
+  normalizeMockSkill,
+  type MockShapedSection,
+  type MockSkill,
+  type MockStartResult,
+} from "@/lib/mocks";
 
 type Props = {
   start: MockStartResult;
@@ -34,7 +42,12 @@ export default function MockSectionPicker({ start, onPick, onBack }: Props) {
   const exam = start.exam;
   const timed = start.mode === "timed";
   const now = Date.now();
-  const bySkill = new Map(exam.sections.map((s) => [s.skill, s]));
+  const bySkill = new Map(
+    exam.sections.map((s) => [
+      normalizeMockSkill(s.skill ?? (s as any).section_type ?? (s as any).sectionType),
+      normalizeMockSection(s),
+    ]),
+  );
 
   return (
     <section className="mx-auto w-full max-w-3xl">
