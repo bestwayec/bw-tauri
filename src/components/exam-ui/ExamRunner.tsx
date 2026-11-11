@@ -275,7 +275,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
   const [helpOpen, setHelpOpen] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
   const [volume, setVolumeState] = useState(() => getVolume());
-  const [saveState, setSaveState] = useState<SaveState>("saved");
+  const [saveState, setSaveState] = useState<SaveState>("checking");
   const [submitting, setSubmitting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -330,7 +330,10 @@ export default function ExamRunner(p: ExamRunnerProps) {
         const pending = await readPendingAnswers(p.attemptId);
         if (!alive) return;
         recoveredRef.current = true;
-        if (pending.length === 0) return;
+        if (pending.length === 0) {
+          setSaveState(dirty.current.size ? "saving" : "saved");
+          return;
+        }
         const restored: Record<string, string> = {};
         for (const item of pending) {
           if (versioned && !writableIds.has(item.questionId)) continue;
@@ -339,14 +342,17 @@ export default function ExamRunner(p: ExamRunnerProps) {
           restored[item.questionId] = item.response;
         }
         const ids = Object.keys(restored);
-        if (ids.length === 0) return;
+        if (ids.length === 0) {
+          setSaveState(dirty.current.size ? "saving" : "saved");
+          return;
+        }
         answersRef.current = { ...answersRef.current, ...restored };
         for (const id of ids) dirty.current.add(id);
         setAnswers((current) => ({ ...current, ...restored }));
         setSaveState("saving");
         persistQueue();
       } catch {
-        /* recovery is best-effort — the exam continues regardless */
+        if (alive) setSaveState("error");
       }
     })();
     return () => {
@@ -441,7 +447,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
     } catch (e) {
       for (const id of ids) dirty.current.add(id);
       persistQueue();
-      setSaveState(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "saving");
+      setSaveState(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "error");
       notifyExamAuthIssue(e);
       throw e;
     }
@@ -490,8 +496,12 @@ export default function ExamRunner(p: ExamRunnerProps) {
       flush: () => flush(),
       onState: (state) => {
         if (state === "offline") setSaveState("offline");
-        else if (state === "pending") setSaveState(dirty.current.size > 0 ? "saving" : "saved");
-        else if (dirty.current.size === 0) {
+        else if (state === "pending") {
+          if (saveInFlight.current) setSaveState("saving");
+          else if (dirty.current.size > 0) setSaveState("error");
+          else if (!recoveredRef.current) setSaveState("checking");
+        }
+        else if (recoveredRef.current && dirty.current.size === 0) {
           setSaveState(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "saved");
         }
       },
@@ -691,6 +701,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
         noteOpen={noteOpen}
         onToggleNote={() => setNoteOpen((v) => !v)}
         saveState={saveState}
+        onRetrySave={() => { void flush().catch(() => undefined); }}
         onHelp={() => setHelpOpen(true)}
         onExit={p.onExit}
         onSubmit={requestSubmit}
