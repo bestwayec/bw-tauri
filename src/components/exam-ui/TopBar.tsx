@@ -1,6 +1,6 @@
 import { fmtCountdown, type ContrastTheme, type SimulatorMode } from "./model";
 
-export type SaveState = "saved" | "saving" | "offline";
+export type SaveState = "checking" | "saved" | "saving" | "offline" | "error";
 
 type Props = {
   candidateName: string | null;
@@ -26,6 +26,7 @@ type Props = {
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
   saveState: SaveState;
+  onRetrySave?: () => void;
   onHelp: () => void;
   onExit: () => void;
   onSubmit?: () => void;
@@ -134,14 +135,21 @@ export default function TopBar(p: Props) {
         <span
           className={`exam-savestate exam-savestate-${p.saveState}`}
           role="status"
-          title={p.saveState === "offline" ? "Offline — javoblar lokal saqlanmoqda" : undefined}
+          aria-live="polite"
         >
-          {p.saveState === "saved"
+          {p.saveState === "checking"
+            ? "Checking saved answers…"
+            : p.saveState === "saved"
             ? "Saved"
             : p.saveState === "saving"
               ? "Saving…"
-              : "Offline — javoblar lokal saqlanmoqda"}
+              : p.saveState === "offline"
+                ? "Offline — answers not yet saved to server"
+                : "Save failed — answers not yet saved to server"}
         </span>
+        {(p.saveState === "offline" || p.saveState === "error") && p.onRetrySave && (
+          <button type="button" className="exam-btn-ghost" onClick={p.onRetrySave}>Retry saving</button>
+        )}
       </div>
 
       <div className="exam-topbar-controls">

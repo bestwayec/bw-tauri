@@ -49,6 +49,13 @@ test('a writing draft survives an API outage and restart, and finalization waits
   await page.getByRole('button', { name: 'Continue without camera' }).click();
   const editor = page.getByRole('textbox', { name: /Answer for question/ }).first();
   await expect(editor).toBeVisible();
+  if (process.env.EXAM_SCREENSHOT_DIR) {
+    for (const [label, width, height] of [['desktop', 1440, 900], ['tablet', 768, 1024], ['mobile', 390, 844]] as const) {
+      await page.setViewportSize({ width, height });
+      await page.screenshot({ path: `${process.env.EXAM_SCREENSHOT_DIR}/${label}.png` });
+    }
+    await page.setViewportSize({ width: 1280, height: 720 });
+  }
   const cameras = await page.evaluate(() => (window as unknown as { cameraRequests: number }).cameraRequests);
   await page.clock.install();
   await page.clock.fastForward(16 * 60 * 1000);
@@ -58,6 +65,8 @@ test('a writing draft survives an API outage and restart, and finalization waits
   await page.route('http://127.0.0.1:3102/v1/**', route => route.abort());
   const draft = 'My complete writing answer must survive the network outage and restart.';
   await editor.fill(draft);
+  await expect(page.getByText('Save failed — answers not yet saved to server')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry saving' })).toBeVisible();
   await page.reload();
   await page.getByRole('button', { name: /Davom ettirish \(Resume\)/ }).click();
   await page.getByRole('button', { name: 'Continue without camera' }).click();
@@ -69,6 +78,8 @@ test('a writing draft survives an API outage and restart, and finalization waits
   await expect(page.getByText('submitted ✓', { exact: true })).toHaveCount(0);
 
   await page.unroute('http://127.0.0.1:3102/v1/**');
+  await page.getByRole('button', { name: 'Retry saving' }).click();
+  await expect(page.locator('.exam-savestate')).toHaveText('Saved');
   await page.getByRole('button', { name: 'Submit Writing', exact: true }).click();
   const acknowledgement = page.waitForResponse(response => /\/mock\/attempts\/[^/]+\/submit$/.test(response.url()) && response.ok());
   await page.getByRole('dialog', { name: 'Submit section' }).getByRole('button', { name: 'Submit Writing', exact: true }).click();
