@@ -34,7 +34,7 @@ jobs:
         run: npm test
 
       - name: Desktop release planning tests
-        run: node --test tools/release-platforms.test.mjs
+        run: node --test tools/release-platforms.test.mjs tools/updater-manifest.test.mjs
 
       - name: Android signing safety tests
         run: node --test tools/android-signing.test.mjs
