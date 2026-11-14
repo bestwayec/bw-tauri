@@ -202,7 +202,9 @@ jobs:
         with:
           projectPath: .
           args: ${{ steps.release-config.outputs.args }} --target ${{ matrix.target }}
-          includeUpdaterJson: ${{ steps.release-config.outputs.includeUpdaterJson }}
+          # latest.json is written once by the publish job after every platform has uploaded:
+          # parallel jobs updating one asset raced (run 42982782068, Apple Silicon: Not Found).
+          includeUpdaterJson: false
           tagName: ${{ needs.prepare.outputs.tag }}
           # Existing release ID uploads additively without changing Latest/draft flags.
           releaseId: ${{ needs.prepare.outputs.release_id }}
@@ -263,6 +265,19 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - name: Setup Node for release tooling
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Updater manifest tests
+        run: node --test tools/updater-manifest.test.mjs
+      - name: Write latest.json once (all platforms signed and uploaded)
+        if: ${{ (vars.DESKTOP_RELEASE_MODE || 'signed_updater') == 'signed_updater' }}
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/publish-updater-manifest.mjs
       - name: Verify all installers before publishing a stable Latest release
         env:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
