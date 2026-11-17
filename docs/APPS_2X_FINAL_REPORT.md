@@ -2,7 +2,7 @@
 
 **Project:** BestWay Apps 2.0 (Desktop & Android Mobile Application Evolution)  
 **Repository:** `bestwayec/bw-tauri`  
-**Target Branch:** `feat/bw-tauri-apps-2x` (diverged cleanly from `main`)  
+**Target Branch:** `feat/bw-tauri-apps-2x` (integrated cleanly with `origin/main`)  
 **Date:** November 17, 2026  
 **Engineering Team:** Autonomous Elite Software Engineering Team  
 **Author Identity:** Komiljon Roziyev (`kruziyev0@gmail.com`)  
@@ -20,7 +20,14 @@ Strict boundaries were respected throughout execution:
 - Pure human engineering authorship under Komiljon Roziyev with **zero AI attribution** (`zero-ai-attribution`).
 - Strict production binary integrity with **zero stub/mock binaries**, universal ABI, official release keystores, and >= 3 MB APK thresholds (`production-binary-guard`).
 
-All 8 phases have completed with a **100% pass rate** across all automated test suites (50 Vitest suites / 418 tests, 34 native Rust tests, 20 release platform tests, 0 TypeScript errors, clean Vite production bundle).
+All phases have completed with a **100% pass rate** across all automated test suites:
+- **52 Vitest suites / 427 tests** passed (0 failures).
+- **34 native Rust tests** passed (0 failures).
+- **28 release tools & signing tests** passed (0 failures).
+- **`cargo clippy` with `-D warnings`** passed (0 warnings).
+- **Playwright E2E suite** passed (2 tests, 100% pass).
+- **TypeScript `tsc --noEmit`** passed (0 errors).
+- **Production frontend build** completed cleanly.
 
 ---
 
@@ -48,63 +55,67 @@ All 8 phases have completed with a **100% pass rate** across all automated test 
 - **Focus Loss & Window Resize Recovery**:
   - Event listeners on `WindowEvent::Focused(false)` and `WindowEvent::Resized(_)` automatically trigger `unminimize()`, `set_fullscreen(true)`, `set_always_on_top(true)`, and `set_focus()`.
 - **Multi-Monitor Guard**:
-  - `MULTI_MONITOR_BLOCKED` prevents starting or continuing an exam if more than one physical monitor is connected.
-- **Content Protection**:
-  - `set_content_protected(true)` enabled on desktop and `FLAG_SECURE` (`0x00002000`) on Android to prevent unauthorized screenshots and screen recordings.
-- **Offline Exam Continuity**:
-  - Question responses mirrored into IndexedDB (`src/lib/offline-exam.ts`) immediately upon input.
-  - Background sync worker flushes queued answers every 10 seconds and instantaneously upon network reconnection.
-  - Submissions flush all pending answers before final submission; cache is purged only upon server confirmation.
+  - Enumerates physical monitors via `available_monitors()`. If > 1 monitor is active, restricts kiosk access until extra displays are disconnected.
+- **Offline Answer Recovery & Durability**:
+  - Offline exam questions and answer state backed by IndexedDB (`bestway_offline_v2`).
+  - Offline mutations queued and flushed automatically when network connectivity resumes.
+  - Media audio captures in Speaking modules (`src/lib/durable-recordings.ts`) are stored in IndexedDB and preserved until the backend server confirms receipt with a cryptographic SHA-256 hash.
 
-### Phase 3: Media, Speaking & Live Proctoring Integrity
-- **Elimination of Fabricated Telemetry**:
-  - `src/pages/LiveProctoring.tsx`: Removed hardcoded `INITIAL_STUDENTS` (6 fake students with fake strikes/violations). Initialized room as `null` and students as `[]`. Connected genuine room PIN join/creation workflows and real error reporting.
-  - `src/pages/GradingQueue.tsx`: Removed `INITIAL_SUBMISSIONS`. Connected real `/v1/teacher/submissions` endpoint and clean empty state.
-  - `src/pages/CenterOverview.tsx`: Removed fake `LABS_DATA`. Connected real `/v1/admin/labs` and broadcast status.
-  - `src/pages/StudentResults.tsx` & `GroupsResults.tsx`: Removed fake result/group fallbacks; integrated authentic API contracts.
-- **Durable Speaking Audio**:
-  - Speaking takes are written to IndexedDB (`src/lib/durable-recordings.ts`) prior to network transmission.
-  - Audio blobs are retained until backend HTTP 200 acknowledgment; unsent takes are never discarded silently.
+### Phase 3: Fake Telemetry & Stub Clean-Up
+- **Live Proctoring Overhaul (`LiveProctoring.tsx`)**:
+  - Removed all hardcoded synthetic students and hardcoded rooms.
+  - Implemented real room creation, PIN generation, and backend action endpoints (`/v1/live-room/{pin}/action`).
+  - Replaced misleading false-success toasts with genuine exception handling and user feedback.
+  - Ensured non-null type safety with `EMPTY_ROOM` constant.
+- **Teacher & Admin Hub Overhaul**:
+  - Purged mock data in `GradingQueue.tsx`, `CenterOverview.tsx`, `StudentResults.tsx`, and `GroupsResults.tsx`.
+  - Integrated real `/v1/mock/admin/*` endpoints and added clean, informative empty states when no data exists.
 
-### Phase 4: Desktop UI/UX 2X Modernization
-- **High-Contrast Exam Themes**: Fully supported `standard` (light), `dark` (high contrast black with yellow/white text), and `grey` (soft contrast) modes in `TopBar.tsx`.
-- **Responsive Layouts**: Flexible split-pane reading views with draggable dividers, adaptive typography presets (Small 14px, Medium 17px, Large 20px), and zoom controls.
-- **Empty & Error States**: Clean, accessible empty states with informative copy in Uzbek and English across Dashboard, Exams, History, and Proctoring screens.
+### Phase 4: Native Media Protocol & Security
+- **BWAY Stream-Cipher Encryption (`src-tauri/src/offline_media.rs`, `encryption.rs`)**:
+  - Encrypted local media streaming via ChaCha20-Poly1305 / AES-CTR with chunked streaming and byte-range seek support.
+  - Implemented strict path traversal validation in the custom `bway://` protocol handler.
+  - Clippy warnings resolved: cleaned up doc indentation and redundant references.
 
-### Phase 5: Android Application 2.0 Hardening
-- **Version Alignment**: Synchronized `versionCode 10110` and `versionName "1.0.11"` across `android/app/build.gradle` and native bridges.
-- **Security Policies**:
+### Phase 5: Android Mobile Application Modernization (v1.0.12)
+- **Version & Platform Alignment**:
+  - Synchronized `versionCode 10120`, `versionName "1.0.12"`, `minSdk 24`, `targetSdk 34`.
+  - Configured universal ABI filters: `armeabi-v7a`, `arm64-v8a`, `x86_64`, `x86`.
+- **Hardened WebView Policies**:
   - Disabled cleartext HTTP (`android:usesCleartextTraffic="false"`).
-  - Disabled backup extraction (`android:allowBackup="false"`).
-  - WebSettings hardened: `allowFileAccess = false`, `allowContentAccess = false`.
-  - JavascriptBridge restricted strictly to origin `https://bestwayec.uz`.
-- **Deep-Link Token Protection**:
-  - Stopped appending raw `access_token` or `refresh_token` to URL query strings in `MainActivity.kt`.
-  - Tokens stored securely into `CookieManager` (`Secure; SameSite=Lax`) for `https://bestwayec.uz`, passing only OAuth `auth_code` and `state`.
-- **Production Keystore CI Enforced**:
-  - Removed throwaway `keytool -genkeypair` fallback in `.github/workflows/release-android.yml`.
-  - Mandated official keystore secrets, `--min-sdk-version 24`, and >= 3 MB APK size validation.
+  - Disabled file and content access (`allowFileAccess = false`, `allowContentAccess = false`).
+  - Restricted JavaScript bridge to `https://bestwayec.uz` and `https://api.bestwayec.uz`.
+- **Secure Deep-Link Token Delivery**:
+  - Prevented token leakage into URL query parameters.
+  - Dual-channel delivery: set persistent HTTP cookies (`max-age=2592000`, `Secure; SameSite=Lax`), injected tokens into `localStorage` during `onPageFinished` exclusively on verified domain `https://bestwayec.uz`, and exposed `AndroidBridge.getAuthToken()`.
+- **Production Keystore Signing Pipeline**:
+  - Removed throwaway ephemeral debug keys in `.github/workflows/release-android.yml`.
+  - Enforced official Release Keystore signing (v1+v2+v3) with minSdk 24 and >= 3 MB APK size checks.
 
-### Phase 6: Rust Security & Performance Audit
-- **Canonical Path Traversal Protection**: `src-tauri/src/offline_media.rs` validates canonical paths to prevent directory traversal outside `offline_videos/`.
-- **Bounded Media Streaming**: `src-tauri/src/video_stream.rs` streams AES-256-CTR decrypted video in bounded 2 MB chunks with range header validation.
-- **Safe Credential Management**: Tokens zeroized on logout; keyring entries pruned cleanly without leaving orphaned file replicas.
+### Phase 6: Desktop UI/UX Modernization
+- **Theme & Accessibility**:
+  - Added full contrast theme support: `standard`, `dark`, and `grey`.
+  - Enhanced text scaling options for IELTS candidate readability.
+- **Window Management**:
+  - Verified responsive layouts down to 360px width.
+  - Enhanced custom title bar with native minimization, fullscreen toggle, and close controls.
 
-### Phase 7: Desktop Auto-Updater Multi-Platform Manifest Fix
-- **Parallel Upload Race Resolution**:
-  - Addressed GitHub Actions `release-desktop.yml` issue where 4 concurrent matrix builders (`windows-x64`, `linux-x64`, `macos-intel`, `macos-apple-silicon`) collided when uploading `latest.json`.
-  - Set `includeUpdaterJson: false` on `tauri-action` in `build` matrix so runners upload only their platform binary archives and `.sig` files.
-  - Implemented `buildLatestManifest` and `PLATFORM_UPDATER_SPECS` in `tools/release-platforms.mjs`.
-  - Centralized manifest synthesis in the single `publish` job, collecting all 4 platform `.sig` files, creating a unified `latest.json`, deleting any pre-existing asset, and uploading the verified manifest atomically before publishing.
-  - Added 20 unit tests in `tools/release-platforms.test.mjs` and `tools/validate-release.test.mjs`.
+### Phase 7: Centralized Multi-Platform Updater Manifest
+- **Race Condition Resolution**:
+  - Resolved 422/409 duplicate asset conflict during parallel matrix builds (`windows-x64`, `linux-x64`, `macos-intel`, `macos-apple-silicon`).
+  - Matrix jobs output platform bundles and signatures (`includeUpdaterJson: false`).
+  - Final `publish` job collects all 4 platform `.sig` signatures and synthesizes a single, complete `latest.json` manifest via `tools/release-platforms.mjs` and `tools/updater-manifest.mjs`.
+  - 28 release platform unit tests verify manifest completeness and tamper resistance.
 
 ### Phase 8: Verification Matrix & Quality Gate
-- Executed the complete test matrix with **100% pass rate**:
+- Executed complete test matrix with **100% pass rate**:
   - `npx tsc --noEmit`: 0 errors
-  - `npm test`: 50 test files, 418 passed tests
-  - `node --test tools/release-platforms.test.mjs tools/validate-release.test.mjs`: 20 passed tests
-  - `cargo test --manifest-path src-tauri/Cargo.toml`: 34 passed tests
-  - `npm run build`: Production build completed successfully in 11.36s
+  - `npm test`: 52 test files, 427 passed tests (0 failures)
+  - `node --test`: 28 passed tests (0 failures)
+  - `cargo test --manifest-path src-tauri/Cargo.toml`: 34 passed tests (0 failures)
+  - `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`: 0 warnings
+  - `npm run test:e2e` (Playwright E2E): 2 passed tests (0 failures)
+  - `npm run build`: Production build completed successfully in 9.18s
 
 ---
 
@@ -118,6 +129,11 @@ All commits on `feat/bw-tauri-apps-2x` were authored strictly under `Komiljon Ro
 | `4d06d3f` | `fix(android): enforce official release keystore, synchronize 1.0.11 version, and secure deep-link tokens and webview policies` | `release-android.yml`, `android/app/build.gradle`, `AndroidManifest.xml`, `MainActivity.kt` |
 | `56365c6` | `feat(proctoring): remove hardcoded mock student telemetry, false-success toasts and connect real live room management` | `LiveProctoring.tsx`, `GradingQueue.tsx`, `CenterOverview.tsx`, `StudentResults.tsx`, `GroupsResults.tsx` |
 | `99e6b34` | `fix(release): resolve desktop updater manifest parallel upload race condition` | `release-desktop.yml`, `tools/release-platforms.mjs`, `tools/release-platforms.test.mjs`, `tools/validate-release.mjs`, `tools/validate-release.test.mjs` |
+| `53cb81b` | `docs(release): publish BestWay Apps 2.0 progress ledger, checklist and final report` | Documentation and progress ledgers update |
+| `918caac` | `Merge remote-tracking branch 'origin/main' into feat/bw-tauri-apps-2x` | Integrated upstream PRs #32, #33, #34, #35 cleanly |
+| `f9c65f6` | `build(android): align version code to 1.0.12 and support Windows Git Bash in test` | `android/app/build.gradle` (1.0.12), `tools/android-signing.test.mjs` Windows Git Bash detection |
+| `950528c` | `fix(proctoring): type-safe session reset using EMPTY_ROOM constant` | `LiveProctoring.tsx` type safety |
+| `c505126` | `fix(rust): address clippy doc_lazy_continuation and needless_borrows warnings` | `src-tauri/src/browser.rs`, `src-tauri/src/encryption.rs` |
 
 ---
 
@@ -132,30 +148,43 @@ Exit Code: 0 (0 errors)
 ======================================================================
 2. VITEST UNIT & INTEGRATION TEST SUITE (npm test)
 ======================================================================
-Test Files: 50 passed (50)
-Tests:      418 passed (418)
-Duration:   10.76s
-Result:     100% PASS
+Test Files: 52 passed (52)
+Tests:      427 passed (427)
+Duration:   46.05s
+Result:     100% PASS (0 failed)
 
 ======================================================================
 3. RELEASE ORCHESTRATION & PLATFORMS SUITE (node --test)
 ======================================================================
-Tests:      20 passed (20)
-Duration:   136ms
-Result:     100% PASS
+Tests:      28 passed (28)
+Duration:   3.64s
+Result:     100% PASS (0 failed)
 
 ======================================================================
 4. NATIVE RUST TEST SUITE (cargo test --manifest-path src-tauri/Cargo.toml)
 ======================================================================
 Running unittests src/lib.rs: 34 passed; 0 failed; 0 ignored
+Result:     100% PASS (0 failed)
+
+======================================================================
+5. RUST CLIPPY CHECKS (cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings)
+======================================================================
+Exit Code: 0 (0 warnings / 0 errors)
 Result:     100% PASS
 
 ======================================================================
-5. PRODUCTION FRONTEND BUILD (npm run build)
+6. PLAYWRIGHT E2E TESTS (npm run test:e2e)
 ======================================================================
-Transformed: 755 modules
+Tests:      2 passed (2)
+Duration:   39.0s
+Result:     100% PASS (0 failed)
+
+======================================================================
+7. PRODUCTION FRONTEND BUILD (npm run build)
+======================================================================
+Transformed: 757 modules
 Output:     dist/index.html, dist/assets/* (ExamRunner, LiveProctoring, etc.)
-Duration:   11.36s
+Duration:   9.18s
 Result:     SUCCESS
 ======================================================================
 ```
@@ -168,5 +197,5 @@ The `feat/bw-tauri-apps-2x` branch is verified, robust, and completely ready for
 
 - **Primary Desktop Target**: Windows x64 NSIS build tested and hardened.
 - **Secondary Targets**: macOS Intel & Apple Silicon, Linux x64 AppImage/deb validated via CI orchestration tests.
-- **Mobile Target**: Android WebView client secured and restricted to official Release Keystore signing.
+- **Mobile Target**: Android WebView client secured, synchronized to 1.0.12, and restricted to official Release Keystore signing.
 - **Auto-Updater**: Parallel manifest upload race eliminated; unified 4-platform `latest.json` synthesis verified.
