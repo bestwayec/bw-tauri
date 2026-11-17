@@ -41,3 +41,72 @@ export function releasePlan(tag, assets = [], selected = 'missing') {
   }
   return { include, hasBuilds: include.length > 0 };
 }
+
+/** Target specs for synthesizing unified multi-platform Tauri updater manifest (latest.json). */
+export const PLATFORM_UPDATER_SPECS = [
+  {
+    platformKey: 'windows-x86_64',
+    archivePattern: /(?:x64-setup(?:\.nsis)?\.zip)$/i,
+  },
+  {
+    platformKey: 'linux-x86_64',
+    archivePattern: /(?:amd64\.AppImage\.tar\.gz)$/i,
+  },
+  {
+    platformKey: 'darwin-x86_64',
+    archivePattern: /(?:_x64\.app\.tar\.gz)$/i,
+  },
+  {
+    platformKey: 'darwin-aarch64',
+    archivePattern: /(?:_aarch64\.app\.tar\.gz)$/i,
+  },
+];
+
+/**
+ * Assemble a unified multi-platform latest.json updater manifest from uploaded release assets.
+ * Fetches .sig signatures and pairs them with archive URLs.
+ */
+export async function buildLatestManifest(tag, assets = [], fetchSignatureText, options = {}) {
+  const version = tag.match(/^(?:bestway-app-)?v((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:rc|beta|alpha)\.(?:0|[1-9][0-9]*))?)$/)?.[1];
+  if (!version) throw new Error('Expected a versioned bestway-app release tag');
+
+  const platforms = {};
+  for (const spec of PLATFORM_UPDATER_SPECS) {
+    const archive = assets.find(a => spec.archivePattern.test(a.name) && a.state === 'uploaded' && a.size > 0);
+    if (!archive) continue;
+
+    const sigAsset = assets.find(a => (a.name === `${archive.name}.sig` || (spec.archivePattern.test(a.name.replace(/\.sig$/i, '')) && a.name.endsWith('.sig'))) && a.state === 'uploaded');
+    if (!sigAsset) {
+      if (options.requireSignatures) {
+        throw new Error(`Missing signature asset for updater archive ${archive.name}`);
+      }
+      continue;
+    }
+
+    const signature = typeof fetchSignatureText === 'function' ? await fetchSignatureText(sigAsset) : sigAsset.signatureText;
+    if (!signature || typeof signature !== 'string' || !signature.trim()) {
+      throw new Error(`Signature for ${archive.name} (${sigAsset.name}) is empty or missing`);
+    }
+
+    platforms[spec.platformKey] = {
+      signature: signature.trim(),
+      url: archive.browser_download_url || `https://github.com/bestwayec/bw-tauri/releases/download/${tag}/${archive.name}`,
+    };
+  }
+
+  if (Object.keys(platforms).length === 0) {
+    return null;
+  }
+
+  if (options.requireAllPlatforms && Object.keys(platforms).length < PLATFORM_UPDATER_SPECS.length) {
+    const missing = PLATFORM_UPDATER_SPECS.map(s => s.platformKey).filter(k => !platforms[k]);
+    throw new Error(`Updater manifest missing required platforms: ${missing.join(', ')}`);
+  }
+
+  return {
+    version,
+    notes: options.notes || `Student lockdown exam client (Tauri v2). Release ${tag}.`,
+    pub_date: options.pub_date || new Date().toISOString(),
+    platforms,
+  };
+}

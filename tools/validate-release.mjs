@@ -30,7 +30,9 @@ export function validateRelease(env, versions) {
   }
   return {
     mode,
-    includeUpdaterJson: mode === 'signed_updater',
+    // Updater JSON is assembled centrally in the publish job across all
+    // platforms to prevent the parallel-build race condition on GitHub Releases.
+    includeUpdaterJson: false,
     args: mode === 'manual_installer' ? '--config src-tauri/tauri.manual-installer.conf.json' : '',
   };
 }

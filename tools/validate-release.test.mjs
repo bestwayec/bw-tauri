@@ -31,9 +31,9 @@ test('signed release requires a signing key', () => {
   assert.throws(() => validateRelease({ ...env, DESKTOP_RELEASE_MODE: 'signed_updater' }, versions), /TAURI_SIGNING_PRIVATE_KEY/);
 });
 
-test('signed release preserves the base updater configuration', () => {
+test('signed release suppresses per-runner updater JSON to prevent parallel race conditions', () => {
   const release = validateRelease({ ...env, DESKTOP_RELEASE_MODE: 'signed_updater', TAURI_SIGNING_PRIVATE_KEY: 'synthetic-test-key' }, versions);
-  assert.equal(release.includeUpdaterJson, true);
+  assert.equal(release.includeUpdaterJson, false);
   assert.equal(release.args, '');
 });
 
