@@ -1,5 +1,19 @@
 # Changelog — Bestway Exam desktop (`bw-tauri`)
 
+## Unreleased
+
+### Dashboard
+- The CEFR level shown by the score predictor, the dashboard banner and the
+  live proctoring CSV now comes from the server and nowhere else. The three
+  local copies of the Multilevel score to level table (A2 0-33, B1 34-45,
+  B2 46-59, C1 60-75; they disagreed with the server's 38 / 51 / 65 scale) are
+  gone. `src/lib/cefr.ts` only recognises what the server sends: C2, C1, B2,
+  B1, BELOW_B1 (written "Below B1"), and A2 / A1 for results saved under the
+  old scales. The offline estimate shows no level.
+- Works with the web API change that follows the ielts.org IELTS to CEFR map
+  (C2 8.5, C1 7.0, B2 5.5, B1 4.0; under 4.0 is BELOW_B1) and removes the
+  internal practice grade (bestwayec/bestway).
+
 ## v1.0.11
 
 ### Dashboard

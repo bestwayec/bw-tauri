@@ -23,8 +23,9 @@ import { ExamTracks, usePrograms } from "@/components/ExamTracks";
 import MultilevelHistory from "@/components/MultilevelHistory";
 import ScorePredictionWidget, {
   computeFallbackPrediction,
-  multilevelScoreToCefr,
+  useScorePrediction,
 } from "@/components/ScorePredictionWidget";
+import { cefrText } from "@/lib/cefr";
 import LiveExamPinJoin from "@/components/LiveExamPinJoin";
 import MockSectionPicker, { type MockStartChoice } from "@/components/exam-ui/MockSectionPicker";
 import { belongsToProgram, programQueryKey, type ExamProgram } from "@/lib/programs";
@@ -216,7 +217,8 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
   // Compute live prediction stats
   const prediction = computeFallbackPrediction(attempts, program);
   const targetPct = prediction.targetProgressPct;
-  const cefrBadge = program === "MULTILEVEL" ? prediction.cefrLevel : multilevelScoreToCefr(prediction.predictedMultilevelScore);
+  // The level is the server's (shared query with the predictor widget); this page never works one out.
+  const cefrBadge = cefrText(useScorePrediction(program, attempts).cefrLevel);
 
   async function handleResume(a: AttemptSummary) {
     const test = tests.find((t) => t.id === a.testId);
