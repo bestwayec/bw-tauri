@@ -44,13 +44,12 @@ BestWay o'rnatiluvchi ilovalarini (Windows [birlamchi], macOS, Linux desktop ilo
    - `npm run build` -> PASS (**tsc + Vite production bundle muvaffaqiyatli yaratildi**).
 
 ## 3. Jarayonda
-- Barcha ishlab chiqish, mustaqil verifikatsiya va avtomatlashtirilgan testlar 100% natija bilan yakunlandi.
-- Pull Request [#36](https://github.com/bestwayec/bw-tauri/pull/36) yangilanmoqda.
+- Barcha ishlab chiqish, mustaqil verifikatsiya, xavfsizlik darvozasi (P0 Security Gate) va avtomatlashtirilgan testlar 100% natija bilan yakunlandi.
+- GitHub Actions CI matrix: 5/5 jobs green (ci, browser, rust, android, windows-x64) muvaffaqiyatli yakunlandi.
 
 ## 4. Keyingi Qadamlar
-- O'zgarishlarni commit qilish va `origin feat/bw-tauri-apps-2x` ga push qilish.
-- PR #36 tavsifini yangilash va GitHub Actions tekshiruvlarini kuzatish.
-- Foydalanuvchiga yakuniy xavfsizlik hisobotini taqdim etish.
+- PR #36 tavsifini yangilash va yakuniy xavfsizlik hisobotini taqdim etish.
+- Physical device staging testing (haqiqiy Android qurilma va Windows kiosk muhitida sinov).
 
 ## 5. Muhim Qarorlar
 - **Zero AI Attribution**: Barcha git kommitlari faqat Komiljon Roziyev (kruziyev0@gmail.com) nomidan amalga oshirildi, AI imzolari yoki belgilariga yo'l qo'yilmadi.
