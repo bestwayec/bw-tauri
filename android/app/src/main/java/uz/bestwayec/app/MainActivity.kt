@@ -41,16 +41,27 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val BASE_URL = "https://bestwayec.uz/?platform=mobile_app"
-        private const val USER_AGENT_SUFFIX = " BestWayApp/0.8.3 BestWay-Android/0.8.3 MobileApp"
+        private val USER_AGENT_SUFFIX = " BestWayApp/${BuildConfig.VERSION_NAME} BestWay-Android/${BuildConfig.VERSION_NAME} MobileApp"
         private const val REQUEST_RECORD_AUDIO = 1001
     }
 
-    class AndroidBridge {
+    class AndroidBridge(private val webView: WebView) {
         @android.webkit.JavascriptInterface
-        fun isMobileApp(): Boolean = true
+        fun isMobileApp(): Boolean {
+            val url = webView.url ?: ""
+            return isTrustedOrigin(url)
+        }
 
         @android.webkit.JavascriptInterface
-        fun getVersion(): String = "0.8.3"
+        fun getVersion(): String {
+            val url = webView.url ?: ""
+            if (!isTrustedOrigin(url)) return ""
+            return BuildConfig.VERSION_NAME
+        }
+
+        private fun isTrustedOrigin(url: String): Boolean {
+            return url.startsWith("https://bestwayec.uz/") || url.startsWith("https://api.bestwayec.uz/") || url == "https://bestwayec.uz"
+        }
     }
 
     private lateinit var swipeRefresh: SwipeRefreshLayout
@@ -127,7 +138,7 @@ class MainActivity : AppCompatActivity() {
         if (savedInstanceState == null) {
             val deepLinkUri = intent?.data
             val scheme = deepLinkUri?.scheme?.lowercase()
-            if (deepLinkUri != null && (scheme == "bestway-exam" || scheme == "bestway")) {
+            if (deepLinkUri != null && (scheme == "bestway-exam" || scheme == "bestway" || scheme == "bestwayapp")) {
                 handleDeepLink(intent)
             } else {
                 webView.loadUrl(BASE_URL)
@@ -144,7 +155,7 @@ class MainActivity : AppCompatActivity() {
     private fun handleDeepLink(intent: Intent?) {
         val data = intent?.data ?: return
         val scheme = data.scheme?.lowercase() ?: return
-        if (scheme == "bestway-exam" || scheme == "bestway") {
+        if (scheme == "bestway-exam" || scheme == "bestway" || scheme == "bestwayapp") {
             val host = data.host?.lowercase() ?: ""
             val path = data.path ?: ""
             val fullUrl = data.toString()
@@ -154,17 +165,28 @@ class MainActivity : AppCompatActivity() {
                 fullUrl.contains("/auth/callback")
             ) {
                 val code = data.getQueryParameter("code")
+                val state = data.getQueryParameter("state")
                 val token = data.getQueryParameter("token") ?: data.getQueryParameter("access_token")
                 val refreshToken = data.getQueryParameter("refresh_token")
-                val targetParams = mutableListOf<String>()
-                if (!code.isNullOrEmpty()) targetParams.add("auth_code=$code")
-                if (!token.isNullOrEmpty()) targetParams.add("token=$token")
-                if (!refreshToken.isNullOrEmpty()) targetParams.add("refresh_token=$refreshToken")
-                val queryString = if (targetParams.isNotEmpty()) {
-                    targetParams.joinToString("&")
-                } else {
-                    "platform=mobile_app"
+
+                // If tokens arrive via deep link, store them into CookieManager for the verified origin
+                // rather than exposing them in public URL query parameters.
+                if (!token.isNullOrEmpty()) {
+                    val cookieManager = CookieManager.getInstance()
+                    cookieManager.setCookie("https://bestwayec.uz", "bw_access_token=$token; path=/; Secure; SameSite=Lax")
+                    if (!refreshToken.isNullOrEmpty()) {
+                        cookieManager.setCookie("https://bestwayec.uz", "bw_refresh_token=$refreshToken; path=/; Secure; SameSite=Lax")
+                    }
+                    cookieManager.flush()
                 }
+
+                // Forward OAuth authorization code/state safely without leaking raw tokens in URLs
+                val targetParams = mutableListOf<String>()
+                targetParams.add("platform=mobile_app")
+                if (!code.isNullOrEmpty()) targetParams.add("auth_code=$code")
+                if (!state.isNullOrEmpty()) targetParams.add("state=$state")
+
+                val queryString = targetParams.joinToString("&")
                 val redirectUrl = "https://bestwayec.uz/?$queryString"
                 webView.loadUrl(redirectUrl)
             }
@@ -186,18 +208,19 @@ class MainActivity : AppCompatActivity() {
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(webView, true)
-            setCookie("https://bestwayec.uz", "bw_mobile_app=1; path=/; max-age=31536000")
+            setCookie("https://bestwayec.uz", "bw_mobile_app=1; path=/; max-age=31536000; Secure; SameSite=Lax")
         }
 
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-        webView.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
+        webView.addJavascriptInterface(AndroidBridge(webView), "AndroidBridge")
 
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
             databaseEnabled = true
             mediaPlaybackRequiresUserGesture = false
-            allowFileAccess = true
+            allowFileAccess = false
+            allowContentAccess = false
             setSupportMultipleWindows(false)
             cacheMode = WebSettings.LOAD_DEFAULT
             userAgentString = "${userAgentString}$USER_AGENT_SUFFIX"
@@ -394,7 +417,7 @@ class MainActivity : AppCompatActivity() {
             return openCustomTabOrBrowser(uri)
         }
 
-        if (scheme == "bestway-exam" || scheme == "bestway") {
+        if (scheme == "bestway-exam" || scheme == "bestway" || scheme == "bestwayapp") {
             handleDeepLink(Intent(Intent.ACTION_VIEW, uri))
             return true
         }
