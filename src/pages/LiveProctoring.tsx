@@ -261,6 +261,16 @@ export function proctorExportRow(s: ProctorStudent): string[] {
   ];
 }
 
+const EMPTY_ROOM: LiveExamRoomSession = {
+  id: "",
+  pin: "",
+  title: "",
+  examType: "IELTS",
+  simulatorMode: "cdi",
+  status: "waiting",
+  createdAt: "",
+};
+
 export default function LiveProctoring() {
   const [students, setStudents] = useState<ProctorStudent[]>(() => (demoDataEnabled() ? DEMO_STUDENTS : []));
   const [search, setSearch] = useState("");
@@ -406,7 +416,7 @@ export default function LiveProctoring() {
     if (!requireRoom()) return;
     try {
       await post(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/action`, { action: "start_exam" });
-      setLiveRoom((prev) => (prev ? { ...prev, status: "active" } : null));
+      setLiveRoom((prev) => ({ ...prev, status: "active" }));
       triggerToast("Barcha ulangan talabalar uchun imtihon sinxron boshlandi!");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -439,7 +449,7 @@ export default function LiveProctoring() {
     if (!confirm("Haqiqatan ham imtihon xonasini yakunlab, barcha natijalarni saqlamoqchimisiz?")) return;
     try {
       await post(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/action`, { action: "end_room" });
-      setLiveRoom((prev) => (prev ? { ...prev, status: "completed" } : null));
+      setLiveRoom((prev) => ({ ...prev, status: "completed" }));
       triggerToast("Imtihon xonasi yakunlandi va yopildi.");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -778,7 +788,7 @@ export default function LiveProctoring() {
           </button>
           <button
             type="button"
-            onClick={() => setLiveRoom(null)}
+            onClick={() => setLiveRoom(EMPTY_ROOM)}
             className="rounded-xl border border-white/20 bg-white/5 hover:bg-white/10 px-3.5 py-2 text-xs font-semibold text-white/80 transition cursor-pointer"
           >
             ← Boshqa xona
