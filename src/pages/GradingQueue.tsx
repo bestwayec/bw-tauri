@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { get, post } from "@/lib/api";
 
 export interface SubmissionItem {
   id: string;
@@ -27,81 +28,24 @@ export interface SubmissionItem {
   teacherFeedback: string;
 }
 
-const INITIAL_SUBMISSIONS: SubmissionItem[] = [
-  {
-    id: "sub-w-01",
-    studentName: "Azamat Karimov",
-    studentPhone: "+998 90 123 45 67",
-    examTitle: "IELTS Academic Mock 14",
-    skill: "writing",
-    subType: "Task 2 (Academic Essay)",
-    submittedAt: "Today, 13:40",
-    status: "pending",
-    prompt:
-      "Some people believe that artificial intelligence will replace teachers in classrooms in the future, while others argue that the human element is indispensable in education. Discuss both views and give your opinion.",
-    responseText:
-      "In contemporary society, the integration of artificial intelligence into educational settings has ignited contentious debate. While technological optimists contend that intelligent algorithms and machine tutors could completely substitute human educators, I staunchly maintain that educators provide irreplaceable pedagogical guidance and emotional empathy.\n\nOn one hand, artificial intelligence offers unparalleled efficiency in data processing and adaptive learning. Advanced algorithms can analyze a student's learning pace, pinpoint specific weaknesses in grammar or mathematics, and curate tailored practice exercises in milliseconds. For instance, algorithmic tutoring platforms in mathematics can provide instant step-by-step diagnostic feedback. Consequently, proponents argue that AI guarantees unbiased, scalable, and personalized education for pupils irrespective of geographical constraints.\n\nOn the other hand, the holistic development of learners necessitates human mentorship that cannot be replicated by silicon processors. Education extends far beyond rote memorization; it encompasses critical thinking, ethical reasoning, and interpersonal communication. A skilled teacher perceives subtle signs of frustration or disengagement, providing timely encouragement that sustains a pupil's intrinsic motivation. Furthermore, teachers cultivate collaboration and resolve conflict during group projects, serving as moral role models.\n\nIn conclusion, although artificial intelligence will undeniably augment instructional efficiency, it should serve as a sophisticated pedagogical assistant rather than a replacement. The human touch remains the cornerstone of inspiring and well-rounded education.",
-    criteriaScores: { c1: 7.5, c2: 7.5, c3: 7.0, c4: 7.5 },
-    overallBand: null,
-    teacherFeedback:
-      "Well structured essay with clear paragraphing and cohesive devices. Strong academic vocabulary (pedagogical guidance, contentious debate, tailored practice). Try to include more diverse complex sentence inversions.",
-  },
-  {
-    id: "sub-s-02",
-    studentName: "Madina Usmanova",
-    studentPhone: "+998 93 456 78 90",
-    examTitle: "IELTS Academic Mock 14",
-    skill: "speaking",
-    subType: "Part 2 (Cue Card)",
-    submittedAt: "Today, 14:15",
-    status: "pending",
-    prompt:
-      "Describe an important historic monument you visited that left a deep impression on you. You should say: where it was, why you visited it, what it looked like, and explain why it was memorable.",
-    audioDurationSeconds: 118,
-    audioUrl: "https://example.com/audio/mock-speaking-01.wav",
-    criteriaScores: { c1: 7.0, c2: 7.0, c3: 6.5, c4: 7.0 },
-    overallBand: null,
-    teacherFeedback:
-      "Fluent delivery with minimal hesitation. Pronunciation of historical terms like 'architecture' and 'mausoleum' was accurate. Work on reducing repetition of 'you know'.",
-  },
-  {
-    id: "sub-w-03",
-    studentName: "Javohir Tursunov",
-    studentPhone: "+998 97 789 01 23",
-    examTitle: "CEFR Multilevel B2/C1 Practice",
-    examType: "MULTILEVEL",
-    skill: "writing",
-    subType: "Part 2 (Formal Letter)",
-    submittedAt: "Yesterday, 16:30",
-    status: "pending",
-    prompt:
-      "Write a letter to your local city council proposing a new green cycling path in your neighborhood. Explain the benefits to public health and traffic decongestion.",
-    responseText:
-      "Dear City Council Members,\n\nI am writing to respectfully submit a proposal regarding the development of a dedicated green cycling corridor connecting the Yunusabad residential district with the central transit terminal.\n\nAt present, our neighborhood experiences acute vehicular congestion during morning and evening rush hours, resulting in elevated carbon emissions and hazardous conditions for pedestrians. The construction of an eco-friendly cycling pathway would encourage active commuting, alleviate peak-hour traffic strain, and measurably boost community wellbeing.\n\nThank you for considering this constructive civic initiative. I would welcome the opportunity to discuss the feasibility study at your upcoming public hearing.\n\nYours sincerely,\nJavohir Tursunov",
-    criteriaScores: { c1: 7.0, c2: 7.0, c3: 6.5, c4: 7.0 },
-    overallBand: null,
-    teacherFeedback: "Concise and formally polite. Good vocabulary.",
-  },
-  {
-    id: "sub-s-04",
-    studentName: "Zarina Alimova",
-    studentPhone: "+998 99 234 56 78",
-    examTitle: "IELTS Academic Mock 13",
-    skill: "speaking",
-    subType: "Part 3 (Discussion)",
-    submittedAt: "Yesterday, 11:20",
-    status: "graded",
-    prompt: "How has technology changed the way cultural heritage is preserved?",
-    audioDurationSeconds: 145,
-    criteriaScores: { c1: 8.0, c2: 8.0, c3: 7.5, c4: 8.0 },
-    overallBand: 8.0,
-    teacherFeedback: "Superb articulation and wide lexical range with natural idiomatic phrasing.",
-  },
-];
-
 export default function GradingQueue() {
-  const [submissions, setSubmissions] = useState<SubmissionItem[]>(INITIAL_SUBMISSIONS);
-  const [selectedId, setSelectedId] = useState<string>("sub-w-01");
+  const [submissions, setSubmissions] = useState<SubmissionItem[]>([]);
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const res = await get<SubmissionItem[]>("/v1/teacher/submissions");
+        if (active && Array.isArray(res)) {
+          setSubmissions(res);
+          if (res.length > 0) setSelectedId(res[0].id);
+        }
+      } catch {
+        // empty queue when unavailable
+      }
+    })();
+    return () => { active = false; };
+  }, []);
+  const [selectedId, setSelectedId] = useState<string>("");
   const [skillFilter, setSkillFilter] = useState<"all" | "writing" | "speaking">("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "graded">("pending");
   const [isPlaying, setIsPlaying] = useState(false);
@@ -137,7 +81,7 @@ export default function GradingQueue() {
     );
   }
 
-  function handleSubmitGrade() {
+  async function handleSubmitGrade() {
     if (!selected) return;
     const avg =
       selected.overallBand ??
@@ -149,12 +93,22 @@ export default function GradingQueue() {
           4) *
           2
       ) / 2;
-    setSubmissions((prev) =>
-      prev.map((s) =>
-        s.id === selected.id ? { ...s, status: "graded", overallBand: avg } : s
-      )
-    );
-    triggerToast(`Official grade submitted for ${selected.studentName}: Band ${avg}`);
+    try {
+      await post(`/v1/teacher/submissions/${encodeURIComponent(selected.id)}/grade`, {
+        criteriaScores: selected.criteriaScores,
+        overallBand: avg,
+        feedback: selected.teacherFeedback,
+      });
+      setSubmissions((prev) =>
+        prev.map((s) =>
+          s.id === selected.id ? { ...s, status: "graded", overallBand: avg } : s
+        )
+      );
+      triggerToast(`Official grade submitted for ${selected.studentName}: Band ${avg}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      triggerToast(`Xatolik: Bahoni saqlab bo'lmadi (${msg})`);
+    }
   }
 
   const filtered = submissions.filter((s) => {
@@ -237,6 +191,17 @@ export default function GradingQueue() {
       </div>
 
       {/* Workspace: 2 Columns */}
+      {filtered.length === 0 ? (
+        <div className="card rounded-2xl p-12 text-center text-white/50 border border-white/10 bg-surface/40">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/10 text-2xl text-emerald-400">
+            📝
+          </div>
+          <p className="mt-4 text-base font-bold text-white">Baholash navbati bo'sh</p>
+          <p className="mt-1 text-xs text-white/60">
+            Hozircha tekshirilishi kerak bo'lgan yangi yozma insho yoki og'zaki audio yozuvlar mavjud emas.
+          </p>
+        </div>
+      ) : (
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
         {/* Left column: Submissions List */}
         <div className="space-y-3 lg:col-span-4">
@@ -488,6 +453,7 @@ export default function GradingQueue() {
           </div>
         )}
       </div>
+    )}
     </div>
   );
 }
