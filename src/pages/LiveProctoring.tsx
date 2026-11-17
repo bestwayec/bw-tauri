@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { API_BASE_URL, get, post } from "@/lib/api";
 import type { SimulatorMode } from "@/components/exam-ui/model";
-import { multilevelScoreToCefr } from "@/components/ScorePredictionWidget";
+import { cefrText, normalizeCefr } from "@/lib/cefr";
 
 export interface LiveExamRoomSession {
   id: string;
@@ -60,6 +60,8 @@ export interface ProctorStudent {
   timeLimitSeconds: number;
   status: "active" | "flagged" | "critical" | "submitted";
   estimatedScore?: number;
+  /** The level the server reported for this student, if any; never worked out from the score here. */
+  cefrLevel?: string | null;
   antiCheatFlags: {
     blurCount: number;
     shortcutCount: number;
@@ -285,6 +287,7 @@ export default function LiveProctoring() {
             answeredCount: number;
             totalQuestions: number;
             progressPercent: number;
+            cefrLevel?: string | null;
           }>;
           status?: string;
         }>(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/proctor-status`);
@@ -328,6 +331,7 @@ export default function LiveProctoring() {
                 timeLimitSeconds: p.timeRemainingSeconds ?? 3600,
                 status: mappedStatus,
                 estimatedScore: prevMatch?.estimatedScore,
+                cefrLevel: p.cefrLevel ?? prevMatch?.cefrLevel ?? null,
                 antiCheatFlags: {
                   blurCount: p.strikesCount,
                   shortcutCount: 0,
@@ -511,7 +515,7 @@ export default function LiveProctoring() {
     ];
     const rows = students.map((s) => {
       const sc = s.estimatedScore ?? 52;
-      const cefr = multilevelScoreToCefr(sc);
+      const cefr = cefrText(normalizeCefr(s.cefrLevel));
       const band = ((sc / 75) * 9).toFixed(1);
       return [
         s.name,

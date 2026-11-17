@@ -1,8 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { get } from "./api";
 
-export type CefrLevel = "A2" | "B1" | "B2" | "C1";
-
 export interface WeakModule {
   module: string;
   skill: "listening" | "reading" | "writing" | "speaking" | string;
@@ -100,14 +98,6 @@ export interface AssessmentOverviewData {
     bestMultilevelScore?: number;
     [key: string]: unknown;
   };
-}
-
-export function multilevelScoreToCefr(score: number): CefrLevel {
-  const clamped = Math.max(0, Math.min(75, Math.round(Number.isFinite(score) ? score : 0)));
-  if (clamped >= 60) return "C1";
-  if (clamped >= 46) return "B2";
-  if (clamped >= 34) return "B1";
-  return "A2";
 }
 
 export async function fetchAssessmentOverview(): Promise<AssessmentOverviewData> {

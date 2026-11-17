@@ -15,7 +15,7 @@ import {
   bandToMultilevelScore,
   computeFallbackPrediction,
   multilevelScoreToBand,
-  multilevelScoreToCefr,
+  normalizeServerPrediction,
 } from "@/components/ScorePredictionWidget";
 import LiveExamPinJoin, {
   isValidExamPin,
@@ -188,16 +188,17 @@ describe("Single Audio & Part Timestamps in ListeningEngine", () => {
   });
 });
 
-describe("Score Prediction CEFR Scale (0–75 ball) & Dual-Scale Conversion", () => {
-  it("maps Multi-Level 0-75 scores strictly to A2 (0-33), B1 (34-45), B2 (46-59), C1 (60-75)", () => {
-    expect(multilevelScoreToCefr(0)).toBe("A2");
-    expect(multilevelScoreToCefr(33)).toBe("A2");
-    expect(multilevelScoreToCefr(34)).toBe("B1");
-    expect(multilevelScoreToCefr(45)).toBe("B1");
-    expect(multilevelScoreToCefr(46)).toBe("B2");
-    expect(multilevelScoreToCefr(59)).toBe("B2");
-    expect(multilevelScoreToCefr(60)).toBe("C1");
-    expect(multilevelScoreToCefr(75)).toBe("C1");
+describe("Score Prediction (CEFR from the server) & Dual-Scale Conversion", () => {
+  it("takes the CEFR level from the server for the active program, accepting C2 and BELOW_B1", () => {
+    const fallback = computeFallbackPrediction([], "MULTILEVEL");
+    expect(fallback.cefrLevel).toBeNull();     // an offline estimate has no level: none is computed here
+    const server = (ielts: unknown, multilevel: unknown) => ({ ielts: { predictedBand: 8.5, cefrLevel: ielts }, multilevel: { predictedScore: 30, cefrLevel: multilevel } });
+    expect(normalizeServerPrediction(server("C2", "BELOW_B1"), fallback, "IELTS").cefrLevel).toBe("C2");
+    expect(normalizeServerPrediction(server("C2", "BELOW_B1"), fallback, "MULTILEVEL").cefrLevel).toBe("BELOW_B1");
+    expect(normalizeServerPrediction(server("B1", "B2"), fallback, "MULTILEVEL").cefrLevel).toBe("B2");
+    expect(normalizeServerPrediction(server("A2", "A2"), fallback, "IELTS").cefrLevel).toBe("A2");        // stored under the old scales
+    expect(normalizeServerPrediction(server("nonsense", null), fallback, "IELTS").cefrLevel).toBeNull();
+    expect(normalizeServerPrediction(server(undefined, undefined), fallback, "MULTILEVEL").cefrLevel).toBeNull();
   });
 
   it("converts between IELTS Band (0-9.0) and Multi-Level (0-75 ball) scales", () => {
@@ -227,7 +228,7 @@ describe("Score Prediction CEFR Scale (0–75 ball) & Dual-Scale Conversion", ()
       "MULTILEVEL",
     );
     expect(pred.predictedMultilevelScore).toBe(62);
-    expect(pred.cefrLevel).toBe("C1");
+    expect(pred.cefrLevel).toBeNull();   // the level is the server's; the offline estimate computes none
     expect(pred.hasEvidence).toBe(true);
     // No invented weak modules: local summaries carry no per-module answers.
     expect(pred.weakModules).toEqual([]);
