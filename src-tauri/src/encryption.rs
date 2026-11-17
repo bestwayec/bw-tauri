@@ -204,7 +204,7 @@ pub fn get_or_derive_machine_key() -> Result<[u8; 32], String> {
     let mut hasher = Sha256::new();
     hasher.update(APP_MEDIA_SALT);
     hasher.update(machine_id.as_bytes());
-    hasher.update(&rand_bytes);
+    hasher.update(rand_bytes);
     let key: [u8; 32] = hasher.finalize().into();
 
     // 4. Try storing to keyring

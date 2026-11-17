@@ -9,6 +9,7 @@
 //! redirect:
 //! - `https://bestwayec.uz/*`, `https://api.bestwayec.uz/*` (production)
 //! - `http://localhost:*` / `http://127.0.0.1:*` / `http://[::1]*` (local dev)
+//!
 //! Anything else — including `javascript:`, `data:`, `file:`, userinfo URLs
 //! (`https://user:pass@host`), or unparseable input — is rejected BEFORE
 //! touching the OS.
