@@ -3,8 +3,7 @@ import { get } from "@/lib/api";
 import { useAssessmentOverview } from "@/lib/assessment-overview";
 import type { AttemptSummary } from "@/lib/tests";
 import type { ExamProgram } from "@/lib/programs";
-
-export type CefrPredictedLevel = "A2" | "B1" | "B2" | "C1";
+import { cefrText, normalizeCefr, type StoredCefrLevel } from "@/lib/cefr";
 
 export interface PredictionAttemptPoint {
   attemptId: string;
@@ -17,7 +16,8 @@ export interface PredictionAttemptPoint {
 export interface ScorePredictionPayload {
   predictedBand: number;
   predictedMultilevelScore: number;
-  cefrLevel: CefrPredictedLevel;
+  /** The level the server reported for the active program; null until it has one (never computed here). */
+  cefrLevel: StoredCefrLevel | null;
   targetBand: number;
   targetMultilevelScore: number;
   targetProgressPct: number;
@@ -32,21 +32,6 @@ export interface ScorePredictionPayload {
     accuracyPct: number | null;
     recommendation: string;
   }>;
-}
-
-/**
- * Official Multi-Level (0–75 ball) to CEFR mapping:
- * - A2: 0–33
- * - B1: 34–45
- * - B2: 46–59
- * - C1: 60–75
- */
-export function multilevelScoreToCefr(score: number): CefrPredictedLevel {
-  const clamped = Math.max(0, Math.min(75, Math.round(Number.isFinite(score) ? score : 0)));
-  if (clamped >= 60) return "C1";
-  if (clamped >= 46) return "B2";
-  if (clamped >= 34) return "B1";
-  return "A2";
 }
 
 /** Convert an IELTS band (0.0–9.0) to an equivalent Multi-Level score (0–75) or vice versa. */
@@ -120,7 +105,8 @@ export function computeFallbackPrediction(
   return {
     predictedBand,
     predictedMultilevelScore,
-    cefrLevel: multilevelScoreToCefr(predictedMultilevelScore),
+    // The level belongs to the server; an offline estimate has none.
+    cefrLevel: null,
     targetBand,
     targetMultilevelScore,
     targetProgressPct,
@@ -134,9 +120,10 @@ export function computeFallbackPrediction(
   };
 }
 
-function normalizeServerPrediction(
+export function normalizeServerPrediction(
   raw: Record<string, unknown> | null | undefined,
   fallback: ScorePredictionPayload,
+  program: ExamProgram = "IELTS",
 ): ScorePredictionPayload {
   if (!raw || typeof raw !== "object") return fallback;
   const rawIelts = (raw.ielts ?? {}) as Record<string, unknown>;
@@ -162,10 +149,8 @@ function normalizeServerPrediction(
             ? raw.multilevelScore
             : bandToMultilevelScore(band);
 
-  const cefrLevel =
-    typeof rawMl.cefrLevel === "string" && ["A2", "B1", "B2", "C1"].includes(rawMl.cefrLevel)
-      ? (rawMl.cefrLevel as CefrPredictedLevel)
-      : multilevelScoreToCefr(mlScore);
+  // The server's level for the program being shown (IELTS band map or Multilevel scale), as it sent it.
+  const cefrLevel = normalizeCefr(program === "MULTILEVEL" ? rawMl.cefrLevel : rawIelts.cefrLevel ?? raw.cefrLevel);
 
   const targetBand =
     typeof rawIelts.targetBand === "number"
@@ -250,11 +235,14 @@ function normalizeServerPrediction(
   };
 }
 
-const CEFR_BADGE_STYLE: Record<CefrPredictedLevel, string> = {
-  A2: "border-amber-500/40 bg-amber-500/15 text-amber-300",
-  B1: "border-sky-500/40 bg-sky-500/15 text-sky-300",
-  B2: "border-violet-500/40 bg-violet-500/15 text-violet-300",
+const CEFR_BADGE_STYLE: Record<StoredCefrLevel, string> = {
+  C2: "border-fuchsia-500/40 bg-fuchsia-500/15 text-fuchsia-300",
   C1: "border-emerald-500/40 bg-emerald-500/15 text-emerald-300",
+  B2: "border-violet-500/40 bg-violet-500/15 text-violet-300",
+  B1: "border-sky-500/40 bg-sky-500/15 text-sky-300",
+  BELOW_B1: "border-slate-500/40 bg-slate-500/15 text-slate-300",
+  A2: "border-amber-500/40 bg-amber-500/15 text-amber-300",
+  A1: "border-amber-500/40 bg-amber-500/15 text-amber-300",
 };
 
 interface Props {
@@ -263,7 +251,8 @@ interface Props {
   onPracticeWeakSkill?: () => void;
 }
 
-export default function ScorePredictionWidget({ program, attempts, onPracticeWeakSkill }: Props) {
+/** The prediction as the server reports it (with the server's CEFR level), or the offline estimate. */
+export function useScorePrediction(program: ExamProgram, attempts?: AttemptSummary[] | null): ScorePredictionPayload {
   const fallback = computeFallbackPrediction(attempts, program);
   const overviewQuery = useAssessmentOverview();
 
@@ -272,7 +261,7 @@ export default function ScorePredictionWidget({ program, attempts, onPracticeWea
     queryFn: async () => {
       try {
         const res = await get<Record<string, unknown>>("/mock/prediction/me");
-        return normalizeServerPrediction(res, fallback);
+        return normalizeServerPrediction(res, fallback, program);
       } catch {
         return fallback;
       }
@@ -282,9 +271,13 @@ export default function ScorePredictionWidget({ program, attempts, onPracticeWea
   });
 
   const livePrediction = overviewQuery.data?.prediction
-    ? normalizeServerPrediction(overviewQuery.data.prediction as unknown as Record<string, unknown>, fallback)
+    ? normalizeServerPrediction(overviewQuery.data.prediction as unknown as Record<string, unknown>, fallback, program)
     : query.data;
-  const data = livePrediction ?? fallback;
+  return livePrediction ?? fallback;
+}
+
+export default function ScorePredictionWidget({ program, attempts, onPracticeWeakSkill }: Props) {
+  const data = useScorePrediction(program, attempts);
   // Only real attempts are charted; no sample bars are invented.
   const chartPoints = data.hasEvidence ? data.history : [];
 
@@ -299,11 +292,11 @@ export default function ScorePredictionWidget({ program, attempts, onPracticeWea
             <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/35 bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-300">
               AI Band & CEFR Predictor
             </span>
-            {data.hasEvidence && (
+            {data.hasEvidence && data.cefrLevel && (
               <span
                 className={`rounded-full border px-2.5 py-0.5 text-[11px] font-extrabold ${CEFR_BADGE_STYLE[data.cefrLevel]}`}
               >
-                CEFR {data.cefrLevel}
+                CEFR {cefrText(data.cefrLevel)}
               </span>
             )}
           </div>
@@ -311,7 +304,7 @@ export default function ScorePredictionWidget({ program, attempts, onPracticeWea
             Dual-Scale Exam Score Forecast
           </h2>
           <p className="text-xs text-white/50">
-            Calibrated from your recent mock performance · CEFR scale: A2 (0-33) · B1 (34-45) · B2 (46-59) · C1 (60-75)
+            Calibrated from your recent mock performance · CEFR level as reported by the server
           </p>
         </div>
 
@@ -364,7 +357,6 @@ export default function ScorePredictionWidget({ program, attempts, onPracticeWea
           <div className="mt-3 flex h-24 items-end gap-2.5 pt-2">
             {chartPoints.map((pt, i) => {
               const pct = Math.max(15, Math.min(100, Math.round((pt.multilevelScore / 75) * 100)));
-              const lvl = multilevelScoreToCefr(pt.multilevelScore);
               return (
                 <div key={pt.attemptId || i} className="flex flex-1 flex-col items-center gap-1">
                   <span className="font-mono text-[10px] font-bold text-emerald-300">
@@ -374,7 +366,7 @@ export default function ScorePredictionWidget({ program, attempts, onPracticeWea
                     <div
                       className="w-full rounded bg-gradient-to-t from-emerald-600 to-emerald-400"
                       style={{ height: `${pct}%` }}
-                      title={`${pt.title}: Band ${pt.ieltsBand.toFixed(1)} / ${pt.multilevelScore} ball (${lvl})`}
+                      title={`${pt.title}: Band ${pt.ieltsBand.toFixed(1)} / ${pt.multilevelScore} ball`}
                     />
                   </div>
                   <span className="max-w-full truncate text-[10px] text-white/45">{pt.title}</span>

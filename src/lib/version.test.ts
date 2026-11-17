@@ -19,11 +19,11 @@ beforeEach(() => {
 
 describe("bundled desktop version", () => {
   it("matches package.json so the app never compares itself against an older release", () => {
-    expect(APP_VERSION).toBe("1.0.11");
+    expect(APP_VERSION).toBe("1.0.12");
     expect(APP_VERSION).toBe(pkg.version);
-    // The manual-installer channel must point at this exact release.
-    expect(DESKTOP_INSTALLER_VERSION).toBe(pkg.version);
-    expect(DESKTOP_INSTALLER_URL).toContain(`Bestway.App_${pkg.version}_x64`);
+    // The fallback refers only to an already published installer, not this candidate.
+    expect(DESKTOP_INSTALLER_VERSION).toBe("1.0.11");
+    expect(DESKTOP_INSTALLER_URL).toContain(`Bestway.App_${DESKTOP_INSTALLER_VERSION}_x64`);
     expect(DESKTOP_INSTALLER_URL.startsWith("https://")).toBe(true);
   });
 });
@@ -64,8 +64,9 @@ describe("installerUrlFor", () => {
   });
 
   it("falls back to the published installer of exactly this release", () => {
-    expect(installerUrlFor(pkg.version, null)).toBe(DESKTOP_INSTALLER_URL);
-    expect(installerUrlFor(pkg.version, "javascript:alert(1)")).toBe(DESKTOP_INSTALLER_URL);
+    expect(installerUrlFor(DESKTOP_INSTALLER_VERSION, null)).toBe(DESKTOP_INSTALLER_URL);
+    expect(installerUrlFor(DESKTOP_INSTALLER_VERSION, "javascript:alert(1)")).toBe(DESKTOP_INSTALLER_URL);
+    expect(installerUrlFor(pkg.version, null)).toBeNull();
   });
 });
 

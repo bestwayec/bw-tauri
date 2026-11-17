@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect } from "react";
 import { API_BASE_URL, get, post } from "@/lib/api";
 import type { SimulatorMode } from "@/components/exam-ui/model";
-import { multilevelScoreToCefr } from "@/components/ScorePredictionWidget";
+import { cefrText, normalizeCefr } from "@/lib/cefr";
+import { demoDataEnabled } from "@/lib/demo-data";
 
 export interface LiveExamRoomSession {
   id: string;
@@ -60,6 +61,8 @@ export interface ProctorStudent {
   timeLimitSeconds: number;
   status: "active" | "flagged" | "critical" | "submitted";
   estimatedScore?: number;
+  /** The level the server reported for this student, if any; never worked out from the score here. */
+  cefrLevel?: string | null;
   antiCheatFlags: {
     blurCount: number;
     shortcutCount: number;
@@ -76,8 +79,190 @@ export interface ProctorStudent {
   };
 }
 
+/** Sample students: shown only when demoDataEnabled() (dev build or a deliberate demo build), never in a real session. */
+const DEMO_STUDENTS: ProctorStudent[] = [
+  {
+    id: "stu-101",
+    name: "Azamat Karimov",
+    phone: "+998 90 123 45 67",
+    terminal: "PC-04",
+    room: "Lab 101",
+    examTitle: "IELTS Academic Mock 14",
+    examType: "IELTS",
+    currentSection: "Writing Task 2 (Essay)",
+    totalSections: 4,
+    currentSectionIndex: 3,
+    timeElapsedSeconds: 3240,
+    timeLimitSeconds: 3600,
+    status: "flagged",
+    estimatedScore: 54,
+    antiCheatFlags: {
+      blurCount: 3,
+      shortcutCount: 1,
+      pasteCount: 2,
+      devtoolsCount: 0,
+      multiMonitorAlert: false,
+      lastEventTime: "2 mins ago",
+      events: [
+        { time: "14:12:04", kind: "tab_switch", description: "Window lost focus for 4 seconds", severity: "medium" },
+        { time: "14:18:22", kind: "paste", description: "External paste operation blocked", severity: "medium" },
+        { time: "14:24:50", kind: "shortcut", description: "Blocked Alt+Tab keystroke", severity: "low" },
+      ],
+    },
+  },
+  {
+    id: "stu-102",
+    name: "Madina Usmanova",
+    phone: "+998 93 456 78 90",
+    terminal: "PC-08",
+    room: "Lab 101",
+    examTitle: "IELTS Academic Mock 14",
+    examType: "IELTS",
+    currentSection: "Reading Passage 3",
+    totalSections: 4,
+    currentSectionIndex: 2,
+    timeElapsedSeconds: 2150,
+    timeLimitSeconds: 3600,
+    status: "active",
+    estimatedScore: 63,
+    antiCheatFlags: {
+      blurCount: 0,
+      shortcutCount: 0,
+      pasteCount: 0,
+      devtoolsCount: 0,
+      multiMonitorAlert: false,
+      events: [],
+    },
+  },
+  {
+    id: "stu-103",
+    name: "Javohir Tursunov",
+    phone: "+998 97 789 01 23",
+    terminal: "PC-12",
+    room: "Lab 102",
+    examTitle: "CEFR Multilevel B2/C1 Practice",
+    examType: "MULTILEVEL",
+    currentSection: "Part 2 Speaking",
+    totalSections: 4,
+    currentSectionIndex: 4,
+    timeElapsedSeconds: 840,
+    timeLimitSeconds: 900,
+    status: "critical",
+    estimatedScore: 41,
+    antiCheatFlags: {
+      blurCount: 6,
+      shortcutCount: 4,
+      pasteCount: 1,
+      devtoolsCount: 1,
+      multiMonitorAlert: true,
+      lastEventTime: "Just now",
+      events: [
+        { time: "14:05:11", kind: "multi_monitor", description: "Second display detected and detached", severity: "high" },
+        { time: "14:10:45", kind: "devtools", description: "F12 key pressed during speaking section", severity: "high" },
+        { time: "14:15:30", kind: "blur", description: "Window minimized / blurred 6 times", severity: "high" },
+      ],
+    },
+  },
+  {
+    id: "stu-104",
+    name: "Zarina Alimova",
+    phone: "+998 99 234 56 78",
+    terminal: "PC-02",
+    room: "Lab 101",
+    examTitle: "IELTS Academic Mock 14",
+    examType: "IELTS",
+    currentSection: "Listening Section 4",
+    totalSections: 4,
+    currentSectionIndex: 1,
+    timeElapsedSeconds: 1680,
+    timeLimitSeconds: 2400,
+    status: "active",
+    estimatedScore: 58,
+    antiCheatFlags: {
+      blurCount: 0,
+      shortcutCount: 0,
+      pasteCount: 0,
+      devtoolsCount: 0,
+      multiMonitorAlert: false,
+      events: [],
+    },
+  },
+  {
+    id: "stu-105",
+    name: "Sherzod Rakhimov",
+    phone: "+998 91 345 67 89",
+    terminal: "PC-15",
+    room: "Lab 102",
+    examTitle: "CEFR Multilevel B2/C1 Practice",
+    examType: "MULTILEVEL",
+    currentSection: "Reading Part 5",
+    totalSections: 4,
+    currentSectionIndex: 2,
+    timeElapsedSeconds: 2500,
+    timeLimitSeconds: 3600,
+    status: "flagged",
+    estimatedScore: 49,
+    antiCheatFlags: {
+      blurCount: 2,
+      shortcutCount: 1,
+      pasteCount: 0,
+      devtoolsCount: 0,
+      multiMonitorAlert: false,
+      lastEventTime: "12 mins ago",
+      events: [
+        { time: "14:02:18", kind: "shortcut", description: "Ctrl+C copy attempt intercepted", severity: "low" },
+        { time: "14:14:02", kind: "blur", description: "Window lost focus for 2 seconds", severity: "low" },
+      ],
+    },
+  },
+  {
+    id: "stu-106",
+    name: "Dilorom Boboeva",
+    phone: "+998 90 987 65 43",
+    terminal: "PC-07",
+    room: "Lab 101",
+    examTitle: "IELTS General Training Mock",
+    examType: "IELTS",
+    currentSection: "Writing Task 1 (Letter)",
+    totalSections: 4,
+    currentSectionIndex: 3,
+    timeElapsedSeconds: 1100,
+    timeLimitSeconds: 3600,
+    status: "active",
+    estimatedScore: 66,
+    antiCheatFlags: {
+      blurCount: 0,
+      shortcutCount: 0,
+      pasteCount: 0,
+      devtoolsCount: 0,
+      multiMonitorAlert: false,
+      events: [],
+    },
+  },
+];
+
+/** One result row of the room export. No score yet: a dash, never an invented number; the level is the server's. */
+export function proctorExportRow(s: ProctorStudent): string[] {
+  const sc = s.estimatedScore;
+  return [
+    s.name,
+    s.phone,
+    s.terminal,
+    s.room,
+    s.examTitle,
+    s.examType,
+    s.currentSection,
+    sc != null ? String(sc) : "—",
+    cefrText(normalizeCefr(s.cefrLevel)),
+    sc != null ? ((sc / 75) * 9).toFixed(1) : "—",
+    s.status,
+    String(s.antiCheatFlags.blurCount),
+    String(s.antiCheatFlags.pasteCount),
+  ];
+}
+
 export default function LiveProctoring() {
-  const [students, setStudents] = useState<ProctorStudent[]>([]);
+  const [students, setStudents] = useState<ProctorStudent[]>(() => (demoDataEnabled() ? DEMO_STUDENTS : []));
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "flagged" | "critical">("all");
   const [selectedStudent, setSelectedStudent] = useState<ProctorStudent | null>(null);
@@ -87,10 +272,23 @@ export default function LiveProctoring() {
   const [autoRefresh, setAutoRefresh] = useState(true);
 
   // Teacher 6-digit PIN Live Exam Room state
-  const [liveRoom, setLiveRoom] = useState<LiveExamRoomSession | null>(null);
-        const [roomPinConnectInput, setRoomPinConnectInput] = useState("");
-    const [connectingRoom, setConnectingRoom] = useState(false);
-  const [roomTitleInput, setRoomTitleInput] = useState("BestWay Group Mock — Lab 101");
+  // No room exists until the teacher creates one; the sample room is for demo/dev builds only.
+  const [liveRoom, setLiveRoom] = useState<LiveExamRoomSession>(() =>
+    demoDataEnabled()
+      ? {
+          id: "room-482910",
+          pin: "482910",
+          title: "BestWay Group Mock — Lab 101",
+          examType: "IELTS",
+          simulatorMode: "cdi",
+          status: "active",
+          createdAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        }
+      : { id: "", pin: "", title: "", examType: "IELTS", simulatorMode: "cdi", status: "waiting", createdAt: "" },
+  );
+  const [roomPinConnectInput, setRoomPinConnectInput] = useState("");
+  const [connectingRoom, setConnectingRoom] = useState(false);
+  const [roomTitleInput, setRoomTitleInput] = useState(() => (demoDataEnabled() ? "BestWay Group Mock — Lab 101" : ""));
   const [roomExamType, setRoomExamType] = useState<"IELTS" | "MULTILEVEL">("IELTS");
   const [roomSimulatorMode, setRoomSimulatorMode] = useState<SimulatorMode>("cdi");
   const [creatingRoom, setCreatingRoom] = useState(false);
@@ -118,13 +316,15 @@ export default function LiveProctoring() {
             answeredCount: number;
             totalQuestions: number;
             progressPercent: number;
+            cefrLevel?: string | null;
           }>;
           status?: string;
         }>(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/proctor-status`);
 
         if (!active || !res) return;
 
-        if (res.participants && res.participants.length > 0) {
+        // A real answer replaces whatever was listed (sample rows included), also when the room is still empty.
+        if (Array.isArray(res.participants)) {
           setStudents((prev) => {
             const hasNewStrike = res.participants!.some((p) => {
               const match = prev.find((s) => s.id === p.studentId);
@@ -161,6 +361,7 @@ export default function LiveProctoring() {
                 timeLimitSeconds: p.timeRemainingSeconds ?? 3600,
                 status: mappedStatus,
                 estimatedScore: prevMatch?.estimatedScore,
+                cefrLevel: p.cefrLevel ?? prevMatch?.cefrLevel ?? null,
                 antiCheatFlags: {
                   blurCount: p.strikesCount,
                   shortcutCount: 0,
@@ -194,8 +395,15 @@ export default function LiveProctoring() {
     };
   }, [autoRefresh, liveRoom?.pin, liveRoom?.status, liveRoom?.title]);
 
+  /** Room actions need a room: without a PIN nothing is sent. */
+  function requireRoom(): boolean {
+    if (liveRoom.pin) return true;
+    triggerToast("Avval imtihon xonasini yarating.");
+    return false;
+  }
+
   async function handleStartAllExams() {
-    if (!liveRoom) return;
+    if (!requireRoom()) return;
     try {
       await post(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/action`, { action: "start_exam" });
       setLiveRoom((prev) => (prev ? { ...prev, status: "active" } : null));
@@ -207,7 +415,7 @@ export default function LiveProctoring() {
   }
 
   async function handleExtendAllExams(minutes: number = 5) {
-    if (!liveRoom) return;
+    if (!requireRoom()) return;
     try {
       await post(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/action`, {
         action: "extend_time",
@@ -227,7 +435,7 @@ export default function LiveProctoring() {
   }
 
   async function handleEndLiveRoom() {
-    if (!liveRoom) return;
+    if (!requireRoom()) return;
     if (!confirm("Haqiqatan ham imtihon xonasini yakunlab, barcha natijalarni saqlamoqchimisiz?")) return;
     try {
       await post(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/action`, { action: "end_room" });
@@ -240,7 +448,7 @@ export default function LiveProctoring() {
   }
 
   async function handleSendProctorWarning(student: ProctorStudent) {
-    if (!liveRoom) return;
+    if (!requireRoom()) return;
     try {
       await post(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/action`, {
         action: "warn_student",
@@ -261,7 +469,7 @@ export default function LiveProctoring() {
   }
 
   async function handleDisqualifyProctorStudent(student: ProctorStudent) {
-    if (!liveRoom) return;
+    if (!requireRoom()) return;
     if (confirm(`Haqiqatan ham ${student.name} ni qoidabuzarlik uchun chetlatmoqchimisiz? (Diskvalifikatsiya)`)) {
       try {
         await post(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/action`, {
@@ -360,42 +568,26 @@ export default function LiveProctoring() {
   }
 
   function handleExportXlsx() {
-    if (!liveRoom) return;
+    if (students.length === 0) {
+      triggerToast("Eksport qilish uchun natijalar yo'q.");
+      return;
+    }
     const header = [
       "Student Name",
       "Phone",
       "Terminal",
       "Room",
       "Exam Title",
-      "Track",
+      "Exam Type",
       "Current Section",
-      "Score (0-75)",
-      "CEFR Level",
-      "IELTS Band Est.",
-      "Anti-Cheat Status",
+      "Score",
+      "CEFR",
+      "Band",
+      "Status",
       "Blur Count",
       "Paste Count",
     ];
-    const rows = students.map((s) => {
-      const sc = s.estimatedScore;
-      const cefr = sc != null ? multilevelScoreToCefr(sc) : "-";
-      const band = sc != null ? ((sc / 75) * 9).toFixed(1) : "-";
-      return [
-        s.name,
-        s.phone,
-        s.terminal,
-        s.room,
-        s.examTitle,
-        s.examType,
-        s.currentSection,
-        sc != null ? String(sc) : "-",
-        cefr,
-        band,
-        s.status,
-        String(s.antiCheatFlags.blurCount),
-        String(s.antiCheatFlags.pasteCount),
-      ];
-    });
+    const rows = students.map(proctorExportRow);
     const tsv = [header, ...rows].map((r) => r.join("\t")).join("\n");
     try {
       const blob = new Blob([tsv], {
@@ -633,7 +825,7 @@ export default function LiveProctoring() {
           <div className="flex flex-wrap items-center gap-4">
             <div className="rounded-2xl border border-violet-400/40 bg-black/50 px-5 py-3 text-center">
               <p className="text-[10px] font-bold uppercase tracking-widest text-violet-300">Room 6-Digit PIN</p>
-              <p className="mt-0.5 font-mono text-3xl font-black tracking-[0.25em] text-white">{liveRoom.pin}</p>
+              <p className="mt-0.5 font-mono text-3xl font-black tracking-[0.25em] text-white">{liveRoom.pin || "——"}</p>
             </div>
             <div>
               <div className="flex items-center gap-2">
@@ -644,9 +836,13 @@ export default function LiveProctoring() {
                   {liveRoom.examType}
                 </span>
               </div>
-              <h2 className="mt-1 text-base font-extrabold text-white">{liveRoom.title}</h2>
+              <h2 className="mt-1 text-base font-extrabold text-white">{liveRoom.title || "No room yet"}</h2>
               <p className="text-xs text-white/50">
-                Students join from Desktop or Web using PIN <strong className="font-mono text-white">{liveRoom.pin}</strong> · Created {liveRoom.createdAt}
+                {liveRoom.pin ? (
+                  <>Students join from Desktop or Web using PIN <strong className="font-mono text-white">{liveRoom.pin}</strong> · Created {liveRoom.createdAt}</>
+                ) : (
+                  <>Create a Live Exam Room below to get a PIN for your students.</>
+                )}
               </p>
             </div>
           </div>

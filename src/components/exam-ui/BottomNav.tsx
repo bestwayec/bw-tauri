@@ -80,10 +80,11 @@ export default function BottomNav(p: Props) {
               key={i}
               type="button"
               onClick={() => p.onJumpQ(i)}
-              aria-label={`Question ${i + 1}${st === "answered" ? ", answered" : st === "flagged" ? ", flagged for review" : ", unanswered"}${i === p.currentQ ? ", current" : ""}`}
+              aria-label={`Question ${i + 1}, ${a ? "answered" : "unanswered"}${isFlagged ? ", flagged for review" : ""}${i === p.currentQ ? ", current" : ""}`}
+              aria-current={i === p.currentQ ? "step" : undefined}
               className={`exam-qbtn ${STATE_CLASS[st]}${dtmClass}`}
             >
-              {i + 1}
+              {i + 1}{a && <span aria-hidden="true"> ✓</span>}{isFlagged && <span aria-hidden="true"> ⚑</span>}
             </button>
           );
         })}
@@ -94,6 +95,7 @@ export default function BottomNav(p: Props) {
       </p>
 
       <div className="exam-legend" aria-label="Question palette legend">
+        <span className="exam-legend-item">Outlined: current · ✓ answered · ⚑ flagged</span>
         <span className="exam-legend-item">
           <i className={`exam-legend-dot exam-legend-answered${isDtm ? " bg-emerald-600" : ""}`} aria-hidden="true" />{" "}
           {isDtm ? "answered (ishlangan)" : "answered"}

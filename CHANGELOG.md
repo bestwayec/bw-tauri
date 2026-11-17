@@ -1,5 +1,29 @@
 # Changelog — Bestway Exam desktop (`bw-tauri`)
 
+## Unreleased
+
+### Live Proctoring
+- No invented numbers: the room export prints a dash (not a made-up 52 points and
+  its band) for a student without a score yet, and the level column shows only
+  the level the server reported.
+- The hard-coded sample students and the sample room (PIN 482910) appear only in
+  a dev build or a build made on purpose with `VITE_DEMO_DATA=true`. A real
+  session starts with no students and no room until the teacher creates one, and
+  the first answer from the server replaces whatever is listed, also when the
+  room is still empty. Room actions without a room send nothing.
+
+### Dashboard
+- The CEFR level shown by the score predictor, the dashboard banner and the
+  live proctoring CSV now comes from the server and nowhere else. The three
+  local copies of the Multilevel score to level table (A2 0-33, B1 34-45,
+  B2 46-59, C1 60-75; they disagreed with the server's 38 / 51 / 65 scale) are
+  gone. `src/lib/cefr.ts` only recognises what the server sends: C2, C1, B2,
+  B1, BELOW_B1 (written "Below B1"), and A2 / A1 for results saved under the
+  old scales. The offline estimate shows no level.
+- Works with the web API change that follows the ielts.org IELTS to CEFR map
+  (C2 8.5, C1 7.0, B2 5.5, B1 4.0; under 4.0 is BELOW_B1) and removes the
+  internal practice grade (bestwayec/bestway).
+
 ## v1.0.11
 
 ### Dashboard

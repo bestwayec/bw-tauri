@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchAssessmentOverview, multilevelScoreToCefr } from "./assessment-overview";
+import { fetchAssessmentOverview } from "./assessment-overview";
 
 vi.mock("./api", () => ({
   get: vi.fn(async (path: string) => {
@@ -48,17 +48,6 @@ vi.mock("./api", () => ({
 }));
 
 describe("assessment-overview", () => {
-  it("maps 0-75 scores to correct CEFR boundaries", () => {
-    expect(multilevelScoreToCefr(0)).toBe("A2");
-    expect(multilevelScoreToCefr(33)).toBe("A2");
-    expect(multilevelScoreToCefr(34)).toBe("B1");
-    expect(multilevelScoreToCefr(45)).toBe("B1");
-    expect(multilevelScoreToCefr(46)).toBe("B2");
-    expect(multilevelScoreToCefr(59)).toBe("B2");
-    expect(multilevelScoreToCefr(60)).toBe("C1");
-    expect(multilevelScoreToCefr(75)).toBe("C1");
-  });
-
   it("fetches and parses assessment overview data", async () => {
     const data = await fetchAssessmentOverview();
     expect(data.user.id).toBe("u-1");

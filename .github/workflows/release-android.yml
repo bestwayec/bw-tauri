@@ -68,12 +68,19 @@ jobs:
         run: |
           # Production APKs are signed only with the official release keystore.
           # A throwaway key would publish an APK that cannot update earlier
-          # installs, so missing secrets stop the release instead.
-          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
-            echo "::error::Official Android keystore secrets are missing (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD). Refusing to sign with a temporary key."
+          # installs, so a missing secret stops the release instead.
+          missing=""
+          [ -n "$KEYSTORE_B64" ] || missing="$missing ANDROID_KEYSTORE_BASE64"
+          [ -n "$KEYSTORE_PASSWORD" ] || missing="$missing ANDROID_KEYSTORE_PASSWORD"
+          [ -n "$KEY_ALIAS" ] || missing="$missing ANDROID_KEY_ALIAS"
+          [ -n "$KEY_PASSWORD" ] || missing="$missing ANDROID_KEY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing. The APK is signed only with the official release keystore; refusing to sign with a temporary key."
             exit 1
           fi
-          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          umask 077
+          trap 'rm -f "$RUNNER_TEMP/release.keystore"' EXIT
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
           apksigner sign \
             --ks "$RUNNER_TEMP/release.keystore" --ks-key-alias "$KEY_ALIAS" \
             --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEY_PASSWORD \
@@ -82,7 +89,6 @@ jobs:
             --v2-signing-enabled true \
             --v3-signing-enabled true \
             --out bestway-app.apk bestway-app-aligned.apk
-          rm -f "$RUNNER_TEMP/release.keystore"
 
       - name: Verify Signed APK
         run: |

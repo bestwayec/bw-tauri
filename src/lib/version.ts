@@ -9,7 +9,7 @@ import { isSafeHttpUrl } from "./secure-storage";
  * show a bogus "New version available" toast, so it is asserted against
  * package.json in version.test.ts.
  */
-export const APP_VERSION = "1.0.11";
+export const APP_VERSION = "1.0.12";
 
 /**
  * Current release of the manual-installer channel. The signed in-place updater

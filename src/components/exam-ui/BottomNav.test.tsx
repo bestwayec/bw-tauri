@@ -68,4 +68,11 @@ describe("part-by-part bottom navigation", () => {
     const busy = renderToStaticMarkup(<BottomNav {...base} isLastPart canPrev submitting />);
     expect(busy).toContain("Submitting…");
   });
+
+  it("announces answer, flag and current state independently", () => {
+    const html = renderToStaticMarkup(<BottomNav {...base} flagged={[true, false, false, false, false]} />);
+    expect(html).toContain('aria-label="Question 1, answered, flagged for review, current"');
+    expect(html).toContain('aria-current="step"');
+    expect(html).toContain("Outlined: current");
+  });
 });

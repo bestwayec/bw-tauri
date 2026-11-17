@@ -45,7 +45,7 @@ class MainActivity : AppCompatActivity() {
         private const val REQUEST_RECORD_AUDIO = 1001
     }
 
-    class AndroidBridge(private val webView: WebView) {
+    class AndroidBridge(private val webView: WebView, private val context: Context) {
         @android.webkit.JavascriptInterface
         fun isMobileApp(): Boolean {
             val url = webView.url ?: ""
@@ -57,6 +57,22 @@ class MainActivity : AppCompatActivity() {
             val url = webView.url ?: ""
             if (!isTrustedOrigin(url)) return ""
             return BuildConfig.VERSION_NAME
+        }
+
+        @android.webkit.JavascriptInterface
+        fun getAuthToken(): String {
+            val url = webView.url ?: ""
+            if (!isTrustedOrigin(url)) return ""
+            val prefs = context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
+            return prefs.getString("access_token", "") ?: ""
+        }
+
+        @android.webkit.JavascriptInterface
+        fun getRefreshToken(): String {
+            val url = webView.url ?: ""
+            if (!isTrustedOrigin(url)) return ""
+            val prefs = context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
+            return prefs.getString("refresh_token", "") ?: ""
         }
 
         private fun isTrustedOrigin(url: String): Boolean {
@@ -169,13 +185,22 @@ class MainActivity : AppCompatActivity() {
                 val token = data.getQueryParameter("token") ?: data.getQueryParameter("access_token")
                 val refreshToken = data.getQueryParameter("refresh_token")
 
-                // If tokens arrive via deep link, store them into CookieManager for the verified origin
-                // rather than exposing them in public URL query parameters.
+                // If tokens arrive via deep link, store them into persistent SharedPreferences and CookieManager
+                // for the verified origin rather than exposing them in public URL query parameters.
                 if (!token.isNullOrEmpty()) {
+                    val prefs = getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
+                    prefs.edit()
+                        .putString("access_token", token)
+                        .putString("refresh_token", refreshToken)
+                        .apply()
+
                     val cookieManager = CookieManager.getInstance()
-                    cookieManager.setCookie("https://bestwayec.uz", "bw_access_token=$token; path=/; Secure; SameSite=Lax")
+                    cookieManager.setCookie("https://bestwayec.uz", "bw_access_token=$token; path=/; max-age=2592000; Secure; SameSite=Lax")
+                    cookieManager.setCookie("https://bestwayec.uz", "access_token=$token; path=/; max-age=2592000; Secure; SameSite=Lax")
+                    cookieManager.setCookie("https://bestwayec.uz", "token=$token; path=/; max-age=2592000; Secure; SameSite=Lax")
                     if (!refreshToken.isNullOrEmpty()) {
-                        cookieManager.setCookie("https://bestwayec.uz", "bw_refresh_token=$refreshToken; path=/; Secure; SameSite=Lax")
+                        cookieManager.setCookie("https://bestwayec.uz", "bw_refresh_token=$refreshToken; path=/; max-age=2592000; Secure; SameSite=Lax")
+                        cookieManager.setCookie("https://bestwayec.uz", "refresh_token=$refreshToken; path=/; max-age=2592000; Secure; SameSite=Lax")
                     }
                     cookieManager.flush()
                 }
@@ -183,7 +208,10 @@ class MainActivity : AppCompatActivity() {
                 // Forward OAuth authorization code/state safely without leaking raw tokens in URLs
                 val targetParams = mutableListOf<String>()
                 targetParams.add("platform=mobile_app")
-                if (!code.isNullOrEmpty()) targetParams.add("auth_code=$code")
+                if (!code.isNullOrEmpty()) {
+                    targetParams.add("auth_code=$code")
+                    targetParams.add("code=$code")
+                }
                 if (!state.isNullOrEmpty()) targetParams.add("state=$state")
 
                 val queryString = targetParams.joinToString("&")
@@ -212,7 +240,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-        webView.addJavascriptInterface(AndroidBridge(webView), "AndroidBridge")
+        webView.addJavascriptInterface(AndroidBridge(webView, this), "AndroidBridge")
 
         webView.settings.apply {
             javaScriptEnabled = true
@@ -334,6 +362,32 @@ class MainActivity : AppCompatActivity() {
                     hideOffline()
                 }
                 checkExamMode(url)
+
+                // On verified origin, safely synchronize authenticated tokens into localStorage without URL exposure
+                if (url?.startsWith("https://bestwayec.uz") == true) {
+                    val prefs = getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
+                    val token = prefs.getString("access_token", null)
+                    if (!token.isNullOrEmpty()) {
+                        val sanitized = token.replace("'", "\\'")
+                        webView.evaluateJavascript(
+                            """
+                            (function() {
+                                try {
+                                    if (window.location.origin === 'https://bestwayec.uz') {
+                                        if (!localStorage.getItem('token')) {
+                                            localStorage.setItem('token', '$sanitized');
+                                        }
+                                        if (!localStorage.getItem('access_token')) {
+                                            localStorage.setItem('access_token', '$sanitized');
+                                        }
+                                    }
+                                } catch (e) {}
+                            })();
+                            """.trimIndent(),
+                            null
+                        )
+                    }
+                }
             }
 
             override fun onReceivedError(
