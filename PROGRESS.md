@@ -12,14 +12,17 @@ BestWay o'rnatiluvchi ilovalarini (Windows [birlamchi], macOS, Linux desktop ilo
    - Versiya `1.0.12` ga sinxronlashtirildi (`versionCode 10120`, `versionName "1.0.12"`), `minSdk 24`, `targetSdk 34`.
    - Cleartext HTTP va zaxira nusxa ko'chirish o'chirildi (`android:usesCleartextTraffic="false"`, `android:allowBackup="false"`).
    - CI release workflow'ida throwaway vaqtinchalik kalit olib tashlandi, faqat rasmiy Release Keystore (v1+v2+v3, minSdk 24, universal ABI, >= 3 MB) talab qilindi.
-3. **Android P0 Xavfsizlik Darvozasi (Security Gate)**:
-   - `AndroidBridge` dan `getRefreshToken()` va `getAuthToken()` butunlay olib tashlandi; JavaScript interfeysidan tokenlar sizib chiqishi bartaraf etildi.
-   - Tokenlarning SharedPreferences, ortiqcha cookielar va `onPageFinished` dagi `localStorage` inyeksiyasidagi 4 karra takrorlanishi to'xtatildi. Zombie sessiyalar va akkaunt almashtirishdagi xatolar bartaraf etildi.
+3. **Android P0 Xavfsizlik Darvozasi va To'liq PKCE Flow**:
+   - `AndroidBridge` dan `getRefreshToken()` va `getAuthToken()` butunlay olib tashlandi; JavaScript interfeysidan tokenlar sizib chiqishi bartaraf etildi. Xavfsiz `startOAuthLogin(provider)` qo'shildi.
+   - Tokenlarning ortiqcha cookielar va `onPageFinished` dagi `localStorage` inyeksiyasidagi takrorlanishi to'xtatildi. Zombie sessiyalar va akkaunt almashtirishdagi xatolar bartaraf etildi.
    - `OAuthSecurityManager` orqali 5 daqiqalik TTL va bir martalik foydalanishga ega qat'iy OAuth state CSRF tekshiruvi joriy etildi.
+   - SharedPreferences orqali state va verifier saqlanishi ta'minlandi: tashqi brauzerda kirish paytida Android xotira yetishmovchiligidan MainActivity jarayonini o'chirib qayta tiklaganda (process recreation) ham autentifikatsiya buzilmaydi.
+   - Haqiqiy PKCE-S256 kodi almashinuvi (`POST /v1/auth/desktop/exchange`) ulandi: authorization code va PKCE verifier backendga yuborilib, muvaffaqiyatli sessiya cookielari CookieManager'da o'rnatiladi.
    - WebView navigatsiyasi faqat `https://bestwayec.uz` va `https://api.bestwayec.uz` bilan cheklandi; har qanday tashqi havola xavfsiz tarzda Custom Tab yoki tizim brauzeriga yo'naltirildi.
    - `onPermissionRequest` da origin tekshiruvi qo'shildi (`isTrustedOrigin`) va faqat audio/video resurslari ruxsat berilishi ta'minlandi.
-   - `tools/android-security.test.mjs` avtomatlashtirilgan regressiya testlari (7 ta test) yaratildi va muvaffaqiyatli o'tkazildi.
-   - `.github/workflows/ci.yml` ga Android kompilyatsiya va assembleRelease tekshiruvi qo'shildi.
+   - `tools/android-oauth.test.mjs` avtomatlashtirilgan xulq-atvor (behavioral) testlari (8 ta test: muvaffaqiyatli login, soxta state, muddati o'tgan state, replay hujumi, verifier yo'qolishi, process recreation, chiqish va akkaunt almashtirish) 100% muvaffaqiyatli o'tdi.
+   - `tools/android-security.test.mjs` regressiya testlari (7 ta test) va Kotlin `OAuthSecurityManagerTest` testlari qo'shildi.
+   - `.github/workflows/ci.yml` da testReleaseUnitTest va assembleRelease tekshiruvi ulandi.
 4. **Soxta Demo Ma'lumotlarni va False-Success Kodlarini Tozalash (Phase 3)**:
    - `LiveProctoring.tsx`: 6 ta sun'iy soxta talaba (`INITIAL_STUDENTS`) va qotirilgan xona PIN'i olib tashlandi. Real xona yaratish va ulanish ulandi, xatolar real bildirishnomaga chiqarildi. `EMPTY_ROOM` yordamida type-safe sessiya holati ta'minlandi.
    - `GradingQueue.tsx`, `CenterOverview.tsx`, `StudentResults.tsx`, `GroupsResults.tsx`: Soxta hardcoded ma'lumotlar olib tashlandi, backend endpointlari bilan integratsiya qilindi va toza empty state'lar qo'shildi.
@@ -37,7 +40,7 @@ BestWay o'rnatiluvchi ilovalarini (Windows [birlamchi], macOS, Linux desktop ilo
 7. **To'liq Test va Build Matritsasi (Phase 8)**:
    - `npx tsc --noEmit` -> PASS (0 xato).
    - `npm test` (Vitest) -> PASS (**52 test fayli, 427 ta test, 0 xatolik**).
-   - `node --test tools/*.test.mjs` -> PASS (**35 ta release va xavfsizlik testi**).
+   - `node --test tools/*.test.mjs` -> PASS (**43 ta release, xavfsizlik va behavioral OAuth testi**).
    - `cargo test --manifest-path src-tauri/Cargo.toml` -> PASS (**34 ta Rust birlik testi**).
    - `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` -> PASS (**0 ogohlantirish**).
    - `npm run test:e2e` (Playwright E2E) -> PASS (**2 ta test, 100% muvaffaqiyatli**).

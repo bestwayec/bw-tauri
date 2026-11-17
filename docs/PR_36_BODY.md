@@ -10,8 +10,11 @@ BestWay Apps 2.0 modernizes, secures, and hardens the installable client applica
 - **Zero Token Exposure over JS Bridge**: Completely removed `AndroidBridge.getRefreshToken()` and `AndroidBridge.getAuthToken()`. JavaScript bridge retains only metadata methods (`isMobileApp()`, `getVersion()`) protected by origin verification.
 - **Elimination of Unsafe Token Duplication**: Purged duplicate token storage in SharedPreferences (`auth_prefs`), removed duplicate cookie keys (`bw_access_token`, `bw_refresh_token`), and stopped script injection into `localStorage.setItem('token', ...)` on `onPageFinished`. Session persistence relies entirely on standard secure `CookieManager`.
 - **Strict OAuth PKCE & State Verification (`OAuthSecurityManager`)**:
-  - Secure random 16-byte state and 32-byte verifier generation with SHA-256 code challenge.
-  - Strict 5-minute state TTL (`STATE_TTL_MS = 300,000`) and single-use state consumption.
+  - Secure random 16-byte state and 32-byte verifier generation with SHA-256 code challenge (`BASE64URL(SHA256(verifier))`).
+  - Locally initiated state bound to the login session (never trusted from untrusted outgoing URLs).
+  - Process recreation survival: state and verifier persisted in private `SharedPreferences` (`uz.bestwayec.app.oauth_state`).
+  - Strict 5-minute state TTL (`STATE_TTL_MS = 300,000`) and single-use state consumption (wiped immediately to defeat replay).
+  - Genuine code exchange: deep link exchanges code + verifier at `POST /v1/auth/desktop/exchange` and sets session cookies (`token`, `access_token`, `bw_mobile_app`) in `CookieManager`.
   - Callbacks with invalid, missing, or unsolicited states are immediately rejected with error notification.
 - **Trusted Origin Navigation Restriction**: Restricts internal WebView navigation strictly to `TRUSTED_HOSTS = setOf("bestwayec.uz", "api.bestwayec.uz")` over HTTPS. Cleartext HTTP and untrusted external domains are intercepted and routed to `CustomTabsIntent` / system browser.
 - **Microphone & Camera Permission Hardening**: `WebChromeClient.onPermissionRequest` strictly validates `request.origin` (must be `https://bestwayec.uz`). Only `RESOURCE_AUDIO_CAPTURE` and `RESOURCE_VIDEO_CAPTURE` are granted; all unknown resource requests are rejected.
@@ -43,7 +46,7 @@ BestWay Apps 2.0 modernizes, secures, and hardens the installable client applica
 
 - **TypeScript Typecheck (`npx tsc --noEmit`)**: 0 errors
 - **Vitest Suite (`npm test`)**: 52 test files, 427 tests passed (100% pass)
-- **Node Release & Android Security Suite (`node --test`)**: 35 tests passed (100% pass across 5 test suites)
+- **Node Release, Security & Behavioral Suite (`node --test`)**: 43 tests passed (100% pass across 6 test suites including 8 Android OAuth behavioral scenarios)
 - **Native Rust Unit Tests (`cargo test --manifest-path src-tauri/Cargo.toml`)**: 34 tests passed (0 failures)
 - **Rust Clippy (`cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`)**: 0 warnings
 - **Playwright E2E Tests (`npm run test:e2e`)**: 2 tests passed (100% pass)

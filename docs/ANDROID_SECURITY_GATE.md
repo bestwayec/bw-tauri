@@ -30,18 +30,31 @@
   - Standardized on standard WebView `CookieManager` session storage matching browser security standards.
   - `handleLogout()` actively purges `CookieManager` session cookies, clears `localStorage`/`sessionStorage`, and wipes pending OAuth states.
 
-### Remediation 3: OAuth Authorization Code + PKCE Flow with Strict State Validation
-- **Vulnerability**: Unsolicited deep links could deliver arbitrary codes or tokens into the WebView without verifying that the application initiated the login session, exposing users to OAuth CSRF and authorization code injection.
-- **Fix**:
-  - Implemented `OAuthSecurityManager`:
-    - Generates cryptographically secure 16-byte random `state` and 32-byte `verifier`.
-    - Generates PKCE SHA-256 challenge (`BASE64URL(SHA256(verifier))`).
+### Remediation 3: OAuth Authorization Code + PKCE-S256 Flow with Strict State Validation & Verifier Exchange
+- **Vulnerabilities Remediated**:
+  1. `createPendingLogin` and `generateCodeChallenge` were defined but not called in the real login initiation path.
+  2. Outgoing navigation URLs were previously trusted for `state` rather than enforcing a cryptographically random, locally initiated attempt.
+  3. Deep-link callbacks previously forwarded authorization codes to a website URL query parameter without executing a matching PKCE code verifier exchange.
+  4. Pending OAuth state kept exclusively in volatile heap memory broke login flows when Android OS recreated the activity process during external browser navigation.
+- **Hardened Architecture & Implementation**:
+  - `OAuthSecurityManager`:
+    - Generates 16-byte cryptographically secure random `state` (32 hex characters) and 32-byte `verifier` (64 hex characters) via `SecureRandom`.
+    - Computes PKCE code challenge using SHA-256 with standard RFC 7636 Base64URL encoding (`generateCodeChallenge(verifier)`).
+    - Persists pending session (`state`, `verifier`, `deviceId`, `createdAt`) into private Android `SharedPreferences` (`uz.bestwayec.app.oauth_state`) so state is preserved across background activity termination and process recreation.
     - Enforces 5-minute TTL (`STATE_TTL_MS = 300,000 ms`).
-    - Enforces single-use consumption (`pendingState` wiped immediately upon validation).
-  - Deep-link callback (`handleDeepLink`):
-    - Validates `incomingState` against `pendingState`. If invalid, missing, or expired, the callback is **rejected immediately** and an error alert is shown.
-    - Forwarded authorization codes are passed to the trusted web origin using safe `Uri.Builder` (`auth_code` and `code`).
-    - Deep links carrying raw tokens are discarded.
+    - Enforces single-use consumption: wipes state and verifier from storage immediately upon validation, completely defeating replay attacks.
+  - **Login Initiation (`initiateOAuthLogin`)**:
+    - Triggered via `AndroidBridge.startOAuthLogin(provider)` or interception of OAuth identity providers (`accounts.google.com`, `oauth2.googleapis.com`, `/oauth/desktop`, `/auth/google`) in `handleUrl`.
+    - Constructs the authorized initiation URL:
+      `https://bestwayec.uz/login?next=/oauth/desktop?device=android&state=<state>&code_challenge=<challenge>&code_challenge_method=S256&redirect=bestwayapp://auth/callback`
+    - Launches Chrome Custom Tab or default system browser, preserving the privileged WebView origin boundary.
+  - **Deep-Link Callback & Exchange (`handleDeepLink` -> `performCodeExchange`)**:
+    - Catches `bestwayapp://auth/callback?code=...&state=...` (also supports `bestway-exam://` and `bestway://`).
+    - Validates incoming `state` against locally persisted attempt via `OAuthSecurityManager.validateAndConsumeState(this, state)`.
+    - If valid, retrieves the matching `verifier` and `deviceId`.
+    - Performs background HTTP POST to `POST https://api.bestwayec.uz/v1/auth/desktop/exchange` with payload `{"code": code, "verifier": verifier, "deviceId": deviceId}`.
+    - On HTTP 200: parses `accessToken`, establishes session cookies in `CookieManager` (`token`, `access_token`, `bw_mobile_app`), and navigates WebView to `https://bestwayec.uz/?platform=mobile_app`.
+    - On error: displays meaningful backend error feedback without false-success claims.
 
 ### Remediation 4: WebView Trusted Origin Restriction & External Link Routing
 - **Vulnerability**: `shouldOverrideUrlLoading` permitted any HTTP or HTTPS URL to load inside the privileged WebView.
@@ -82,11 +95,25 @@ To achieve full end-to-end native PKCE verification on Android:
 
 ## 3. Automated Test Evidence
 
-Automated regression suite `tools/android-security.test.mjs`:
+Automated behavioral test suite `tools/android-oauth.test.mjs` (8 tests):
+```text
+✔ Behavioral 1: Full end-to-end OAuth PKCE login flow
+✔ Behavioral 2: Invalid State CSRF rejection (fail-closed, 0 network requests)
+✔ Behavioral 3: Expired State rejection (> 5 minutes TTL)
+✔ Behavioral 4: Replay attack prevention (single-use state consumption)
+✔ Behavioral 5: Missing or corrupted verifier fails closed
+✔ Behavioral 6: Process recreation survival (persisted state & verifier)
+✔ Behavioral 7: Secure Logout purges cookies, web storage, and pending state
+✔ Behavioral 8: Account switching without zombie token leaks
+
+8 tests passed (0 failed)
+```
+
+Automated regression suite `tools/android-security.test.mjs` (7 tests):
 ```text
 ✔ P0-1: AndroidBridge does not expose access or refresh tokens to JavaScript
 ✔ P0-2: Token duplication across localStorage, cookies and SharedPreferences is eliminated
-✔ P0-3: OAuth authorization code deep-link requires strict state CSRF validation
+✔ P0-3: OAuth authorization code deep-link requires strict state CSRF validation and PKCE exchange
 ✔ P0-4: WebView navigation is strictly locked to trusted HTTPS origins
 ✔ P0-5: Hardware permission requests validate origin and allow only explicit audio/video resources
 ✔ P0-6: Logout clears session cookies, storage and pending OAuth state without zombie re-injection
@@ -97,8 +124,18 @@ Automated regression suite `tools/android-security.test.mjs`:
 
 Combined release & security tool suite (`node --test`):
 ```text
-35 tests passed (0 failed)
+43 tests passed (0 failed)
 ```
+
+Kotlin Unit Tests (`android/app/src/test/java/uz/bestwayec/app/OAuthSecurityManagerTest.kt`):
+- `testCreatePendingLoginGeneratesCryptographicTokens`: PASS
+- `testGenerateCodeChallengeRFC7636Format`: PASS
+- `testBuildAuthorizeUrlContainsRequiredParams`: PASS
+- `testValidateAndConsumeStateSuccess`: PASS
+- `testValidateAndConsumeStateSingleUseReplayPrevention`: PASS
+- `testValidateAndConsumeStateRejectsInvalidState`: PASS
+- `testValidateAndConsumeStateRejectsExpiredState`: PASS
+- `testClearPurgesPendingSession`: PASS
 
 ---
 

@@ -37,7 +37,7 @@ jobs:
         run: node --test tools/release-platforms.test.mjs tools/updater-manifest.test.mjs
 
       - name: Android signing and security tests
-        run: node --test tools/android-signing.test.mjs tools/android-security.test.mjs
+        run: node --test tools/android-signing.test.mjs tools/android-security.test.mjs tools/android-oauth.test.mjs
 
       - name: Build
         run: npm run build
@@ -111,6 +111,6 @@ jobs:
         with:
           gradle-version: "8.6"
 
-      - name: Assemble Android Release
+      - name: Test and Assemble Android Release
         run: |
-          cd android && gradle :app:assembleRelease --no-daemon
+          cd android && gradle :app:testReleaseUnitTest :app:assembleRelease --no-daemon

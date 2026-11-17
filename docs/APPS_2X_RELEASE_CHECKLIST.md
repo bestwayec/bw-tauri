@@ -17,11 +17,13 @@
 - [x] **Desktop Credential Protection**: Auth tokens securely managed via OS Keyring on desktop (`keyring` crate).
 - [x] **Android P0 Security Gate**:
   - Unnecessary token exposure removed from `AndroidBridge` (`getRefreshToken`, `getAuthToken` eliminated).
-  - Unsafe token duplication eliminated (no SharedPreferences, no duplicate cookies, no `localStorage` injection).
+  - Unsafe token duplication eliminated (no duplicate cookies, no `localStorage` injection).
   - Strict OAuth PKCE with cryptographically secure state & verifier, SHA-256 challenge, 5-minute TTL, single-use consumption.
+  - Process recreation survival: state and verifier persisted in private `SharedPreferences` (`uz.bestwayec.app.oauth_state`).
+  - Genuine code exchange: deep link exchanges code + verifier at `POST /v1/auth/desktop/exchange` and sets session cookies.
   - WebView navigation strictly locked to `TRUSTED_HOSTS` (`bestwayec.uz`, `api.bestwayec.uz`); external URLs routed to CustomTabs/external browser.
   - Media permissions gated by origin (`https://bestwayec.uz`) and whitelisted resources (`RESOURCE_AUDIO_CAPTURE`, `RESOURCE_VIDEO_CAPTURE`).
-  - Session cleanup on logout (`clearSessionCookies`, `localStorage`/`sessionStorage` purge).
+  - Session cleanup on logout (`clearSessionCookies`, `OAuthSecurityManager.clear()`, `localStorage`/`sessionStorage` purge).
 - [x] **Network Policy**: Remote API requests strictly enforce HTTPS with loopback limited to development. Cleartext HTTP disabled on Android (`usesCleartextTraffic="false"`).
 - [x] **Android Keystore Signing**: Official Release Keystore configured in CI; throwaway fallback removed. Signature schemes v1, v2, and v3 validated.
 - [x] **Android MinSdk**: Minimum SDK version set to 24 (Android 7.0 Nougat) or higher.
@@ -62,7 +64,7 @@ All automated regression tests (Vitest, Rust, Playwright, Node release and secur
 - `npm test`: 52 test files, 427 passed tests
 - `cargo test --manifest-path src-tauri/Cargo.toml`: 34 passed tests
 - `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`: 0 warnings
-- `node --test tools/release-platforms.test.mjs tools/validate-release.test.mjs tools/android-signing.test.mjs tools/updater-manifest.test.mjs tools/android-security.test.mjs`: 35 passed tests
+- `node --test tools/release-platforms.test.mjs tools/validate-release.test.mjs tools/android-signing.test.mjs tools/updater-manifest.test.mjs tools/android-security.test.mjs tools/android-oauth.test.mjs`: 43 passed tests
 - `npm run test:e2e`: 2 passed tests
 - `npm run build`: Production bundle compiled successfully
 - GitHub Actions CI matrix: 5/5 jobs green (ci, browser, rust, android, windows-x64)

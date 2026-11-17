@@ -31,17 +31,18 @@ test('P0-2: Token duplication across localStorage, cookies and SharedPreferences
   assert.ok(!mainActivity.includes('bw_refresh_token='), 'Must not write refresh tokens into cookies');
 });
 
-test('P0-3: OAuth authorization code deep-link requires strict state CSRF validation', () => {
+test('P0-3: OAuth authorization code deep-link requires strict state CSRF validation and PKCE exchange', () => {
   assert.ok(mainActivity.includes('OAuthSecurityManager'), 'OAuthSecurityManager must be defined');
   assert.ok(mainActivity.includes('validateAndConsumeState'), 'Must call validateAndConsumeState on callback');
   assert.ok(mainActivity.includes('STATE_TTL_MS'), 'Must enforce TTL on pending OAuth state');
+  assert.ok(mainActivity.includes('performCodeExchange'), 'Must execute PKCE verifier exchange');
 
   // Deep link handler must reject invalid or missing state
   const deepLinkMatch = mainActivity.match(/private fun handleDeepLink[\s\S]*?\{([\s\S]*?)\n    \}/);
   assert.ok(deepLinkMatch, 'handleDeepLink must exist');
   const deepLinkBody = deepLinkMatch[1];
-  assert.ok(deepLinkBody.includes('OAuthSecurityManager.validateAndConsumeState(state)'), 'Deep link handler must validate state');
-  assert.ok(deepLinkBody.includes('appendQueryParameter("auth_code", code)'), 'Must safely pass authorization code');
+  assert.ok(deepLinkBody.includes('OAuthSecurityManager.validateAndConsumeState(this, state)'), 'Deep link handler must validate state');
+  assert.ok(deepLinkBody.includes('performCodeExchange(code, pendingSession.verifier, pendingSession.deviceId)'), 'Must exchange code and verifier');
 });
 
 test('P0-4: WebView navigation is strictly locked to trusted HTTPS origins', () => {
@@ -76,7 +77,7 @@ test('P0-6: Logout clears session cookies, storage and pending OAuth state witho
   assert.ok(logoutMatch, 'handleLogout implementation must exist');
   const logoutBody = logoutMatch[1];
   assert.ok(logoutBody.includes('removeAllCookies'), 'Must clear cookies on logout');
-  assert.ok(logoutBody.includes('OAuthSecurityManager.clear()'), 'Must clear OAuth state on logout');
+  assert.ok(logoutBody.includes('OAuthSecurityManager.clear(this)'), 'Must clear OAuth state on logout');
   assert.ok(logoutBody.includes('localStorage.clear()'), 'Must clear localStorage on logout');
 });
 
