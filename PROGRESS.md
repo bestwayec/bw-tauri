@@ -11,31 +11,33 @@ BestWay o'rnatiluvchi ilovalarini (Windows [birlamchi], macOS, Linux desktop ilo
 2. **Android Ilovasi Xavfsizligi va Konfiguratsiyasi (Phase 5 & v1.0.12 Alignment)**:
    - Versiya `1.0.12` ga sinxronlashtirildi (`versionCode 10120`, `versionName "1.0.12"`), `minSdk 24`, `targetSdk 34`.
    - Cleartext HTTP va zaxira nusxa ko'chirish o'chirildi (`android:usesCleartextTraffic="false"`, `android:allowBackup="false"`).
-   - WebView xavfsizligi: `allowFileAccess = false`, `allowContentAccess = false`, JavaScript bridge faqat `https://bestwayec.uz` va `https://api.bestwayec.uz` bilan cheklandi.
-   - Deep-link orqali tokenlar URL query paramlariga chiqarilmasdan, uch bosqichli xavfsiz mexanizm orqali yetkazildi:
-     1. Persistent cookies (`max-age=2592000`, `Secure; SameSite=Lax`).
-     2. `onPageFinished` hodisasida faqat tasdiqlangan `https://bestwayec.uz` domeniga xavfsiz `localStorage` inyeksiyasi.
-     3. `AndroidBridge.getAuthToken()` va `getRefreshToken()` APIlari.
    - CI release workflow'ida throwaway vaqtinchalik kalit olib tashlandi, faqat rasmiy Release Keystore (v1+v2+v3, minSdk 24, universal ABI, >= 3 MB) talab qilindi.
-3. **Soxta Demo Ma'lumotlarni va False-Success Kodlarini Tozalash (Phase 3)**:
+3. **Android P0 Xavfsizlik Darvozasi (Security Gate)**:
+   - `AndroidBridge` dan `getRefreshToken()` va `getAuthToken()` butunlay olib tashlandi; JavaScript interfeysidan tokenlar sizib chiqishi bartaraf etildi.
+   - Tokenlarning SharedPreferences, ortiqcha cookielar va `onPageFinished` dagi `localStorage` inyeksiyasidagi 4 karra takrorlanishi to'xtatildi. Zombie sessiyalar va akkaunt almashtirishdagi xatolar bartaraf etildi.
+   - `OAuthSecurityManager` orqali 5 daqiqalik TTL va bir martalik foydalanishga ega qat'iy OAuth state CSRF tekshiruvi joriy etildi.
+   - WebView navigatsiyasi faqat `https://bestwayec.uz` va `https://api.bestwayec.uz` bilan cheklandi; har qanday tashqi havola xavfsiz tarzda Custom Tab yoki tizim brauzeriga yo'naltirildi.
+   - `onPermissionRequest` da origin tekshiruvi qo'shildi (`isTrustedOrigin`) va faqat audio/video resurslari ruxsat berilishi ta'minlandi.
+   - `tools/android-security.test.mjs` avtomatlashtirilgan regressiya testlari (7 ta test) yaratildi va muvaffaqiyatli o'tkazildi.
+   - `.github/workflows/ci.yml` ga Android kompilyatsiya va assembleRelease tekshiruvi qo'shildi.
+4. **Soxta Demo Ma'lumotlarni va False-Success Kodlarini Tozalash (Phase 3)**:
    - `LiveProctoring.tsx`: 6 ta sun'iy soxta talaba (`INITIAL_STUDENTS`) va qotirilgan xona PIN'i olib tashlandi. Real xona yaratish va ulanish ulandi, xatolar real bildirishnomaga chiqarildi. `EMPTY_ROOM` yordamida type-safe sessiya holati ta'minlandi.
    - `GradingQueue.tsx`, `CenterOverview.tsx`, `StudentResults.tsx`, `GroupsResults.tsx`: Soxta hardcoded ma'lumotlar olib tashlandi, backend endpointlari bilan integratsiya qilindi va toza empty state'lar qo'shildi.
-4. **Desktop Auto-Updater Parallel Manifest Ziddiyatini Tuzatish (Phase 7)**:
+5. **Desktop Auto-Updater Parallel Manifest Ziddiyatini Tuzatish (Phase 7)**:
    - Matrix build (`windows-x64`, `linux-x64`, `macos-intel`, `macos-apple-silicon`) jarayonida `latest.json` ni bir vaqtda yuklashdagi 422/409 race condition bartaraf etildi.
    - Matrix bosqichida faqat platforma `.sig` va bundle arxivlari yuklanadi (`includeUpdaterJson: false`).
    - `publish` bosqichida barcha 4 ta platforma `.sig` fayllari yig'ilib, yagona va to'liq `latest.json` generatsiya qilinadi va GitHub Release'ga yuklanadi.
    - Release platformalari va manifest sintezi uchun 28 ta test muvaffaqiyatli o'tkazildi.
-5. **Desktop Exam Kiosk 2.0 va Yadro Barqarorligi (Phase 1, 2, 4, 6)**:
+6. **Desktop Exam Kiosk 2.0 va Yadro Barqarorligi (Phase 1, 2, 4, 6)**:
    - Windows kiosk `WH_KEYBOARD_LL` low-level hook, fokus yo'qolishida avtomatik tiklanish, monitor sonini cheklash, content protection tekshirildi.
    - Offline holatda IndexedDB ga javoblar navbati saqlanishi va internet qaytganda avtomatik sinxronizatsiya qilinishi tasdiqlandi (`src/lib/offline-exam.ts`).
    - Speaking audio yozuvlarini server tasdiqlamaguncha o'chirmaslik mustahkamlandi (`src/lib/durable-recordings.ts`).
    - Rust media protokoli va path traversal xavfsizligi tekshirildi (`src-tauri/src/offline_media.rs`, `video_stream.rs`).
    - Rust clippy ogohlantirishlari bartaraf etildi (`src-tauri/src/browser.rs`, `src-tauri/src/encryption.rs`).
-6. **To'liq Test va Build Matritsasi (Phase 8)**:
-   - `origin/main` (PR #32, #33, #34, #35) bilan ziddiyatsiz merge qilindi (`918caac`).
+7. **To'liq Test va Build Matritsasi (Phase 8)**:
    - `npx tsc --noEmit` -> PASS (0 xato).
    - `npm test` (Vitest) -> PASS (**52 test fayli, 427 ta test, 0 xatolik**).
-   - `node --test` -> PASS (**28 ta release va manifest testi**).
+   - `node --test tools/*.test.mjs` -> PASS (**35 ta release va xavfsizlik testi**).
    - `cargo test --manifest-path src-tauri/Cargo.toml` -> PASS (**34 ta Rust birlik testi**).
    - `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` -> PASS (**0 ogohlantirish**).
    - `npm run test:e2e` (Playwright E2E) -> PASS (**2 ta test, 100% muvaffaqiyatli**).
@@ -43,16 +45,15 @@ BestWay o'rnatiluvchi ilovalarini (Windows [birlamchi], macOS, Linux desktop ilo
 
 ## 3. Jarayonda
 - Barcha ishlab chiqish, mustaqil verifikatsiya va avtomatlashtirilgan testlar 100% natija bilan yakunlandi.
-- GitHub yetkazib berish (Draft Pull Request ochish) jarayoni boshlanmoqda.
+- Pull Request [#36](https://github.com/bestwayec/bw-tauri/pull/36) yangilanmoqda.
 
 ## 4. Keyingi Qadamlar
-- `feat/bw-tauri-apps-2x` dagi so'nggi hujjatlashtirish kommitini amalga oshirish.
-- `git push -u origin feat/bw-tauri-apps-2x`.
-- `gh pr create --draft` orqali `main` tarmog'iga yo'naltirilgan rasmiy Draft PR ochish.
-- Foydalanuvchiga to'liq audit va verifikatsiya hisobotini topshirish.
+- O'zgarishlarni commit qilish va `origin feat/bw-tauri-apps-2x` ga push qilish.
+- PR #36 tavsifini yangilash va GitHub Actions tekshiruvlarini kuzatish.
+- Foydalanuvchiga yakuniy xavfsizlik hisobotini taqdim etish.
 
 ## 5. Muhim Qarorlar
 - **Zero AI Attribution**: Barcha git kommitlari faqat Komiljon Roziyev (kruziyev0@gmail.com) nomidan amalga oshirildi, AI imzolari yoki belgilariga yo'l qo'yilmadi.
 - **Production Binary Guard**: Soxta test/mock binar fayllar kiritilmadi, Android uchun rasmiy keystore, minSdk 24, universal ABI va APK >= 3 MB talablari qat'iy saqlandi.
-- **Centralized Updater Manifest**: 4 ta matrix runnerning bir vaqtda `latest.json` yozish ziddiyati bartaraf etildi va `publish-updater-manifest` orqali markazlashtirildi.
-- **Dual-Channel Auth Sync**: Mobil WebView'da sessiya uzluksizligi uchun faqat cookie emas, balki `localStorage` va `AndroidBridge` integratsiyasi ham birgalikda ta'minlandi.
+- **Zero Token Exposure over JS Bridge**: `AndroidBridge` orqali refresh yoki access tokenlar berilishi to'xtatildi, faqat environment metama'lumotlari qoldirildi.
+- **Single-Source Session Storage**: Sessiya boshqaruvi standart WebView CookieManager ga biriktirildi, SharedPreferences va localStorage orqali noxavfsiz takrorlanishlar olib tashlandi.
