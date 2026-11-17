@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { API_BASE_URL, get, post } from "@/lib/api";
 import type { SimulatorMode } from "@/components/exam-ui/model";
 import { cefrText, normalizeCefr } from "@/lib/cefr";
+import { demoDataEnabled } from "@/lib/demo-data";
 
 export interface LiveExamRoomSession {
   id: string;
@@ -78,7 +79,8 @@ export interface ProctorStudent {
   };
 }
 
-const INITIAL_STUDENTS: ProctorStudent[] = [
+/** Sample students: shown only when demoDataEnabled() (dev build or a deliberate demo build), never in a real session. */
+const DEMO_STUDENTS: ProctorStudent[] = [
   {
     id: "stu-101",
     name: "Azamat Karimov",
@@ -239,8 +241,28 @@ const INITIAL_STUDENTS: ProctorStudent[] = [
   },
 ];
 
+/** One result row of the room export. No score yet: a dash, never an invented number; the level is the server's. */
+export function proctorExportRow(s: ProctorStudent): string[] {
+  const sc = s.estimatedScore;
+  return [
+    s.name,
+    s.phone,
+    s.terminal,
+    s.room,
+    s.examTitle,
+    s.examType,
+    s.currentSection,
+    sc != null ? String(sc) : "—",
+    cefrText(normalizeCefr(s.cefrLevel)),
+    sc != null ? ((sc / 75) * 9).toFixed(1) : "—",
+    s.status,
+    String(s.antiCheatFlags.blurCount),
+    String(s.antiCheatFlags.pasteCount),
+  ];
+}
+
 export default function LiveProctoring() {
-  const [students, setStudents] = useState<ProctorStudent[]>(INITIAL_STUDENTS);
+  const [students, setStudents] = useState<ProctorStudent[]>(() => (demoDataEnabled() ? DEMO_STUDENTS : []));
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "flagged" | "critical">("all");
   const [selectedStudent, setSelectedStudent] = useState<ProctorStudent | null>(null);
@@ -250,16 +272,21 @@ export default function LiveProctoring() {
   const [autoRefresh, setAutoRefresh] = useState(true);
 
   // Teacher 6-digit PIN Live Exam Room state
-  const [liveRoom, setLiveRoom] = useState<LiveExamRoomSession>({
-    id: "room-482910",
-    pin: "482910",
-    title: "BestWay Group Mock — Lab 101",
-    examType: "IELTS",
-    simulatorMode: "cdi",
-    status: "active",
-    createdAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-  });
-  const [roomTitleInput, setRoomTitleInput] = useState("BestWay Group Mock — Lab 101");
+  // No room exists until the teacher creates one; the sample room is for demo/dev builds only.
+  const [liveRoom, setLiveRoom] = useState<LiveExamRoomSession>(() =>
+    demoDataEnabled()
+      ? {
+          id: "room-482910",
+          pin: "482910",
+          title: "BestWay Group Mock — Lab 101",
+          examType: "IELTS",
+          simulatorMode: "cdi",
+          status: "active",
+          createdAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        }
+      : { id: "", pin: "", title: "", examType: "IELTS", simulatorMode: "cdi", status: "waiting", createdAt: "" },
+  );
+  const [roomTitleInput, setRoomTitleInput] = useState(() => (demoDataEnabled() ? "BestWay Group Mock — Lab 101" : ""));
   const [roomExamType, setRoomExamType] = useState<"IELTS" | "MULTILEVEL">("IELTS");
   const [roomSimulatorMode, setRoomSimulatorMode] = useState<SimulatorMode>("cdi");
   const [creatingRoom, setCreatingRoom] = useState(false);
@@ -294,7 +321,8 @@ export default function LiveProctoring() {
 
         if (!active || !res) return;
 
-        if (res.participants && res.participants.length > 0) {
+        // A real answer replaces whatever was listed (sample rows included), also when the room is still empty.
+        if (Array.isArray(res.participants)) {
           setStudents((prev) => {
             const hasNewStrike = res.participants!.some((p) => {
               const match = prev.find((s) => s.id === p.studentId);
@@ -365,7 +393,15 @@ export default function LiveProctoring() {
     };
   }, [autoRefresh, liveRoom.pin, liveRoom.status, liveRoom.title]);
 
+  /** Room actions need a room: without a PIN nothing is sent. */
+  function requireRoom(): boolean {
+    if (liveRoom.pin) return true;
+    triggerToast("Avval imtihon xonasini yarating.");
+    return false;
+  }
+
   async function handleStartAllExams() {
+    if (!requireRoom()) return;
     try {
       await post(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/action`, { action: "start_exam" });
       setLiveRoom((prev) => ({ ...prev, status: "active" }));
@@ -376,6 +412,7 @@ export default function LiveProctoring() {
   }
 
   async function handleExtendAllExams(minutes: number = 5) {
+    if (!requireRoom()) return;
     try {
       await post(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/action`, {
         action: "extend_time",
@@ -394,6 +431,7 @@ export default function LiveProctoring() {
   }
 
   async function handleEndLiveRoom() {
+    if (!requireRoom()) return;
     if (!confirm("Haqiqatan ham imtihon xonasini yakunlab, barcha natijalarni saqlamoqchimisiz?")) return;
     try {
       await post(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/action`, { action: "end_room" });
@@ -406,6 +444,7 @@ export default function LiveProctoring() {
   }
 
   async function handleSendProctorWarning(student: ProctorStudent) {
+    if (!requireRoom()) return;
     try {
       await post(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/action`, {
         action: "warn_student",
@@ -425,6 +464,7 @@ export default function LiveProctoring() {
   }
 
   async function handleDisqualifyProctorStudent(student: ProctorStudent) {
+    if (!requireRoom()) return;
     if (confirm(`Haqiqatan ham ${student.name} ni qoidabuzarlik uchun chetlatmoqchimisiz? (Diskvalifikatsiya)`)) {
       try {
         await post(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/action`, {
@@ -498,6 +538,10 @@ export default function LiveProctoring() {
   }
 
   function handleExportXlsx() {
+    if (students.length === 0) {
+      triggerToast("Eksport qilish uchun natijalar yo'q.");
+      return;
+    }
     const header = [
       "Student Name",
       "Phone",
@@ -513,26 +557,7 @@ export default function LiveProctoring() {
       "Blur Count",
       "Paste Count",
     ];
-    const rows = students.map((s) => {
-      const sc = s.estimatedScore ?? 52;
-      const cefr = cefrText(normalizeCefr(s.cefrLevel));
-      const band = ((sc / 75) * 9).toFixed(1);
-      return [
-        s.name,
-        s.phone,
-        s.terminal,
-        s.room,
-        s.examTitle,
-        s.examType,
-        s.currentSection,
-        String(sc),
-        cefr,
-        band,
-        s.status,
-        String(s.antiCheatFlags.blurCount),
-        String(s.antiCheatFlags.pasteCount),
-      ];
-    });
+    const rows = students.map(proctorExportRow);
     const tsv = [header, ...rows].map((r) => r.join("\t")).join("\n");
     try {
       const blob = new Blob([tsv], {
@@ -680,7 +705,7 @@ export default function LiveProctoring() {
           <div className="flex flex-wrap items-center gap-4">
             <div className="rounded-2xl border border-violet-400/40 bg-black/50 px-5 py-3 text-center">
               <p className="text-[10px] font-bold uppercase tracking-widest text-violet-300">Room 6-Digit PIN</p>
-              <p className="mt-0.5 font-mono text-3xl font-black tracking-[0.25em] text-white">{liveRoom.pin}</p>
+              <p className="mt-0.5 font-mono text-3xl font-black tracking-[0.25em] text-white">{liveRoom.pin || "——"}</p>
             </div>
             <div>
               <div className="flex items-center gap-2">
@@ -691,9 +716,13 @@ export default function LiveProctoring() {
                   {liveRoom.examType}
                 </span>
               </div>
-              <h2 className="mt-1 text-base font-extrabold text-white">{liveRoom.title}</h2>
+              <h2 className="mt-1 text-base font-extrabold text-white">{liveRoom.title || "No room yet"}</h2>
               <p className="text-xs text-white/50">
-                Students join from Desktop or Web using PIN <strong className="font-mono text-white">{liveRoom.pin}</strong> · Created {liveRoom.createdAt}
+                {liveRoom.pin ? (
+                  <>Students join from Desktop or Web using PIN <strong className="font-mono text-white">{liveRoom.pin}</strong> · Created {liveRoom.createdAt}</>
+                ) : (
+                  <>Create a Live Exam Room below to get a PIN for your students.</>
+                )}
               </p>
             </div>
           </div>

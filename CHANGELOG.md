@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Live Proctoring
+- No invented numbers: the room export prints a dash (not a made-up 52 points and
+  its band) for a student without a score yet, and the level column shows only
+  the level the server reported.
+- The hard-coded sample students and the sample room (PIN 482910) appear only in
+  a dev build or a build made on purpose with `VITE_DEMO_DATA=true`. A real
+  session starts with no students and no room until the teacher creates one, and
+  the first answer from the server replaces whatever is listed, also when the
+  room is still empty. Room actions without a room send nothing.
+
 ### Dashboard
 - The CEFR level shown by the score predictor, the dashboard banner and the
   live proctoring CSV now comes from the server and nowhere else. The three
