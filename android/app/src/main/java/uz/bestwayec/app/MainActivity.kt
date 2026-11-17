@@ -193,25 +193,15 @@ class MainActivity : AppCompatActivity() {
             val session = createPendingLogin(context)
             val challenge = generateCodeChallenge(session.verifier)
 
-            val desktopParams = Uri.Builder()
-                .appendQueryParameter("device", "android")
-                .appendQueryParameter("state", session.state)
-                .appendQueryParameter("code_challenge", challenge)
-                .appendQueryParameter("code_challenge_method", "S256")
-                .appendQueryParameter("redirect", "bestwayapp://auth/callback")
-                .build()
-                .query ?: ""
-
+            val enc = { s: String -> java.net.URLEncoder.encode(s, "UTF-8") }
+            val desktopParams = "device=android&state=${enc(session.state)}&code_challenge=${enc(challenge)}&code_challenge_method=S256&redirect=${enc("bestwayapp://auth/callback")}"
             val nextPath = "/oauth/desktop?$desktopParams"
-            val builder = Uri.parse("https://bestwayec.uz/login").buildUpon()
-                .appendQueryParameter("next", nextPath)
-                .appendQueryParameter("platform", "mobile_app")
 
+            var url = "https://bestwayec.uz/login?next=${enc(nextPath)}&platform=mobile_app"
             if (!provider.isNullOrBlank()) {
-                builder.appendQueryParameter("provider", provider)
+                url += "&provider=${enc(provider)}"
             }
-
-            return builder.build().toString()
+            return url
         }
 
         /**
