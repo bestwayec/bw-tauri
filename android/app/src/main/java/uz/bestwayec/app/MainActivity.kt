@@ -43,8 +43,9 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         const val BASE_URL = "https://bestwayec.uz/?platform=mobile_app"
+        const val APP_VERSION = "1.0.12"
         private val TRUSTED_HOSTS = setOf("bestwayec.uz", "api.bestwayec.uz")
-        private val USER_AGENT_SUFFIX = " BestWayApp/${BuildConfig.VERSION_NAME} BestWay-Android/${BuildConfig.VERSION_NAME} MobileApp"
+        private val USER_AGENT_SUFFIX = " BestWayApp/$APP_VERSION BestWay-Android/$APP_VERSION MobileApp"
         private const val REQUEST_RECORD_AUDIO = 1001
 
         /**
@@ -79,7 +80,7 @@ class MainActivity : AppCompatActivity() {
         fun getVersion(): String {
             val url = webView.url ?: ""
             if (!isTrustedOrigin(url)) return ""
-            return BuildConfig.VERSION_NAME
+            return APP_VERSION
         }
     }
 
