@@ -18,6 +18,7 @@ import {
 } from "@/lib/mocks";
 import MockSectionPicker, { type MockStartChoice } from "@/components/exam-ui/MockSectionPicker";
 import LiveExamPinJoin from "@/components/LiveExamPinJoin";
+import DeviceReadinessModal from "@/components/DeviceReadinessModal";
 
 type Props = {
   studentName: string | null;
@@ -99,6 +100,7 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [picker, setPicker] = useState<{ mock: MockExamListItem; mode: MockAttemptMode } | null>(null);
   const [watchdogExpired, setWatchdogExpired] = useState(false);
+  const [showReadiness, setShowReadiness] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setWatchdogExpired(true), 4500);
@@ -248,6 +250,15 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <Greeting name={studentName} isStaff={staffUser} />
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowReadiness(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-all shadow-sm"
+            title="Audio, mikrofon va tarmoqni tekshirish"
+          >
+            <span>🛡️</span>
+            <span>Device Readiness</span>
+          </button>
           <div
             className="inline-flex rounded-xl border border-emerald-500/20 bg-[#111827] p-1"
             role="group"
@@ -681,6 +692,8 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
           onStart={(choice) => void startChosen(choice)}
         />
       )}
+
+      <DeviceReadinessModal open={showReadiness} onClose={() => setShowReadiness(false)} />
     </section>
   );
 }
