@@ -14,7 +14,8 @@ export type LockdownCheatEvent =
   | "keydown:save"
   | "keydown:view-source"
   | "visibilitychange:hidden"
-  | "window:blur";
+  | "window:blur"
+  | "multimonitor:detected";
 
 export type LockdownOrientation =
   | "any"
@@ -53,6 +54,7 @@ export function mapCheatEventToKind(
     case "visibilitychange:hidden":
       return "tab_switch";
     case "window:blur":
+    case "multimonitor:detected":
       return "blur";
     case "copy":
     case "cut":
@@ -342,6 +344,24 @@ export function useLockdown(options: UseLockdownOptions): UseLockdownResult {
 
     let disposed = false;
     let unlistenTauriFocus: (() => void) | null = null;
+    let monitorTimer: number | null = null;
+
+    if (typeof window !== "undefined") {
+      monitorTimer = window.setInterval(async () => {
+        try {
+          const mod = await import("@tauri-apps/api/core").catch(() => null);
+          const invoke = (mod as { invoke?: unknown } | null)?.invoke;
+          if (typeof invoke === "function") {
+            const count = await (invoke as (cmd: string) => Promise<number>)("check_monitors");
+            if (typeof count === "number" && count > 1 && !disposed) {
+              report("multimonitor:detected");
+            }
+          }
+        } catch {
+          /* ignore outside tauri */
+        }
+      }, 3000);
+    }
     void (async () => {
       try {
         const eventMod = await import("@tauri-apps/api/event").catch(() => null);
@@ -367,6 +387,7 @@ export function useLockdown(options: UseLockdownOptions): UseLockdownResult {
 
     return () => {
       disposed = true;
+      if (monitorTimer !== null) window.clearInterval(monitorTimer);
       unlistenTauriFocus?.();
       document.removeEventListener("contextmenu", onContextMenu);
       document.removeEventListener("copy", onCopy);
@@ -380,7 +401,7 @@ export function useLockdown(options: UseLockdownOptions): UseLockdownResult {
       if (requestFullscreen) tryExitFullscreen();
       void tryTauriInvoke("set_locked", { locked: false });
     };
-  }, [locked, requestFullscreen, clearClipboard, lockOrientation, report]);
+  }, [effectiveLocked, requestFullscreen, clearClipboard, lockOrientation, report]);
 
   return { cheatCount, relock };
 }

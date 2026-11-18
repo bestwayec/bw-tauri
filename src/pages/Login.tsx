@@ -189,16 +189,8 @@ export default function Login({ onLogin }: Props) {
       .catch(() => {
         /* event plugin always present in Tauri; ignore outside Tauri */
       });
-    // Don't hang forever on "Waiting for browser login…" — nudge a retry.
-    const timer = window.setTimeout(() => {
-      if (!dead) {
-        // Only nudge; the listeners stay alive until Cancel.
-        setError((prev) => prev ?? "Still waiting — if the browser didn't return, cancel and try again.");
-      }
-    }, 120_000);
     return () => {
       dead = true;
-      window.clearTimeout(timer);
       for (const u of unlistens) {
         try {
           u();
@@ -209,6 +201,15 @@ export default function Login({ onLogin }: Props) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-once deep-link wiring; handleCallback refs are stable via pendingRef/onLoginRef
   }, []);
+
+  // Don't hang forever on "Waiting for browser login…" — nudge a retry only while actively waiting.
+  useEffect(() => {
+    if (busy !== "browser" || !pending) return;
+    const timer = window.setTimeout(() => {
+      setError((prev) => prev ?? "Still waiting — if the browser didn't return, cancel and try again.");
+    }, 120_000);
+    return () => window.clearTimeout(timer);
+  }, [busy, pending]);
 
   async function handleBrowser() {
     setBusy("browser");

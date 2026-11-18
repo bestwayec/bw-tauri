@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
 import { useSessionStore } from "@/lib/session-store";
 import type { MockExamListItem, MockStartResult, MockSkill } from "@/lib/mocks";
+import type { TestListItem, StartResult } from "@/lib/tests";
 
 export interface ActiveMockSession {
+  kind?: "mock";
   studentId: string;
   mock: MockExamListItem;
   start: MockStartResult;
@@ -10,21 +12,52 @@ export interface ActiveMockSession {
   at: number;
 }
 
+export interface ActiveTestSession {
+  kind: "test";
+  studentId: string;
+  test: TestListItem;
+  start: StartResult;
+  at: number;
+}
+
+export type ActiveExamSession = ActiveMockSession | ActiveTestSession;
+
 export const ACTIVE_MOCK_SESSION_KEY = "bw_active_mock_session";
 
 export function persistActiveMockSession(
   mock: MockExamListItem,
   start: MockStartResult,
-  chosen?: MockSkill
+  chosen?: MockSkill,
 ) {
   try {
     const studentId = useSessionStore.getState().profile?.id;
     if (!studentId) return;
     const session: ActiveMockSession = {
+      kind: "mock",
       studentId,
       mock,
       start,
       chosen,
+      at: Date.now(),
+    };
+    localStorage.setItem(ACTIVE_MOCK_SESSION_KEY, JSON.stringify(session));
+  } catch {
+    /* private storage fallback */
+  }
+}
+
+export function persistActiveTestSession(
+  test: TestListItem,
+  start: StartResult,
+) {
+  try {
+    const studentId = useSessionStore.getState().profile?.id;
+    if (!studentId) return;
+    const session: ActiveTestSession = {
+      kind: "test",
+      studentId,
+      test,
+      start,
       at: Date.now(),
     };
     localStorage.setItem(ACTIVE_MOCK_SESSION_KEY, JSON.stringify(session));
@@ -41,44 +74,71 @@ export function clearActiveMockSession() {
   }
 }
 
-export function getActiveMockSession(): ActiveMockSession | null {
+export const clearActiveExamSession = clearActiveMockSession;
+
+export function getActiveExamSession(explicitOwnerId?: string | null): ActiveExamSession | null {
   try {
     const raw = localStorage.getItem(ACTIVE_MOCK_SESSION_KEY);
     if (!raw) return null;
-    const session = JSON.parse(raw) as ActiveMockSession;
-    if (!session?.mock?.id || !session?.start?.attemptId) return null;
-    // Never expose another student's cached questions/answers on a shared PC.
-    // Legacy unowned records remain on disk; the owner can resume via the
-    // authenticated exam start endpoint instead of an unverified local card.
-    if (!session.studentId || session.studentId !== useSessionStore.getState().profile?.id) return null;
+    const parsed = JSON.parse(raw) as Partial<ActiveExamSession>;
+    const targetOwner = explicitOwnerId !== undefined ? explicitOwnerId : useSessionStore.getState().profile?.id;
+    if (!parsed || !parsed.studentId || !targetOwner || parsed.studentId !== targetOwner) {
+      return null;
+    }
+
     // Session is valid for up to 4 hours (240 minutes)
-    if (Date.now() - (session.at || 0) > 4 * 60 * 60 * 1000) {
+    if (Date.now() - (parsed.at || 0) > 4 * 60 * 60 * 1000) {
       clearActiveMockSession();
       return null;
     }
-    return session;
+
+    if (parsed.kind === "test") {
+      const testSession = parsed as ActiveTestSession;
+      if (!testSession.test?.id || !testSession.start?.attemptId) return null;
+      return testSession;
+    }
+
+    // Default to mock session (includes legacy payloads without explicit kind)
+    const mockSession = parsed as ActiveMockSession;
+    if (!mockSession.mock?.id || !mockSession.start?.attemptId) return null;
+    return { ...mockSession, kind: "mock" };
   } catch {
     return null;
   }
 }
 
+export function getActiveMockSession(): ActiveMockSession | null {
+  const session = getActiveExamSession();
+  if (session && session.kind !== "test") {
+    return session as ActiveMockSession;
+  }
+  return null;
+}
+
 interface Props {
   onResume: (mock: MockExamListItem, start: MockStartResult, chosen?: MockSkill) => void;
+  onResumeTest?: (test: TestListItem, start: StartResult) => void;
   isExamActive: boolean;
 }
 
-export default function ResumeExamModal({ onResume, isExamActive }: Props) {
-  const [session, setSession] = useState<ActiveMockSession | null>(null);
+export default function ResumeExamModal({ onResume, onResumeTest, isExamActive }: Props) {
+  const [session, setSession] = useState<ActiveExamSession | null>(null);
+  const currentProfileId = useSessionStore((s) => s.profile?.id);
 
   useEffect(() => {
-    if (isExamActive) return;
-    const found = getActiveMockSession();
-    if (found) {
-      setSession(found);
+    if (isExamActive || !currentProfileId) {
+      if (isExamActive) setSession(null);
+      return;
     }
-  }, [isExamActive]);
+    const found = getActiveExamSession(currentProfileId);
+    setSession(found);
+  }, [isExamActive, currentProfileId]);
 
   if (!session || isExamActive) return null;
+
+  const isTest = session.kind === "test";
+  const title = isTest ? session.test.title : session.mock.title;
+  const subtitle = isTest ? "Standard / Practice Test" : "Full CBT Mock Exam";
 
   return (
     <div
@@ -96,14 +156,14 @@ export default function ResumeExamModal({ onResume, isExamActive }: Props) {
               Imtihonni davom ettirish
             </h3>
             <p className="text-xs text-slate-400">
-              Resume Unfinished CBT Session
+              Resume Unfinished CBT Session ({subtitle})
             </p>
           </div>
         </div>
 
         <div className="mt-4 rounded-xl border border-emerald-500/15 bg-[#111827] p-3.5 text-xs text-slate-300 space-y-1.5">
           <p className="font-semibold text-emerald-300">
-            {session.mock.title}
+            {title}
           </p>
           <p className="text-slate-400 leading-relaxed">
             Ilova yopilishidan oldingi imtihon seansi topildi. Barcha belgilangan javoblaringiz xavfsiz saqlangan. Qolgan vaqtingiz bilan to'xtagan joyingizdan davom etasizmi?
@@ -126,7 +186,11 @@ export default function ResumeExamModal({ onResume, isExamActive }: Props) {
             onClick={() => {
               const active = session;
               setSession(null);
-              onResume(active.mock, active.start, active.chosen);
+              if (active.kind === "test") {
+                onResumeTest?.(active.test, active.start);
+              } else {
+                onResume(active.mock, active.start, active.chosen);
+              }
             }}
             className="btn-brand rounded-xl px-5 py-2 text-xs font-bold shadow-lg shadow-emerald-950/40"
           >

@@ -33,7 +33,7 @@ import ReauthModal from "@/components/ReauthModal";
 import { getDismissedVersion, resolveDesktopUpdate, type UpdateInfo } from "@/lib/version";
 import ClickSpark from "@/components/ClickSpark";
 import CrashRecovery from "@/components/CrashRecovery";
-import ResumeExamModal, { persistActiveMockSession, clearActiveMockSession } from "@/components/ResumeExamModal";
+import ResumeExamModal, { persistActiveMockSession, persistActiveTestSession, clearActiveMockSession } from "@/components/ResumeExamModal";
 import { logout } from "@/lib/api";
 import { isAdminRole, isStaffRole, isTeacherRole } from "@/lib/auth";
 import { useSessionStore } from "@/lib/session-store";
@@ -294,6 +294,7 @@ export default function App() {
   }, [route]);
 
   const handleStartExam = (test: TestListItem, start: StartResult) => {
+    persistActiveTestSession(test, start);
     setActiveTest(test);
     setActiveStart(start);
     setLastScore(null);
@@ -301,6 +302,7 @@ export default function App() {
   };
 
   const handleFinishExam = (score: { autoScore: number | null }) => {
+    clearActiveMockSession();
     setLastScore(score);
     setLastMockResult(null);
     setHistoryKey((k) => k + 1);
@@ -589,7 +591,7 @@ export default function App() {
     </div>
     </div>
     {update && <UpdateNotifier update={update} onClose={() => setUpdate(null)} deferInstall={examActive} />}
-    <ResumeExamModal onResume={handleStartMock} isExamActive={examActive} />
+    <ResumeExamModal onResume={handleStartMock} onResumeTest={handleStartExam} isExamActive={examActive} />
     {showSplash && (
       <ErrorBoundary fallback={null}>
         <Suspense fallback={null}>

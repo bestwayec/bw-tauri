@@ -1,6 +1,8 @@
-import BestWayLogo3D from "./BestWayLogo3D";
+import { lazy, Suspense } from "react";
 import { ErrorBoundary } from "./common/ErrorBoundary";
 import { hasWebGL } from "@/lib/webgl";
+
+const BestWayLogo3D = lazy(() => import("./BestWayLogo3D"));
 
 type Props = {
   /** When true, plays the quick exit transition (fade + scale). */
@@ -50,12 +52,14 @@ export default function BootSplash({ exiting = false, webgl }: Props) {
           <div className="bw-logo-enter">
             {canRender3D ? (
               <ErrorBoundary fallback={<StaticLogo />}>
-                <BestWayLogo3D
-                  className="bw-logo-3d bw-logo-3d-solo"
-                  glow={false}
-                  particles={false}
-                  style={{ width: "min(1100px, 94vw)", height: "auto", aspectRatio: "3 / 1" }}
-                />
+                <Suspense fallback={<StaticLogo />}>
+                  <BestWayLogo3D
+                    className="bw-logo-3d bw-logo-3d-solo"
+                    glow={false}
+                    particles={false}
+                    style={{ width: "min(1100px, 94vw)", height: "auto", aspectRatio: "3 / 1" }}
+                  />
+                </Suspense>
               </ErrorBoundary>
             ) : (
               <StaticLogo />

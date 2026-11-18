@@ -5,6 +5,7 @@ describe("mapCheatEventToKind", () => {
   it("maps visibility loss to tab_switch and window blur to blur", () => {
     expect(mapCheatEventToKind("visibilitychange:hidden")).toBe("tab_switch");
     expect(mapCheatEventToKind("window:blur")).toBe("blur");
+    expect(mapCheatEventToKind("multimonitor:detected")).toBe("blur");
   });
 
   it("maps clipboard events to paste", () => {

@@ -50,6 +50,10 @@ export default defineConfig(({ mode }) => {
               name: "vendor-query",
               test: /node_modules[\\/]_?(@tanstack|zustand)[\\/]/,
             },
+            {
+              name: "vendor-three",
+              test: /node_modules[\\/](three|@react-three)[\\/]/,
+            },
           ],
         },
       },
