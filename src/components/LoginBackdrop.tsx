@@ -1,5 +1,6 @@
 import { Suspense, lazy } from "react";
 import { ErrorBoundary } from "./common/ErrorBoundary";
+import { isLowEndSystem } from "@/lib/device-capability";
 
 const Particles = lazy(() => import("./Particles"));
 
@@ -11,11 +12,11 @@ type Props = {
 
 /**
  * Decorative particle field behind the login card. It is optional: no WebGL,
- * reduced motion, or a crash inside ogl all leave the login form usable on
- * the plain dark background.
+ * reduced motion, low-memory 4GB PC, or a crash inside ogl all leave the login form usable on
+ * the plain dark background, avoiding excessive idle CPU usage.
  */
 export default function LoginBackdrop({ webgl, reduceMotion }: Props) {
-  if (!webgl || reduceMotion) return null;
+  if (!webgl || reduceMotion || isLowEndSystem()) return null;
   return (
     <div
       aria-hidden="true"

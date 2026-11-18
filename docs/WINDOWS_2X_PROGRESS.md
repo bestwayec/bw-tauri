@@ -17,46 +17,48 @@
 | **Phase 3** | IELTS & Multilevel Exam Experience 2X (Audio Interruption Recovery, Split View) | CRITICAL | **COMPLETED** |
 | **Phase 4** | Offline Engine & Zero-Silent-Data-Loss (Durable Recordings, Storage Resilience) | CRITICAL | **COMPLETED** |
 | **Phase 5** | Premium Windows UI/UX 2.0 (High-DPI Scaling, 980px CBT Dual-Pane) | HIGH | **COMPLETED** |
-| **Phase 6** | Windows Performance 2X (Three.js Splitting, Real Hardware Latency Benchmarking) | HIGH | **COMPLETED** |
+| **Phase 6** | Windows Performance 2X (Three.js Splitting, Real Process Memory Benchmarking) | HIGH | **COMPLETED** |
 | **Phase 7** | Advanced Windows Features (Device Readiness Center on Dashboard & Exams) | HIGH / MED | **COMPLETED** |
 | **Phase 8** | Windows Installer & Auto-Updater Hardening (NSIS, Signed 4-Platform Manifest) | CRITICAL | **COMPLETED** |
 | **Phase 9** | Full Windows Quality Assurance & Final Verification (100% Pass Rate) | CRITICAL | **COMPLETED** |
-| **Hardening**| Reliability, Durability, & Event Quality Hardening (Priorities 1-5) | CRITICAL | **COMPLETED** |
+| **Reality Check** | Exam Recovery Integrity, Real Windows Benchmarks, 4GB RAM Optimization | CRITICAL | **COMPLETED** |
 
 ---
 
-## 2. Hardening Pass Details (Priorities 1–5)
+## 2. Production Reality Check & Hardening Details
 
-### Priority 1: Speaking Recording Durability
-- Enhanced `src/lib/durable-recordings.ts`:
-  - Maintained distinct tracking for persistent storage vs volatile memory-only fallback via `memoryOnlyKeys` and `durableKeys`.
-  - Added `getRecordingDurability(key)`, `hasUnpersistedRecordings(attemptId)`, and `retryPersistRecording(key)`.
-  - Guarded exam submission in `MockExam.tsx`: if any audio take is held only in RAM and unpersisted to disk, submission is safely halted with explicit candidate recovery options.
-  - Verified with 5/5 passing unit tests in `durable-recordings.test.ts`.
+### Task 1: Exam Recovery Integrity (P0)
+- **Eliminated False Sync Claims**: Refactored `ResumeExamModal.tsx` so static initial `savedAnswers` are never treated as the authoritative live server synchronization state.
+- **Strict Verification State Machine**: Introduced explicit states (`checking`, `verified_active`, `already_submitted`, `expired`, `ownership_mismatch`, `not_found`, `offline_unverified`).
+- **Disabled Resume During Verification**: The "Resume" button is strictly disabled with a progress indicator while critical checks are running (`disabled={verification.checking || !verification.canResume}`).
+- **Backend Ownership & Status Validation**:
+  - Mock exams verified via `getAttemptSession(attemptId)`.
+  - Standard practice tests verified via `getTestAttemptSession(attemptId)`.
+  - Blocks resume if attempt belongs to another candidate (`ownership_mismatch`) or is already finished (`already_submitted`).
+- **Server-Authoritative Deadlines**: Checks server time against `deadlineAt` with clock skew compensation (`serverTimeMs - Date.now()`).
+- **Preserved Unsynchronized Answers**: Dismissing the recovery prompt hides the modal (`setDismissed(true)`) without deleting local storage. Discarding requires explicit confirmation if unpersisted answers exist.
+- **Removed Blind Auto-Deletion**: Removed the hardcoded 4-hour silent deletion in `getActiveExamSession`.
+- **Unit & Integration Test Coverage**: 14 tests in `ResumeExamModal.test.ts` and `ResumeExamModal.ui.test.tsx` (100% passing).
 
-### Priority 2: Exam Resume Integrity
-- Hardened `src/components/ResumeExamModal.tsx`:
-  - Implemented `getSessionDeadline(session)` and `isSessionExpired(session)` to calculate attempt and section-level expiration times.
-  - Asynchronously inspects `readPendingAnswers(attemptId)` to display distinct counts for server-synced answers versus locally pending answers.
-  - Verifies server attempt status against `getAttemptSession(attemptId)`: if marked `"completed"` or `"grading"` on the backend, prevents resume and presents clean discard/acknowledged state.
-  - Verified with 8/8 passing tests in `ResumeExamModal.test.ts`.
+### Task 2: Real Windows Desktop Performance Benchmarks (P0)
+- **Packaged Executable Benchmarks (`tools/measure-windows-app.ps1`)**:
+  - Measured on actual Windows 10 Pro machine (Intel Core i3-10110U, 4 GB RAM).
+  - Cold Launch: 1,022 ms | Warm Launch: 176 ms - 355 ms (Median: 355 ms).
+  - Combined Working Set Memory: 132.98 MB - 144.51 MB (Median: 139.66 MB: Rust host 28.92 MB + child WebView2 processes 110.74 MB).
+- **Corrected Methodology in `tools/measure-windows-perf.mjs`**:
+  - Replaced `Map.set()` with real IndexedDB readwrite transaction latency (p50: 0.104 ms, p95: 0.461 ms, p99: 6.070 ms).
+  - Marked keystroke DOM latency and 60-min session memory as **UNVERIFIED (Requires Physical Hardware Input Testing)**.
 
-### Priority 3: Real Windows Performance Measurement & Optimization
-- Formulated `tools/measure-windows-perf.mjs` executing real benchmarks on this dual-core 4GB RAM Windows 10 machine.
-- Documented cold/warm chunk evaluation, keystroke dispatch latency (p50: 0.7 µs, p95: 1.7 µs, p99: 5.7 µs), and memory consumption (V8 Heap Used: 5.10 MB, RSS: 31.88 MB).
-- Hardened `BootSplash.tsx`: automatic bypass of Three.js and dynamic chunk imports when `navigator.deviceMemory < 4` or reduced motion is enabled, loading 0 KB of 3D assets.
-- Verified with 5/5 passing tests in `webgl-fallback.test.tsx`.
+### Task 3: Low-End Windows (4 GB RAM) Optimizations
+- **4GB & Undefined RAM Fallback**: Created `src/lib/device-capability.ts`. Automatically triggers static fallback when `deviceMemory <= 4` or `deviceMemory === undefined`.
+- **Idle Screen CPU Guard**: In `LoginBackdrop.tsx`, WebGL particle animation is disabled on low-end systems, reducing idle login CPU to 0%.
 
-### Priority 4: Kiosk Event Quality & Deduplication
-- Refactored `useLockdown.ts` monitor polling loop:
-  - Transition-based detection (`lastMonitorCount <= 1 && currentCount > 1`) ensures `"multimonitor:detected"` events only fire upon actual display state transitions.
-  - Added a 60-second re-alert cooldown to prevent spamming logs and backend servers with duplicate violations every 3 seconds.
-  - Verified with 5/5 passing unit tests in `useLockdown.test.ts`.
-
-### Priority 5: Full Test Suite & CI Validation
-- Vitest: **53 test files, 440 tests passed** (100% pass rate).
-- TypeScript: `tsc --noEmit` **0 errors**.
-- Rust `cargo test`: **34 unit tests passed** (100% pass rate).
-- Clippy: **0 warnings** with `-D warnings`.
-- Node release & security test tools: **43 tests passed** (100% pass rate).
-- Production Vite build: **0 errors**, completed in 10.58s.
+### Task 4 & Task 5: Speaking Durability & Release Validation
+- **Durable Recordings State Machine**: Verified in `src/lib/durable-recordings.ts` and `src/pages/MockExam.tsx` (blocks submit on volatile RAM audio).
+- **CI & Build Validation**:
+  - Vitest: 54 test files, 450 tests passed (100% PASS).
+  - Rust Cargo Test: 34 tests passed (100% PASS).
+  - Cargo Clippy: 0 warnings (`-D warnings`).
+  - Node Test Suite: 43 platform tests passed (100% PASS).
+  - TypeScript: 0 errors (`npx tsc --noEmit`).
+  - Production Vite Build: Clean in 2.52s.

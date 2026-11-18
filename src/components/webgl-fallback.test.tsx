@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hasWebGL, resetWebGLProbeForTests } from "@/lib/webgl";
 import BootSplash from "./BootSplash";
+import { isLowEndSystem } from "@/lib/device-capability";
 import LoginBackdrop from "./LoginBackdrop";
 import Login from "@/pages/Login";
 
@@ -61,5 +62,33 @@ describe("without WebGL (getContext returns null)", () => {
     });
     expect(hasWebGL()).toBe(true);
     expect(loseContext).toHaveBeenCalled();
+  });
+});
+
+describe("low-end system detection & 4 GB RAM fallback", () => {
+  it("triggers fallback when navigator.deviceMemory is unavailable (undefined)", () => {
+    vi.stubGlobal("navigator", { deviceMemory: undefined, hardwareConcurrency: 2 });
+    expect(isLowEndSystem()).toBe(true);
+    const html = renderToStaticMarkup(<BootSplash webgl={true} reduceMotion={false} />);
+    expect(html).toContain('data-testid="static-logo"');
+  });
+
+  it("triggers fallback when navigator.deviceMemory is exactly 4 GB", () => {
+    vi.stubGlobal("navigator", { deviceMemory: 4, hardwareConcurrency: 4 });
+    expect(isLowEndSystem()).toBe(true);
+    const html = renderToStaticMarkup(<BootSplash webgl={true} reduceMotion={false} />);
+    expect(html).toContain('data-testid="static-logo"');
+  });
+
+  it("triggers fallback when navigator.deviceMemory is 2 GB", () => {
+    vi.stubGlobal("navigator", { deviceMemory: 2, hardwareConcurrency: 2 });
+    expect(isLowEndSystem()).toBe(true);
+    const html = renderToStaticMarkup(<BootSplash webgl={true} reduceMotion={false} />);
+    expect(html).toContain('data-testid="static-logo"');
+  });
+
+  it("identifies high-end systems when navigator.deviceMemory is 8 GB", () => {
+    vi.stubGlobal("navigator", { deviceMemory: 8, hardwareConcurrency: 8 });
+    expect(isLowEndSystem()).toBe(false);
   });
 });

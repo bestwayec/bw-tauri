@@ -231,6 +231,18 @@ export function getAttemptReview(attemptId: string): Promise<AttemptReview> {
   return get<AttemptReview>(`/tests/attempts/${encodeURIComponent(attemptId)}`);
 }
 
+/** Fetch active standard test attempt session with safe 404 handling. */
+export async function getTestAttemptSession(attemptId: string): Promise<AttemptSummary | null> {
+  try {
+    return await get<AttemptSummary>(`/tests/attempts/${encodeURIComponent(attemptId)}`);
+  } catch (err: unknown) {
+    if (typeof err === "object" && err !== null && (err as { status?: number }).status === 404) {
+      return null;
+    }
+    throw err;
+  }
+}
+
 /**
  * Turn the backend's sanitized audio path into a fetchable absolute URL.
  * Backend returns `/v1/tests/questions/:id/audio`; API_BASE_URL already

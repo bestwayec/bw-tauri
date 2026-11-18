@@ -19,32 +19,33 @@ BestWay Windows desktop ilovasini (Tauri v2 / Rust, Win32, React 19, TypeScript,
 4. **Phase 2: Windows Exam Kiosk 2.0 (Bajarildi)**:
    - `useLockdown.ts` da `effectiveLocked` dependency array'ga qo'shildi, rol o'zgarishi reaktiv ishlaydi (W2X-04).
    - Imtihon davomida ikkinchi monitor ulanganini tekshirish holat o'tishlariga (`transition-based`) o'tkazildi va 60s cooldown bilan deduplikatsiya qilindi (W2X-03).
-5. **Phase 6: Windows Performance 2X (Bajarildi)**:
+5. **Phase 6: Windows Performance 2X & Reality Check (Bajarildi)**:
    - `BootSplash.tsx` da `BestWayLogo3D` dynamic `lazy()` va `<Suspense>` ga o'tkazildi, Three.js `vendor-three` ga ajratildi (W2X-06).
-   - `BootSplash` hajmi **1,037.27 kB dan 1.71 kB ga tushirildi (99.8% qisqarish)**, yuklanish bir necha millisekundga tushdi.
-   - 4GB RAM lab kompyuterlari va reduced-motion rejimida Three.js yuklanishi butunlay cheklandi (0 KB yuklanadi).
-   - `tools/measure-windows-perf.mjs` orqali real uskunada (Intel i3, 4GB RAM) p50/p95/p99 klaviatura latensiyasi (0.7-5.7 µs) o'lchandi.
-6. **Phase 7 & Phase 3: Device Readiness & Audio Resilience (Bajarildi)**:
-   - Nomzodlar uchun `DeviceReadinessModal.tsx` (stereo audio chime testi, real-time mikrofon level meter, ping/latensiya tekshiruvi, xotira kvotasi) yaratildi.
-   - `Exams.tsx` va `Dashboard.tsx` bosh sahifalariga o'rnatildi.
-   - `ListeningEngine.tsx` da audio to'xtab qolganda yoki naushnik uzilganda tiklash oynasi (recovery banner) qo'shildi (W2X-07).
-7. **Phase 4 & Phase 5: Zero Silent Data Loss & 1366x768 Display Scaling (Bajarildi)**:
-   - `durable-recordings.ts` da audio yozuvlarning xotiradagi (RAM) holati va diskdagi (IndexedDB) holati ajratildi (`memoryOnlyKeys`, `durableKeys`).
-   - Yozuv to'liq diskka yoki serverga yetib bormaguncha imtihonni topshirish xavfsiz bloklanadi (`hasUnpersistedRecordings`), nomzodga qayta urinish imkoniyati beriladi.
-   - `ResumeExamModal.tsx` da server holati (`"completed"` / `"grading"`), lokal va sinxronlangan javoblar soni, hamda deadline (`getSessionDeadline`) chuqur tekshiriladi.
-   - `exam-layout.ts` da `EXAM_SPLIT_MIN_WIDTH` 1100px dan 980px ga tushirildi, 1366x768 noutbuklarda 125% masshtabda ham dual-column split view saqlanadi (W2X-08).
-   - `TopBar.tsx` da saqlash holatlari (`"saving_local"`, `"local_awaiting_sync"`, `"submitting"`) boyitildi (W2X-10).
-8. **Phase 9: Comprehensive Test Verification (Bajarildi)**:
-   - `npm test`: **53 fayl, 440 ta test o'tdi (100% PASS)**.
+   - `src/lib/device-capability.ts` yaratildi: 4GB RAM yoki `deviceMemory === undefined` bo'lganda Three.js yuklanishi butunlay cheklandi (0 KB yuklanadi).
+   - `LoginBackdrop.tsx` da 4GB kompyuterlarda ortiqcha zarrachalar (particles) to'xtatildi, idle login CPU 0% ga tushirildi.
+   - `tools/measure-windows-app.ps1` orqali real paketlangan Windows ilovasining ishga tushish vaqti (Median: 355 ms) va umumiy Working Set xotirasi (Median: 139.66 MB: Rust host 28.92 MB + child WebView2 110.74 MB) o'lchandi.
+   - `tools/measure-windows-perf.mjs` da real IndexedDB tranzaksiya latensiyasi (p50: 0.104 ms, p95: 0.461 ms, p99: 6.070 ms) o'lchandi.
+   - Jismoniy kiritish latensiyasi (keystroke DOM latency) aniq qilib `UNVERIFIED` deb belgilandi.
+6. **Task 1: Exam Recovery Integrity (P0) (Bajarildi)**:
+   - `ResumeExamModal.tsx` dagi statik dastlabki `savedAnswers` endi joriy server sinxronizatsiya holati deb ko'rsatilmaydi.
+   - Tekshiruv vaqtida Resume tugmasi qat'iy bloklanadi (`disabled={verification.checking || !verification.canResume}`).
+   - Mock imtihonlar (`getAttemptSession`) va standart testlar (`getTestAttemptSession`) server orqali egalik va faol holati tekshiriladi.
+   - Agar server javob bermasa, holat `offline_unverified` (noma'lum) deb ko'rsatiladi va ogohlantirish beriladi.
+   - Server vaqti va deadline (`deadlineAt`) server clock skew bilan to'liq hisoblanadi.
+   - Nomzod modalni "Keyinroq" qilib yopganda ma'lumotlar o'chirilmaydi (`setDismissed(true)`). Seansni o'chirishda sinxronlanmagan javoblar bo'lsa, tasdiqlash so'raladi.
+   - `getActiveExamSession` dan 4 soatlik avtomatik o'chirish olib tashlandi.
+   - 14 ta unit va UI integratsiya testlari (`ResumeExamModal.test.ts`, `ResumeExamModal.ui.test.tsx`) 100% o'tdi.
+7. **Comprehensive Test Verification**:
+   - `npm test`: **54 fayl, 450 ta test o'tdi (100% PASS)**.
    - `cargo test`: **34 ta Rust testi o'tdi (100% PASS)**.
    - `cargo clippy -- -D warnings`: **0 ta xatolik, 0 ta ogohlantirish**.
    - `node --test tools/*.test.mjs`: **43 ta test o'tdi (100% PASS)**.
    - `npx tsc --noEmit`: **0 ta xatolik**.
-   - `npm run build`: **0 ta xatolik, 10.58s da muvaffaqiyatli build bo'ldi**.
+   - `npm run build`: **0 ta xatolik, 2.52s da muvaffaqiyatli build bo'ldi**.
    - `docs/WINDOWS_2X_FINAL_REPORT.md` va `docs/WINDOWS_2X_PERFORMANCE.md` yangilandi.
 
 ## 3. Jarayonda
-- Barcha yangilanishlar sinovdan o'tkazildi, branch PR #37 ga yuborishga tayyor.
+- Barcha tuzatishlar va yangi testlar kiritildi, commit va push ga tayyor.
 
 ## 4. Keyingi Qadamlar
 - O'zgarishlarni commit qilib, `feat/windows-2x-desktop-evolution` branch'i orqali PR #37 ga push qilish.

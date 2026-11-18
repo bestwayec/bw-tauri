@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useSessionStore } from "@/lib/session-store";
 import { getAttemptSession } from "@/lib/exam-sessions";
-import { readPendingAnswers } from "@/lib/offline-exam";
+import { getTestAttemptSession } from "@/lib/tests";
+import { readPendingAnswers, clearAttemptCache } from "@/lib/offline-exam";
 import type { MockExamListItem, MockStartResult, MockSkill } from "@/lib/mocks";
 import type { TestListItem, StartResult } from "@/lib/tests";
 
@@ -99,11 +100,11 @@ export function getSessionDeadline(session: ActiveExamSession): string | null {
   );
 }
 
-export function isSessionExpired(session: ActiveExamSession): boolean {
+export function isSessionExpired(session: ActiveExamSession, now = Date.now()): boolean {
   const deadline = getSessionDeadline(session);
   if (!deadline) return false;
   const parsed = Date.parse(deadline);
-  return !Number.isNaN(parsed) && parsed <= Date.now();
+  return !Number.isNaN(parsed) && parsed <= now;
 }
 
 export function getActiveExamSession(explicitOwnerId?: string | null): ActiveExamSession | null {
@@ -113,12 +114,6 @@ export function getActiveExamSession(explicitOwnerId?: string | null): ActiveExa
     const parsed = JSON.parse(raw) as Partial<ActiveExamSession>;
     const targetOwner = explicitOwnerId !== undefined ? explicitOwnerId : useSessionStore.getState().profile?.id;
     if (!parsed || !parsed.studentId || !targetOwner || parsed.studentId !== targetOwner) {
-      return null;
-    }
-
-    // Session is valid for up to 4 hours (240 minutes)
-    if (Date.now() - (parsed.at || 0) > 4 * 60 * 60 * 1000) {
-      clearActiveMockSession();
       return null;
     }
 
@@ -151,26 +146,39 @@ interface Props {
   isExamActive: boolean;
 }
 
-interface VerificationState {
+export type RecoveryServerStatus =
+  | "checking"
+  | "verified_active"
+  | "already_submitted"
+  | "expired"
+  | "ownership_mismatch"
+  | "not_found"
+  | "offline_unverified";
+
+export interface VerificationState {
   checking: boolean;
-  isExpired: boolean;
-  alreadySubmitted: boolean;
-  syncedAnswersCount: number;
+  serverStatus: RecoveryServerStatus;
   pendingAnswersCount: number;
+  initialAnswersCount: number;
   deadlineText: string | null;
+  canResume: boolean;
 }
 
 export default function ResumeExamModal({ onResume, onResumeTest, isExamActive }: Props) {
-  const [session, setSession] = useState<ActiveExamSession | null>(null);
+  const currentProfileId = useSessionStore((s) => s.profile?.id);
+  const [session, setSession] = useState<ActiveExamSession | null>(() =>
+    isExamActive ? null : getActiveExamSession(useSessionStore.getState().profile?.id),
+  );
+  const [dismissed, setDismissed] = useState(false);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const [verification, setVerification] = useState<VerificationState>({
     checking: true,
-    isExpired: false,
-    alreadySubmitted: false,
-    syncedAnswersCount: 0,
+    serverStatus: "checking",
     pendingAnswersCount: 0,
+    initialAnswersCount: 0,
     deadlineText: null,
+    canResume: false,
   });
-  const currentProfileId = useSessionStore((s) => s.profile?.id);
 
   useEffect(() => {
     if (isExamActive || !currentProfileId) {
@@ -186,8 +194,15 @@ export default function ResumeExamModal({ onResume, onResumeTest, isExamActive }
     if (!session) return;
 
     let cancelled = false;
+    setVerification((prev) => ({
+      ...prev,
+      checking: true,
+      serverStatus: "checking",
+      canResume: false,
+    }));
+
     const deadline = getSessionDeadline(session);
-    let expired = false;
+    let expired = isSessionExpired(session);
     let deadlineDesc: string | null = null;
 
     if (deadline) {
@@ -205,46 +220,194 @@ export default function ResumeExamModal({ onResume, onResumeTest, isExamActive }
     }
 
     const savedMap = (session.start as { savedAnswers?: Record<string, string> }).savedAnswers ?? {};
-    const syncedCount = Object.keys(savedMap).length;
+    const initialCount = Object.keys(savedMap).length;
 
-    // Check offline pending answers
+    // Check offline pending answers from IndexedDB
     void readPendingAnswers(session.start.attemptId)
       .then(async (pending) => {
         if (cancelled) return;
         const pendingCount = pending.length;
 
-        // When online, check server status
-        if (typeof navigator !== "undefined" && navigator.onLine && session.kind === "mock") {
+        // When online, check server attempt status
+        const online = typeof navigator === "undefined" || navigator.onLine !== false;
+        if (online) {
           try {
-            const serverAttempt = await getAttemptSession(session.start.attemptId);
-            if (cancelled) return;
-            if (serverAttempt) {
+            if (session.kind === "mock") {
+              const serverAttempt = await getAttemptSession(session.start.attemptId);
+              if (cancelled) return;
+
+              if (serverAttempt === null) {
+                // HTTP 404
+                setVerification({
+                  checking: false,
+                  serverStatus: "not_found",
+                  pendingAnswersCount: pendingCount,
+                  initialAnswersCount: initialCount,
+                  deadlineText: deadlineDesc,
+                  canResume: false,
+                });
+                return;
+              }
+
+              // Validate ownership against server record
+              if (
+                serverAttempt.studentId &&
+                currentProfileId &&
+                serverAttempt.studentId !== currentProfileId
+              ) {
+                setVerification({
+                  checking: false,
+                  serverStatus: "ownership_mismatch",
+                  pendingAnswersCount: pendingCount,
+                  initialAnswersCount: initialCount,
+                  deadlineText: deadlineDesc,
+                  canResume: false,
+                });
+                return;
+              }
+
+              // Check if completed or grading
               if (serverAttempt.status === "completed" || serverAttempt.status === "grading") {
                 clearActiveExamSession();
                 setVerification({
                   checking: false,
-                  isExpired: false,
-                  alreadySubmitted: true,
-                  syncedAnswersCount: syncedCount,
+                  serverStatus: "already_submitted",
                   pendingAnswersCount: pendingCount,
+                  initialAnswersCount: initialCount,
                   deadlineText: deadlineDesc,
+                  canResume: false,
                 });
                 return;
               }
+
+              // Server-authoritative deadline check with server clock skew
+              let serverExpired = expired;
+              if (serverAttempt.deadlineAt && serverAttempt.serverTime) {
+                const serverTimeMs = Date.parse(serverAttempt.serverTime);
+                const deadlineMs = Date.parse(serverAttempt.deadlineAt);
+                if (!Number.isNaN(serverTimeMs) && !Number.isNaN(deadlineMs)) {
+                  const skew = serverTimeMs - Date.now();
+                  const remainingMs = deadlineMs - (Date.now() + skew);
+                  if (remainingMs <= 0) {
+                    serverExpired = true;
+                    deadlineDesc = "Muddati tugagan (Server Deadline Passed)";
+                  } else {
+                    serverExpired = false;
+                    const mins = Math.max(1, Math.round(remainingMs / 60000));
+                    deadlineDesc = `${mins} daqiqa qoldi (${mins}m remaining)`;
+                  }
+                }
+              }
+
+              if (serverExpired) {
+                setVerification({
+                  checking: false,
+                  serverStatus: "expired",
+                  pendingAnswersCount: pendingCount,
+                  initialAnswersCount: initialCount,
+                  deadlineText: deadlineDesc,
+                  canResume: false,
+                });
+                return;
+              }
+
+              // Verified active mock attempt
+              setVerification({
+                checking: false,
+                serverStatus: "verified_active",
+                pendingAnswersCount: pendingCount,
+                initialAnswersCount: initialCount,
+                deadlineText: deadlineDesc,
+                canResume: true,
+              });
+              return;
+            } else {
+              // Standard test verification
+              const serverTest = await getTestAttemptSession(session.start.attemptId);
+              if (cancelled) return;
+
+              if (serverTest === null) {
+                setVerification({
+                  checking: false,
+                  serverStatus: "not_found",
+                  pendingAnswersCount: pendingCount,
+                  initialAnswersCount: initialCount,
+                  deadlineText: deadlineDesc,
+                  canResume: false,
+                });
+                return;
+              }
+
+              if (
+                serverTest.studentId &&
+                currentProfileId &&
+                serverTest.studentId !== currentProfileId
+              ) {
+                setVerification({
+                  checking: false,
+                  serverStatus: "ownership_mismatch",
+                  pendingAnswersCount: pendingCount,
+                  initialAnswersCount: initialCount,
+                  deadlineText: deadlineDesc,
+                  canResume: false,
+                });
+                return;
+              }
+
+              if (
+                serverTest.status === "completed" ||
+                serverTest.status === "grading" ||
+                Boolean(serverTest.finishedAt)
+              ) {
+                clearActiveExamSession();
+                setVerification({
+                  checking: false,
+                  serverStatus: "already_submitted",
+                  pendingAnswersCount: pendingCount,
+                  initialAnswersCount: initialCount,
+                  deadlineText: deadlineDesc,
+                  canResume: false,
+                });
+                return;
+              }
+
+              if (expired) {
+                setVerification({
+                  checking: false,
+                  serverStatus: "expired",
+                  pendingAnswersCount: pendingCount,
+                  initialAnswersCount: initialCount,
+                  deadlineText: deadlineDesc,
+                  canResume: false,
+                });
+                return;
+              }
+
+              // Verified active standard test attempt
+              setVerification({
+                checking: false,
+                serverStatus: "verified_active",
+                pendingAnswersCount: pendingCount,
+                initialAnswersCount: initialCount,
+                deadlineText: deadlineDesc,
+                canResume: true,
+              });
+              return;
             }
           } catch {
-            /* server unreachable, proceed with offline integrity data */
+            /* Network unreachable or timeout -> treat server status as UNKNOWN (offline_unverified) */
           }
         }
 
+        // Offline or server unreachable: Treat server as UNKNOWN, do not claim verified
         if (!cancelled) {
           setVerification({
             checking: false,
-            isExpired: expired,
-            alreadySubmitted: false,
-            syncedAnswersCount: syncedCount,
+            serverStatus: expired ? "expired" : "offline_unverified",
             pendingAnswersCount: pendingCount,
+            initialAnswersCount: initialCount,
             deadlineText: deadlineDesc,
+            canResume: !expired,
           });
         }
       })
@@ -252,11 +415,11 @@ export default function ResumeExamModal({ onResume, onResumeTest, isExamActive }
         if (!cancelled) {
           setVerification({
             checking: false,
-            isExpired: expired,
-            alreadySubmitted: false,
-            syncedAnswersCount: syncedCount,
+            serverStatus: expired ? "expired" : "offline_unverified",
             pendingAnswersCount: 0,
+            initialAnswersCount: initialCount,
             deadlineText: deadlineDesc,
+            canResume: !expired,
           });
         }
       });
@@ -264,16 +427,174 @@ export default function ResumeExamModal({ onResume, onResumeTest, isExamActive }
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [session, currentProfileId]);
 
-  if (!session || isExamActive) return null;
+  if (!session || isExamActive || dismissed) return null;
 
   const isTest = session.kind === "test";
   const title = isTest ? session.test.title : session.mock.title;
   const subtitle = isTest ? "Standard / Practice Test" : "Full CBT Mock Exam";
 
+  // Discard Confirmation Dialog (protects unsynchronized answers)
+  if (showDiscardConfirm) {
+    return (
+      <div
+        role="alertdialog"
+        aria-label="Confirm Discard Session"
+        className="fixed inset-0 z-[90] grid place-items-center bg-black/85 p-4 backdrop-blur-sm animate-fade-in"
+      >
+        <div className="card w-full max-w-md rounded-2xl border border-red-500/30 bg-[#0B0F17] p-6 shadow-2xl space-y-4">
+          <div className="flex items-center gap-3">
+            <span className="grid size-10 place-items-center rounded-xl bg-red-500/15 border border-red-500/30 text-red-400 text-lg">
+              ⚠️
+            </span>
+            <div>
+              <h3 className="text-base font-bold text-white">
+                Seansni butunlay o'chirish
+              </h3>
+              <p className="text-xs text-red-400">
+                Confirm session discard
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-red-500/20 bg-red-950/20 p-3 text-xs text-slate-300 space-y-2">
+            <p className="font-semibold text-red-300">
+              Diqqat: Sinxronlanmagan ma'lumotlar yo'qolishi mumkin!
+            </p>
+            <p className="text-slate-400 leading-relaxed">
+              {verification.pendingAnswersCount > 0
+                ? `Ushbu imtihonda ${verification.pendingAnswersCount} ta serverga yuborilmagan javob mavjud. Agar seansni o'chirsangiz, bu javoblar qaytarib bo'lmaydigan darajada o'chib ketadi.`
+                : "Ushbu seansni xotiradan butunlay o'chirmoqchimisiz? Uni keyinroq davom ettirib bo'lmaydi."}
+            </p>
+          </div>
+
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setShowDiscardConfirm(false)}
+              className="rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+            >
+              Orqaga (Cancel)
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                clearActiveExamSession();
+                await clearAttemptCache(session.start.attemptId).catch(() => undefined);
+                setShowDiscardConfirm(false);
+                setSession(null);
+              }}
+              className="rounded-xl border border-red-500/30 bg-red-600 px-4 py-2 text-xs font-bold text-white hover:bg-red-500 transition-colors shadow-lg shadow-red-950/40"
+            >
+              Ha, butunlay o'chirish (Delete)
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Ownership mismatch state
+  if (verification.serverStatus === "ownership_mismatch") {
+    return (
+      <div
+        role="alertdialog"
+        aria-label="Exam Ownership Mismatch"
+        className="fixed inset-0 z-[85] grid place-items-center bg-black/80 p-4 backdrop-blur-sm animate-fade-in"
+      >
+        <div className="card w-full max-w-md rounded-2xl border border-amber-500/30 bg-[#0B0F17] p-6 shadow-2xl">
+          <div className="flex items-center gap-3">
+            <span className="grid size-10 place-items-center rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 text-lg">
+              🔒
+            </span>
+            <div>
+              <h3 className="text-base font-bold text-white">
+                Foydalanuvchi mos kelmadi
+              </h3>
+              <p className="text-xs text-amber-400">
+                Attempt belongs to another candidate
+              </p>
+            </div>
+          </div>
+          <p className="mt-4 text-xs text-slate-300 leading-relaxed">
+            Ushbu imtihon seansi boshqa profilga tegishli ekanligi server tomonidan tasdiqlandi. Xavfsizlik yuzasidan boshqa nomzodning imtihonini davom ettirish taqiqlanadi.
+          </p>
+          <div className="mt-5 flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setDismissed(true)}
+              className="rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+            >
+              Keyinroq (Dismiss)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                clearActiveMockSession();
+                setSession(null);
+              }}
+              className="btn-brand rounded-xl px-5 py-2 text-xs font-bold"
+            >
+              Tozalash (Clear)
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Not found on server state
+  if (verification.serverStatus === "not_found") {
+    return (
+      <div
+        role="alertdialog"
+        aria-label="Exam Not Found"
+        className="fixed inset-0 z-[85] grid place-items-center bg-black/80 p-4 backdrop-blur-sm animate-fade-in"
+      >
+        <div className="card w-full max-w-md rounded-2xl border border-slate-700 bg-[#0B0F17] p-6 shadow-2xl">
+          <div className="flex items-center gap-3">
+            <span className="grid size-10 place-items-center rounded-xl bg-slate-800 border border-slate-700 text-slate-400 text-lg">
+              ❓
+            </span>
+            <div>
+              <h3 className="text-base font-bold text-white">
+                Imtihon serverda topilmadi
+              </h3>
+              <p className="text-xs text-slate-400">
+                Attempt record not found on server
+              </p>
+            </div>
+          </div>
+          <p className="mt-4 text-xs text-slate-300 leading-relaxed">
+            Server ma'lumotlar bazasida ushbu urinish ID si topilmadi. Ehtimol, u bekor qilingan yoki server yangilangan.
+          </p>
+          <div className="mt-5 flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setDismissed(true)}
+              className="rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+            >
+              Keyinroq (Dismiss)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                clearActiveMockSession();
+                setSession(null);
+              }}
+              className="btn-brand rounded-xl px-5 py-2 text-xs font-bold"
+            >
+              Tozalash (Clear)
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Already submitted state
-  if (verification.alreadySubmitted) {
+  if (verification.serverStatus === "already_submitted") {
     return (
       <div
         role="alertdialog"
@@ -315,7 +636,7 @@ export default function ResumeExamModal({ onResume, onResumeTest, isExamActive }
   }
 
   // Expired attempt state
-  if (verification.isExpired) {
+  if (verification.serverStatus === "expired") {
     return (
       <div
         role="alertdialog"
@@ -345,10 +666,14 @@ export default function ResumeExamModal({ onResume, onResumeTest, isExamActive }
           <div className="mt-5 flex justify-end gap-3">
             <button
               type="button"
-              onClick={() => {
-                clearActiveMockSession();
-                setSession(null);
-              }}
+              onClick={() => setDismissed(true)}
+              className="rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+            >
+              Keyinroq (Dismiss)
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowDiscardConfirm(true)}
               className="btn-brand rounded-xl px-5 py-2 text-xs font-bold"
             >
               Seansni tozalash (Discard Session)
@@ -392,20 +717,46 @@ export default function ResumeExamModal({ onResume, onResumeTest, isExamActive }
             )}
           </div>
 
-          <div className="border-t border-slate-800 pt-2 space-y-1 text-[11px]">
-            <p className="text-slate-300 flex items-center gap-1.5">
-              <span className="text-emerald-400">✓</span>
-              <span>Serverda tasdiqlangan javoblar: <strong>{verification.syncedAnswersCount}</strong> ta</span>
-            </p>
+          <div className="border-t border-slate-800 pt-2 space-y-1.5 text-[11px]">
+            {/* Server Status Indicator */}
+            {verification.checking ? (
+              <p className="text-blue-400 flex items-center gap-1.5">
+                <span className="animate-spin text-xs">⏳</span>
+                <span>Server va sessiya holati tekshirilmoqda...</span>
+              </p>
+            ) : verification.serverStatus === "verified_active" ? (
+              <p className="text-emerald-400 flex items-center gap-1.5 font-medium">
+                <span>✓</span>
+                <span>Server holati: Faol (Server-verified in progress)</span>
+              </p>
+            ) : (
+              <p className="text-amber-400 flex items-center gap-1.5 font-medium">
+                <span>⚠️</span>
+                <span>Server holati: Noma'lum (Tarmoqqa ulanib bo'lmadi — Offline)</span>
+              </p>
+            )}
+
+            {/* Offline Pending Answers */}
             {verification.pendingAnswersCount > 0 ? (
               <p className="text-amber-300 flex items-center gap-1.5 font-medium">
                 <span>⚠️</span>
-                <span>Mahalliy navbatda sinxronizatsiya kutilmoqda: <strong>{verification.pendingAnswersCount}</strong> ta</span>
+                <span>Mahalliy navbatda sinxronizatsiya kutilmoqda: <strong>{verification.pendingAnswersCount}</strong> ta javob</span>
+              </p>
+            ) : verification.serverStatus === "verified_active" ? (
+              <p className="text-slate-400 flex items-center gap-1.5">
+                <span className="text-emerald-400">✓</span>
+                <span>Mahalliy navbatda sinxronlanmagan o'zgarishlar yo'q</span>
               </p>
             ) : (
               <p className="text-slate-400 flex items-center gap-1.5">
-                <span className="text-emerald-400">✓</span>
-                <span>Barcha javoblar to'liq server bilan sinxronlangan</span>
+                <span className="text-amber-400">ℹ️</span>
+                <span>Mahalliy navbat bo'sh, ammo server holati tasdiqlanmagan</span>
+              </p>
+            )}
+
+            {verification.initialAnswersCount > 0 && (
+              <p className="text-slate-500 text-[10px]">
+                Boshlang'ich javoblar soni: {verification.initialAnswersCount} ta
               </p>
             )}
           </div>
@@ -418,16 +769,21 @@ export default function ResumeExamModal({ onResume, onResumeTest, isExamActive }
         <div className="mt-5 flex items-center justify-end gap-3">
           <button
             type="button"
-            onClick={() => {
-              clearActiveMockSession();
-              setSession(null);
-            }}
+            onClick={() => setDismissed(true)}
             className="rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+          >
+            Keyinroq (Dismiss)
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowDiscardConfirm(true)}
+            className="rounded-xl border border-red-500/20 bg-red-950/30 px-3 py-2 text-xs font-semibold text-red-300 hover:bg-red-900/40 transition-colors"
           >
             Bekor qilish (Discard)
           </button>
           <button
             type="button"
+            disabled={verification.checking || !verification.canResume}
             onClick={() => {
               const active = session;
               setSession(null);
@@ -437,9 +793,13 @@ export default function ResumeExamModal({ onResume, onResumeTest, isExamActive }
                 onResume(active.mock, active.start, active.chosen);
               }
             }}
-            className="btn-brand rounded-xl px-5 py-2 text-xs font-bold shadow-lg shadow-emerald-950/40"
+            className={`rounded-xl px-5 py-2 text-xs font-bold transition-all ${
+              verification.checking || !verification.canResume
+                ? "bg-slate-700 text-slate-400 cursor-not-allowed opacity-60"
+                : "btn-brand shadow-lg shadow-emerald-950/40"
+            }`}
           >
-            Davom ettirish (Resume) →
+            {verification.checking ? "Tekshirilmoqda..." : "Davom ettirish (Resume) →"}
           </button>
         </div>
       </div>

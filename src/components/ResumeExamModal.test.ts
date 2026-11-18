@@ -9,6 +9,7 @@ import {
   isSessionExpired,
   ACTIVE_MOCK_SESSION_KEY,
   type ActiveExamSession,
+  type ActiveTestSession,
 } from './ResumeExamModal';
 import { useSessionStore } from '@/lib/session-store';
 import type { MockExamListItem, MockStartResult } from '@/lib/mocks';
@@ -69,21 +70,24 @@ it('resolves active session reactively when owner id is passed explicitly', () =
   expect(resolved?.studentId).toBe('student-a');
 });
 
-it('expires cached sessions older than 4 hours', () => {
+it('preserves cached sessions on read without destructive silent deletion', () => {
   const fiveHoursAgo = Date.now() - 5 * 60 * 60 * 1000;
-  const expired = JSON.stringify({
+  const sessionData = JSON.stringify({
     kind: 'mock',
     studentId: 'student-a',
-    mock: { id: 'exam-expired', title: 'Old' },
-    start: { attemptId: 'att-old' },
+    mock: { id: 'exam-5h', title: 'Session 5h ago' },
+    start: { attemptId: 'att-5h' },
     at: fiveHoursAgo,
   });
-  localStorage.setItem(ACTIVE_MOCK_SESSION_KEY, expired);
-  expect(getActiveExamSession('student-a')).toBeNull();
-  expect(localStorage.getItem(ACTIVE_MOCK_SESSION_KEY)).toBeNull();
+  localStorage.setItem(ACTIVE_MOCK_SESSION_KEY, sessionData);
+  // getActiveExamSession preserves the session rather than deleting it destructively
+  const retrieved = getActiveExamSession('student-a');
+  expect(retrieved).not.toBeNull();
+  expect(retrieved?.start.attemptId).toBe('att-5h');
+  expect(localStorage.getItem(ACTIVE_MOCK_SESSION_KEY)).toBe(sessionData);
 });
 
-it('clears active session cleanly', () => {
+it('clears active session cleanly when explicitly instructed', () => {
   persistActiveMockSession({ id: 'exam-3' } as MockExamListItem, { attemptId: 'attempt-3' } as MockStartResult);
   expect(getActiveExamSession('student-a')).not.toBeNull();
   clearActiveMockSession();
@@ -136,4 +140,33 @@ it('prioritizes section deadlines for scoped mock exams', () => {
 
   expect(getSessionDeadline(scopedSession)).toBe(sectionDeadlineIso);
   expect(isSessionExpired(scopedSession)).toBe(false);
+});
+
+it('calculates deadline for standard tests using durationMinutes and startedAt', () => {
+  const startedAt = new Date(Date.now() - 10 * 60 * 1000).toISOString(); // 10 mins ago
+  const testSession: ActiveTestSession = {
+    kind: 'test',
+    studentId: 'student-a',
+    test: { id: 't-timed', title: 'Timed Test' } as TestListItem,
+    start: {
+      attemptId: 'att-timed',
+      resumed: false,
+      durationMinutes: 30, // 30 min duration -> 20 min left
+      startedAt,
+      questions: [],
+    },
+    at: Date.now(),
+  };
+
+  const deadline = getSessionDeadline(testSession);
+  expect(deadline).not.toBeNull();
+  expect(isSessionExpired(testSession)).toBe(false);
+
+  // If started 40 mins ago with 30 min duration:
+  const oldStartedAt = new Date(Date.now() - 40 * 60 * 1000).toISOString();
+  const expiredTestSession: ActiveTestSession = {
+    ...testSession,
+    start: { ...testSession.start, startedAt: oldStartedAt },
+  };
+  expect(isSessionExpired(expiredTestSession)).toBe(true);
 });
