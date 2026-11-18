@@ -4,10 +4,11 @@
  * (run 42982782068: "Uploading latest.json… Not Found – update-a-release-asset" on Apple Silicon).
  */
 export const UPDATER_PLATFORMS = [
-  { key: 'windows-x86_64', platform: 'windows-x64', bundle: /_x64-setup\.exe$/ },
-  { key: 'linux-x86_64', platform: 'linux-x64', bundle: /_amd64\.AppImage$/ },
-  { key: 'darwin-x86_64', platform: 'macos-intel', bundle: /_x64\.app\.tar\.gz$/ },
-  { key: 'darwin-aarch64', platform: 'macos-apple-silicon', bundle: /_aarch64\.app\.tar\.gz$/ },
+  { key: 'windows-x86_64', alias: 'windows-x86_64-nsis', platform: 'windows-x64', bundle: /_x64-setup\.exe$/ },
+  { key: 'linux-x86_64', alias: 'linux-x86_64-appimage', platform: 'linux-x64', bundle: /_amd64\.AppImage$/ },
+  { key: 'linux-x86_64-deb', platform: 'linux-x64 DEB', bundle: /_amd64\.deb$/ },
+  { key: 'darwin-x86_64', alias: 'darwin-x86_64-app', platform: 'macos-intel', bundle: /_x64\.app\.tar\.gz$/ },
+  { key: 'darwin-aarch64', alias: 'darwin-aarch64-app', platform: 'macos-apple-silicon', bundle: /_aarch64\.app\.tar\.gz$/ },
 ];
 
 const uploaded = (asset) => asset && asset.state === 'uploaded' && asset.size > 0;
@@ -33,6 +34,7 @@ export async function buildUpdaterManifest({ version, tag, repository, notes = '
       signature,
       url: `https://github.com/${repository}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(bundles[0].name)}`,
     };
+    if (item.alias) platforms[item.alias] = platforms[item.key];
   }
   if (problems.length) throw new Error(`latest.json not written — ${problems.join('; ')}`);
   return { version, notes, pub_date: pubDate, platforms };
@@ -42,9 +44,13 @@ export async function buildUpdaterManifest({ version, tag, repository, notes = '
 export function verifyUpdaterManifest(manifest, version) {
   const errors = [];
   if (manifest?.version !== version) errors.push(`version ${manifest?.version} ≠ ${version}`);
-  for (const { key } of UPDATER_PLATFORMS) {
+  for (const { key, alias } of UPDATER_PLATFORMS) {
     const entry = manifest?.platforms?.[key];
     if (!entry?.signature || !/^https:\/\/github\.com\//.test(entry?.url || '')) errors.push(`${key} entry is incomplete`);
+    const aliasEntry = manifest?.platforms?.[alias];
+    if (alias && (!aliasEntry || aliasEntry.signature !== entry?.signature || aliasEntry.url !== entry?.url)) {
+      errors.push(`${alias} entry does not match ${key}`);
+    }
   }
   if (errors.length) throw new Error(`latest.json check failed — ${errors.join('; ')}`);
   return true;

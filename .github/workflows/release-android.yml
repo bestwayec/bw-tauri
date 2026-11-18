@@ -1,24 +1,26 @@
 name: Release Android (bestway-app)
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      release_tag:
-        description: Target release tag (e.g. v0.7.0 or bestway-app-v0.7.0)
+      release_commit:
         required: true
-        default: v0.7.0
         type: string
-  push:
-    tags:
-      - "v*"
-      - "bestway-app-v*"
-
-concurrency:
-  group: android-release-${{ github.ref_name }}
-  cancel-in-progress: false
+      release_tag:
+        required: true
+        type: string
+    secrets:
+      ANDROID_KEYSTORE_BASE64:
+        required: true
+      ANDROID_KEYSTORE_PASSWORD:
+        required: true
+      ANDROID_KEY_ALIAS:
+        required: true
+      ANDROID_KEY_PASSWORD:
+        required: true
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   ANDROID_HOME: /usr/local/lib/android/sdk
@@ -28,7 +30,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.release_commit }}
+          persist-credentials: false
 
       - name: Setup OpenJDK 17
         uses: actions/setup-java@v4
@@ -52,7 +57,7 @@ jobs:
 
       - name: Build Android Release APK
         run: |
-          cd android && gradle :app:assembleRelease --no-daemon
+          cd android && gradle :app:testReleaseUnitTest :app:assembleRelease --no-daemon
 
       - name: Align APK
         run: |
@@ -90,44 +95,57 @@ jobs:
             --v3-signing-enabled true \
             --out bestway-app.apk bestway-app-aligned.apk
 
-      - name: Verify Signed APK
+      - name: Verify Signed APK and upgrade identity
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
         run: |
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
           apksigner verify --verbose --print-certs --min-sdk-version 24 bestway-app.apk | tee verify.txt
           grep -q "^Verifies" verify.txt
-          grep -q "Verified using v1 scheme (JAR signing): true" verify.txt
+          # API 24 verifies v2 instead of v1 even when both signatures exist.
+          apksigner verify --verbose --min-sdk-version 23 bestway-app.apk > "$RUNNER_TEMP/verify-v1.txt"
+          grep -q "Verified using v1 scheme (JAR signing): true" "$RUNNER_TEMP/verify-v1.txt"
           grep -q "Verified using v2 scheme (APK Signature Scheme v2): true" verify.txt
           grep -q "Verified using v3 scheme (APK Signature Scheme v3): true" verify.txt
-          SIZE=$(stat -c%s bestway-app.apk)
-          echo "APK size: $SIZE bytes"
-          if [ "$SIZE" -lt 3145728 ]; then echo "FATAL: APK below 3 MB, rejected as stub" >&2; exit 1; fi
-          sha256sum bestway-app.apk
+          test "$(stat -c%s bestway-app.apk)" -ge 3145728
+          curl --fail --silent --show-error --location \
+            https://github.com/bestwayec/bw-tauri/releases/download/v1.0.10/bestway-app.apk \
+            --output "$RUNNER_TEMP/previous.apk"
+          printf '%s  %s\n' af60066c6e715d2a4211a64e86b6e3bab82c06a066d18df390852dc05d1c9c38 "$RUNNER_TEMP/previous.apk" | sha256sum --check
+          apksigner verify --print-certs "$RUNNER_TEMP/previous.apk" > "$RUNNER_TEMP/previous-certs.txt"
+          grep '^Signer #.* certificate SHA-256 digest:' verify.txt > "$RUNNER_TEMP/certs.txt"
+          grep '^Signer #.* certificate SHA-256 digest:' "$RUNNER_TEMP/previous-certs.txt" > "$RUNNER_TEMP/baseline-certs.txt"
+          diff "$RUNNER_TEMP/baseline-certs.txt" "$RUNNER_TEMP/certs.txt"
+          aapt dump badging bestway-app.apk > "$RUNNER_TEMP/current-badging.txt"
+          aapt dump badging "$RUNNER_TEMP/previous.apk" > "$RUNNER_TEMP/previous-badging.txt"
+          python3 - <<'PYTHON'
+          import os, re
+          from pathlib import Path
 
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+          def package(filename):
+              text = (Path(os.environ["RUNNER_TEMP"]) / filename).read_text()
+              match = re.search(r"^package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'", text, re.M)
+              if not match:
+                  raise RuntimeError(f"Missing package metadata in {filename}")
+              return match[1], int(match[2]), match[3], text
+
+          identity, code, version, details = package("current-badging.txt")
+          prior_identity, prior_code, _, _ = package("previous-badging.txt")
+          tag_version = os.environ["RELEASE_TAG"].removeprefix("bestway-app-").removeprefix("v")
+          if identity != prior_identity or identity != "uz.bestwayec.app" or code <= prior_code or version != tag_version:
+              raise RuntimeError("Android package identity, version or upgrade version code mismatch")
+          if "sdkVersion:'24'" not in details.splitlines():
+              raise RuntimeError("Unexpected Android minimum SDK")
+          PYTHON
+          sha256sum bestway-app.apk > android-sha256.txt
+
+      - name: Upload verified APK for the release coordinator
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: bestway-app-apk
-          path: bestway-app.apk
-
-      - name: Upload to GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.release_tag || github.ref_name }}
-        # Never create a release here. A release created by this job used the
-        # default branch as its commitish (so the desktop publish job refused
-        # it with "Release source commit mismatch"), and the extra
-        # `bestway-app-vX` release it created became GitHub's "Latest" with
-        # only an APK, which made releases/latest/download/latest.json 404 for
-        # every desktop updater. The desktop workflow owns the release; wait
-        # for its draft and attach the APK to it.
-        run: |
-          for attempt in $(seq 1 60); do
-            if gh release view "$TAG" --json tagName >/dev/null 2>&1; then
-              gh release upload "$TAG" bestway-app.apk --clobber
-              echo "Attached APK to $TAG"
-              exit 0
-            fi
-            echo "Waiting for the desktop release $TAG (attempt $attempt/60)..."
-            sleep 60
-          done
-          echo "::error::Release $TAG was not created by the desktop workflow within 60 minutes; APK kept as a workflow artifact" >&2
-          exit 1
+          if-no-files-found: error
+          path: |
+            bestway-app.apk
+            android-sha256.txt
