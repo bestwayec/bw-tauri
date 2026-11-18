@@ -36,8 +36,8 @@ jobs:
       - name: Desktop release planning tests
         run: node --test tools/release-platforms.test.mjs tools/updater-manifest.test.mjs
 
-      - name: Android signing safety tests
-        run: node --test tools/android-signing.test.mjs
+      - name: Android signing and security tests
+        run: node --test tools/android-signing.test.mjs tools/android-security.test.mjs tools/android-oauth.test.mjs
 
       - name: Build
         run: npm run build
@@ -93,3 +93,24 @@ jobs:
         # Needs a full codegen build (heavy); on small machines prefer
         # `cargo check --tests`. CI runners handle it fine.
         run: cargo test
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup OpenJDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.6"
+
+      - name: Test and Assemble Android Release
+        run: |
+          cd android && gradle :app:testReleaseUnitTest :app:assembleRelease --no-daemon

@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -28,29 +29,238 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
-import android.graphics.Color
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-import androidx.browser.customtabs.CustomTabsIntent
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import org.json.JSONObject
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
+import java.security.MessageDigest
+import java.security.SecureRandom
+import java.util.UUID
 
 class MainActivity : AppCompatActivity() {
 
     companion object {
-        private const val BASE_URL = "https://bestwayec.uz/?platform=mobile_app"
-        private const val USER_AGENT_SUFFIX = " BestWayApp/0.8.3 BestWay-Android/0.8.3 MobileApp"
+        const val BASE_URL = "https://bestwayec.uz/?platform=mobile_app"
+        const val API_BASE_URL = "https://api.bestwayec.uz/v1"
+        const val APP_VERSION = "1.0.12"
+        private val TRUSTED_HOSTS = setOf("bestwayec.uz", "api.bestwayec.uz")
+        private val USER_AGENT_SUFFIX = " BestWayApp/$APP_VERSION BestWay-Android/$APP_VERSION MobileApp"
         private const val REQUEST_RECORD_AUDIO = 1001
+
+        /**
+         * Validates whether a URL or origin belongs strictly to an approved HTTPS host.
+         * Cleartext HTTP is never trusted.
+         */
+        fun isTrustedOrigin(urlOrOrigin: String?): Boolean {
+            if (urlOrOrigin.isNullOrBlank()) return false
+            return try {
+                val uri = Uri.parse(urlOrOrigin)
+                val scheme = uri.scheme?.lowercase()
+                val host = uri.host?.lowercase()
+                scheme == "https" && host != null && TRUSTED_HOSTS.contains(host)
+            } catch (_: Exception) {
+                false
+            }
+        }
     }
 
-    class AndroidBridge {
+    /**
+     * Minimal, hardened JavaScript interface.
+     * Exposes environment metadata and safe OAuth initiation triggers.
+     * Never exposes access tokens, refresh tokens, or raw secrets.
+     */
+    class AndroidBridge(private val activity: MainActivity, private val webView: WebView) {
         @android.webkit.JavascriptInterface
-        fun isMobileApp(): Boolean = true
+        fun isMobileApp(): Boolean {
+            val url = webView.url ?: ""
+            return isTrustedOrigin(url)
+        }
 
         @android.webkit.JavascriptInterface
-        fun getVersion(): String = "0.8.3"
+        fun getVersion(): String {
+            val url = webView.url ?: ""
+            if (!isTrustedOrigin(url)) return ""
+            return APP_VERSION
+        }
+
+        @android.webkit.JavascriptInterface
+        fun startOAuthLogin(provider: String?) {
+            val url = webView.url ?: ""
+            if (!isTrustedOrigin(url)) return
+            activity.runOnUiThread {
+                activity.initiateOAuthLogin(provider)
+            }
+        }
+    }
+
+    data class OAuthPendingSession(
+        val state: String,
+        val verifier: String,
+        val deviceId: String,
+        val createdAt: Long
+    )
+
+    /**
+     * PKCE & State Security Manager for OAuth flows.
+     * Generates local state + verifier with S256 code challenge, persists across
+     * process recreation via SharedPreferences, enforces strict TTL and single-use consumption.
+     */
+    object OAuthSecurityManager {
+        const val STATE_TTL_MS = 5 * 60 * 1000L // 5 minutes
+        private const val PREFS_NAME = "uz.bestwayec.app.oauth_state"
+        private const val KEY_STATE = "oauth_pending_state"
+        private const val KEY_VERIFIER = "oauth_pending_verifier"
+        private const val KEY_DEVICE_ID = "oauth_device_id"
+        private const val KEY_CREATED_AT = "oauth_created_at"
+
+        @Volatile
+        private var memorySession: OAuthPendingSession? = null
+
+        @Synchronized
+        fun getOrCreateDeviceId(context: Context?): String {
+            if (context == null) return "android-client"
+            return try {
+                val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                var deviceId = prefs.getString(KEY_DEVICE_ID, null)
+                if (deviceId.isNullOrBlank()) {
+                    deviceId = "android-" + UUID.randomUUID().toString()
+                    prefs.edit().putString(KEY_DEVICE_ID, deviceId).apply()
+                }
+                deviceId
+            } catch (_: Exception) {
+                "android-client"
+            }
+        }
+
+        @Synchronized
+        fun createPendingLogin(context: Context?): OAuthPendingSession {
+            val stateBytes = ByteArray(16)
+            val verifierBytes = ByteArray(32)
+            val rng = SecureRandom()
+            rng.nextBytes(stateBytes)
+            rng.nextBytes(verifierBytes)
+
+            val state = stateBytes.joinToString("") { "%02x".format(it) }
+            val verifier = verifierBytes.joinToString("") { "%02x".format(it) }
+            val deviceId = getOrCreateDeviceId(context)
+            val now = System.currentTimeMillis()
+
+            val session = OAuthPendingSession(
+                state = state,
+                verifier = verifier,
+                deviceId = deviceId,
+                createdAt = now
+            )
+
+            // Persist to private SharedPreferences so it survives Android process death/recreation
+            if (context != null) {
+                try {
+                    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+                        .putString(KEY_STATE, state)
+                        .putString(KEY_VERIFIER, verifier)
+                        .putLong(KEY_CREATED_AT, now)
+                        .apply()
+                } catch (_: Exception) {}
+            }
+
+            memorySession = session
+            return session
+        }
+
+        @Synchronized
+        fun generateCodeChallenge(verifier: String): String {
+            val bytes = verifier.toByteArray(Charsets.US_ASCII)
+            val md = MessageDigest.getInstance("SHA-256")
+            val digest = md.digest(bytes)
+            return try {
+                val clazz = Class.forName("android.util.Base64")
+                val method = clazz.getMethod("encodeToString", ByteArray::class.java, Int::class.javaPrimitiveType)
+                // URL_SAFE = 8, NO_PADDING = 1, NO_WRAP = 2 -> 11
+                (method.invoke(null, digest, 11) as String).trim()
+            } catch (_: Exception) {
+                java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(digest).trim()
+            }
+        }
+
+        fun buildAuthorizeUrl(context: Context?, provider: String? = null): String {
+            val session = createPendingLogin(context)
+            val challenge = generateCodeChallenge(session.verifier)
+
+            val enc = { s: String -> java.net.URLEncoder.encode(s, "UTF-8") }
+            val desktopParams = "device=android&state=${enc(session.state)}&code_challenge=${enc(challenge)}&code_challenge_method=S256&redirect=${enc("bestwayapp://auth/callback")}"
+            val nextPath = "/oauth/desktop?$desktopParams"
+
+            var url = "https://bestwayec.uz/login?next=${enc(nextPath)}&platform=mobile_app"
+            if (!provider.isNullOrBlank()) {
+                url += "&provider=${enc(provider)}"
+            }
+            return url
+        }
+
+        /**
+         * Validates incoming OAuth callback state against locally initiated attempt.
+         * Single-use: once verified, state is wiped from both storage and memory to prevent replay attacks.
+         */
+        @Synchronized
+        fun validateAndConsumeState(context: Context?, state: String?): OAuthPendingSession? {
+            if (state.isNullOrBlank()) return null
+
+            val prefs = try {
+                context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            } catch (_: Exception) { null }
+
+            val storedState = prefs?.getString(KEY_STATE, null) ?: memorySession?.state
+            val storedVerifier = prefs?.getString(KEY_VERIFIER, null) ?: memorySession?.verifier
+            val storedCreatedAt = if (prefs != null && prefs.contains(KEY_CREATED_AT)) {
+                prefs.getLong(KEY_CREATED_AT, 0L)
+            } else {
+                memorySession?.createdAt ?: 0L
+            }
+            val deviceId = getOrCreateDeviceId(context)
+
+            // Always wipe immediately to prevent replay attacks
+            clear(context)
+
+            if (storedState.isNullOrBlank() || storedVerifier.isNullOrBlank()) {
+                return null
+            }
+
+            if (storedState != state) {
+                return null
+            }
+
+            if (System.currentTimeMillis() - storedCreatedAt > STATE_TTL_MS) {
+                return null
+            }
+
+            return OAuthPendingSession(
+                state = storedState,
+                verifier = storedVerifier,
+                deviceId = deviceId,
+                createdAt = storedCreatedAt
+            )
+        }
+
+        @Synchronized
+        fun clear(context: Context?) {
+            memorySession = null
+            if (context != null) {
+                try {
+                    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+                        .remove(KEY_STATE)
+                        .remove(KEY_VERIFIER)
+                        .remove(KEY_CREATED_AT)
+                        .apply()
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     private lateinit var swipeRefresh: SwipeRefreshLayout
@@ -81,7 +291,7 @@ class MainActivity : AppCompatActivity() {
                             grantedResources.add(res)
                         }
                     }
-                    else -> grantedResources.add(res)
+                    // Reject all other resource types (fail-closed)
                 }
             }
             if (grantedResources.isNotEmpty()) {
@@ -124,14 +334,12 @@ class MainActivity : AppCompatActivity() {
         setupBackNavigation()
         requestAudioPermission()
 
-        if (savedInstanceState == null) {
-            val deepLinkUri = intent?.data
-            val scheme = deepLinkUri?.scheme?.lowercase()
-            if (deepLinkUri != null && (scheme == "bestway-exam" || scheme == "bestway")) {
-                handleDeepLink(intent)
-            } else {
-                webView.loadUrl(BASE_URL)
-            }
+        val deepLinkUri = intent?.data
+        val scheme = deepLinkUri?.scheme?.lowercase()
+        if (deepLinkUri != null && (scheme == "bestway-exam" || scheme == "bestway" || scheme == "bestwayapp")) {
+            handleDeepLink(intent)
+        } else if (savedInstanceState == null) {
+            webView.loadUrl(BASE_URL)
         }
     }
 
@@ -144,31 +352,148 @@ class MainActivity : AppCompatActivity() {
     private fun handleDeepLink(intent: Intent?) {
         val data = intent?.data ?: return
         val scheme = data.scheme?.lowercase() ?: return
-        if (scheme == "bestway-exam" || scheme == "bestway") {
-            val host = data.host?.lowercase() ?: ""
-            val path = data.path ?: ""
-            val fullUrl = data.toString()
-            if ((host == "auth" && (path == "/callback" || path.isEmpty())) ||
-                path == "/auth/callback" ||
-                path.endsWith("/auth/callback") ||
-                fullUrl.contains("/auth/callback")
-            ) {
-                val code = data.getQueryParameter("code")
-                val token = data.getQueryParameter("token") ?: data.getQueryParameter("access_token")
-                val refreshToken = data.getQueryParameter("refresh_token")
-                val targetParams = mutableListOf<String>()
-                if (!code.isNullOrEmpty()) targetParams.add("auth_code=$code")
-                if (!token.isNullOrEmpty()) targetParams.add("token=$token")
-                if (!refreshToken.isNullOrEmpty()) targetParams.add("refresh_token=$refreshToken")
-                val queryString = if (targetParams.isNotEmpty()) {
-                    targetParams.joinToString("&")
-                } else {
-                    "platform=mobile_app"
-                }
-                val redirectUrl = "https://bestwayec.uz/?$queryString"
-                webView.loadUrl(redirectUrl)
-            }
+        if (scheme != "bestway-exam" && scheme != "bestway" && scheme != "bestwayapp") {
+            return
         }
+
+        val host = data.host?.lowercase() ?: ""
+        val path = data.path ?: ""
+        val fullUrl = data.toString()
+        val isAuthCallback = (host == "auth" && (path == "/callback" || path.isEmpty())) ||
+            path == "/auth/callback" ||
+            path.endsWith("/auth/callback") ||
+            fullUrl.contains("/auth/callback")
+
+        if (!isAuthCallback) {
+            return
+        }
+
+        val state = data.getQueryParameter("state")
+        val code = data.getQueryParameter("code")
+
+        // Mandatory CSRF state verification with PKCE verifier retrieval
+        val pendingSession = OAuthSecurityManager.validateAndConsumeState(this, state)
+        if (pendingSession == null) {
+            Toast.makeText(this, "Xavfsizlik xatosi: Yaroqsiz yoki muddati o'tgan OAuth holati", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        if (code.isNullOrBlank()) {
+            Toast.makeText(this, "Avtorizatsiya kodi topilmadi", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // Exchange authorization code for authenticated session using matching verifier
+        performCodeExchange(code, pendingSession.verifier, pendingSession.deviceId)
+    }
+
+    private fun performCodeExchange(code: String, verifier: String, deviceId: String) {
+        progressBar.visibility = View.VISIBLE
+
+        Thread {
+            var success = false
+            var errorMessage: String? = null
+            var accessToken: String? = null
+
+            try {
+                val url = URL("$API_BASE_URL/auth/desktop/exchange")
+                val connection = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 15000
+                    readTimeout = 15000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    setRequestProperty("Accept", "application/json")
+                    setRequestProperty("User-Agent", webView.settings.userAgentString)
+                }
+
+                val payload = JSONObject().apply {
+                    put("code", code)
+                    put("verifier", verifier)
+                    put("deviceId", deviceId)
+                }
+
+                OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { writer ->
+                    writer.write(payload.toString())
+                    writer.flush()
+                }
+
+                val responseCode = connection.responseCode
+                if (responseCode in 200..299) {
+                    val responseText = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    val json = JSONObject(responseText)
+                    accessToken = json.optString("accessToken").ifEmpty { json.optString("token") }
+                    if (!accessToken.isNullOrBlank()) {
+                        success = true
+                    } else {
+                        errorMessage = "Server javobida token topilmadi"
+                    }
+                } else {
+                    val errorText = try {
+                        connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                    } catch (_: Exception) { null }
+                    errorMessage = try {
+                        val errJson = if (errorText != null) JSONObject(errorText) else null
+                        val nested = errJson?.optJSONObject("error")
+                        nested?.optString("message") ?: errJson?.optString("message") ?: "Server xatosi: $responseCode"
+                    } catch (_: Exception) {
+                        "Server xatosi: $responseCode"
+                    }
+                }
+            } catch (e: Exception) {
+                errorMessage = "Tarmoq xatosi: ${e.localizedMessage ?: "Server bilan aloqa o'rnatib bo'lmadi"}"
+            }
+
+            runOnUiThread {
+                progressBar.visibility = View.GONE
+                if (success && !accessToken.isNullOrBlank()) {
+                    val cookieManager = CookieManager.getInstance()
+                    cookieManager.setAcceptCookie(true)
+                    cookieManager.setAcceptThirdPartyCookies(webView, true)
+                    val domain = "https://bestwayec.uz"
+                    cookieManager.setCookie(domain, "token=$accessToken; path=/; max-age=2592000; Secure; SameSite=Lax")
+                    cookieManager.setCookie(domain, "access_token=$accessToken; path=/; max-age=2592000; Secure; SameSite=Lax")
+                    cookieManager.setCookie(domain, "bw_mobile_app=1; path=/; max-age=31536000; Secure; SameSite=Lax")
+                    cookieManager.setCookie("https://api.bestwayec.uz", "token=$accessToken; path=/; max-age=2592000; Secure; SameSite=Lax")
+                    cookieManager.flush()
+
+                    Toast.makeText(this@MainActivity, "Muvaffaqiyatli tizimga kirildi", Toast.LENGTH_SHORT).show()
+                    webView.loadUrl(BASE_URL)
+                } else {
+                    val msg = errorMessage ?: "Avtorizatsiyadan o'tishda xatolik yuz berdi"
+                    Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
+    fun initiateOAuthLogin(provider: String? = null) {
+        try {
+            val authUrl = OAuthSecurityManager.buildAuthorizeUrl(this, provider)
+            openCustomTabOrBrowser(Uri.parse(authUrl))
+        } catch (e: Exception) {
+            Toast.makeText(this, "Kirishni boshlashda xatolik: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun handleLogout() {
+        val cookieManager = CookieManager.getInstance()
+        cookieManager.removeAllCookies(null)
+        cookieManager.flush()
+
+        OAuthSecurityManager.clear(this)
+
+        webView.evaluateJavascript(
+            """
+            (function() {
+                try {
+                    localStorage.clear();
+                    sessionStorage.clear();
+                } catch (e) {}
+            })();
+            """.trimIndent(),
+            null
+        )
     }
 
     private fun initViews() {
@@ -186,18 +511,19 @@ class MainActivity : AppCompatActivity() {
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(webView, true)
-            setCookie("https://bestwayec.uz", "bw_mobile_app=1; path=/; max-age=31536000")
+            setCookie("https://bestwayec.uz", "bw_mobile_app=1; path=/; max-age=31536000; Secure; SameSite=Lax")
         }
 
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-        webView.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
+        webView.addJavascriptInterface(AndroidBridge(this, webView), "AndroidBridge")
 
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
             databaseEnabled = true
             mediaPlaybackRequiresUserGesture = false
-            allowFileAccess = true
+            allowFileAccess = false
+            allowContentAccess = false
             setSupportMultipleWindows(false)
             cacheMode = WebSettings.LOAD_DEFAULT
             userAgentString = "${userAgentString}$USER_AGENT_SUFFIX"
@@ -210,13 +536,23 @@ class MainActivity : AppCompatActivity() {
         webView.webChromeClient = object : WebChromeClient() {
             override fun onPermissionRequest(request: PermissionRequest?) {
                 if (request == null) return
+                val origin = request.origin?.toString() ?: ""
+
+                // Origin verification: Only approved HTTPS origin can request device hardware
+                if (!isTrustedOrigin(origin)) {
+                    request.deny()
+                    return
+                }
+
                 runOnUiThread {
                     val requestedResources = request.resources
                     val neededPermissions = mutableListOf<String>()
+                    val validResources = mutableListOf<String>()
 
                     for (resource in requestedResources) {
                         when (resource) {
                             PermissionRequest.RESOURCE_AUDIO_CAPTURE -> {
+                                validResources.add(resource)
                                 if (ContextCompat.checkSelfPermission(
                                         this@MainActivity,
                                         Manifest.permission.RECORD_AUDIO
@@ -226,6 +562,7 @@ class MainActivity : AppCompatActivity() {
                                 }
                             }
                             PermissionRequest.RESOURCE_VIDEO_CAPTURE -> {
+                                validResources.add(resource)
                                 if (ContextCompat.checkSelfPermission(
                                         this@MainActivity,
                                         Manifest.permission.CAMERA
@@ -234,11 +571,17 @@ class MainActivity : AppCompatActivity() {
                                     neededPermissions.add(Manifest.permission.CAMERA)
                                 }
                             }
+                            // Reject all other resource types
                         }
                     }
 
+                    if (validResources.isEmpty()) {
+                        request.deny()
+                        return@runOnUiThread
+                    }
+
                     if (neededPermissions.isEmpty()) {
-                        request.grant(requestedResources)
+                        request.grant(validResources.toTypedArray())
                     } else {
                         pendingPermissionRequest = request
                         permissionLauncher.launch(neededPermissions.toTypedArray())
@@ -279,7 +622,7 @@ class MainActivity : AppCompatActivity() {
                 return try {
                     fileChooserLauncher.launch(intent)
                     true
-                } catch (e: ActivityNotFoundException) {
+                } catch (_: ActivityNotFoundException) {
                     fileUploadCallback?.onReceiveValue(null)
                     fileUploadCallback = null
                     false
@@ -290,12 +633,12 @@ class MainActivity : AppCompatActivity() {
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val url = request?.url?.toString()
-                return handleUrl(url) || super.shouldOverrideUrlLoading(view, request)
+                return handleUrl(url)
             }
 
             @Suppress("DEPRECATION")
             override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                return handleUrl(url) || super.shouldOverrideUrlLoading(view, url)
+                return handleUrl(url)
             }
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
@@ -374,31 +717,48 @@ class MainActivity : AppCompatActivity() {
                 .build()
             customTabsIntent.launchUrl(this, uri)
             true
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             try {
                 val intent = Intent(Intent.ACTION_VIEW, uri)
                 startActivity(intent)
                 true
-            } catch (ex: Exception) {
+            } catch (_: Exception) {
                 false
             }
         }
     }
 
+    /**
+     * Intercepts and controls all navigations.
+     * Enforces origin boundary: only verified HTTPS origins (bestwayec.uz / api.bestwayec.uz)
+     * may load inside the privileged WebView. All untrusted external links are routed outside.
+     */
     private fun handleUrl(url: String?): Boolean {
-        if (url == null) return false
-        val uri = Uri.parse(url)
+        if (url == null) return true
+        val uri = try {
+            Uri.parse(url)
+        } catch (_: Exception) {
+            return true
+        }
         val scheme = uri.scheme?.lowercase() ?: ""
 
-        if (url.contains("accounts.google.com") || url.contains("oauth2.googleapis.com")) {
-            return openCustomTabOrBrowser(uri)
-        }
-
-        if (scheme == "bestway-exam" || scheme == "bestway") {
+        // 1. In-app OAuth Deep Links
+        if (scheme == "bestway-exam" || scheme == "bestway" || scheme == "bestwayapp") {
             handleDeepLink(Intent(Intent.ACTION_VIEW, uri))
             return true
         }
 
+        // 2. OAuth Initiation Interception:
+        // When navigating to external OAuth identity providers or in-app OAuth initiation endpoints,
+        // locally create a PKCE-S256 login attempt with bound state & verifier, then launch in Custom Tab.
+        if (url.contains("accounts.google.com") || url.contains("oauth2.googleapis.com") ||
+            (isTrustedOrigin(url) && (uri.path?.contains("/oauth/desktop") == true || uri.path?.contains("/auth/google") == true))) {
+            val provider = if (url.contains("google")) "google" else null
+            initiateOAuthLogin(provider)
+            return true
+        }
+
+        // 3. Known external communication schemes
         if (scheme == "tel" || scheme == "mailto" || scheme == "tg" ||
             url.startsWith("https://t.me/") || url.startsWith("http://t.me/") ||
             (scheme != "http" && scheme != "https")
@@ -407,11 +767,27 @@ class MainActivity : AppCompatActivity() {
                 val intent = Intent(Intent.ACTION_VIEW, uri)
                 startActivity(intent)
                 true
-            } catch (e: Exception) {
-                false
+            } catch (_: Exception) {
+                true
             }
         }
-        return false
+
+        // 4. HTTPS Navigation: Strict Trusted Origin Boundary
+        if (scheme == "https") {
+            val host = uri.host?.lowercase() ?: ""
+            if (TRUSTED_HOSTS.contains(host)) {
+                val path = uri.path?.lowercase() ?: ""
+                if (path == "/logout" || path == "/auth/logout" || path == "/account/logout") {
+                    handleLogout()
+                }
+                // Allowed within privileged WebView
+                return false
+            }
+        }
+
+        // 5. Untrusted external origin: Route outside privileged WebView
+        openCustomTabOrBrowser(uri)
+        return true
     }
 
     private fun isCurrentExam(url: String? = webView.url): Boolean {

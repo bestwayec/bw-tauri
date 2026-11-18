@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { get, post } from "@/lib/api";
 import type { Route } from "@/App";
 
 interface LabStatus {
@@ -11,51 +12,24 @@ interface LabStatus {
   status: "in_session" | "preparing" | "idle";
 }
 
-const LABS_DATA: LabStatus[] = [
-  {
-    id: "lab-101",
-    name: "Testing Lab 101 (Main)",
-    totalSeats: 25,
-    occupiedSeats: 24,
-    currentExam: "IELTS Academic Mock #14",
-    proctorName: "Anvar Ruziyev",
-    status: "in_session",
-  },
-  {
-    id: "lab-102",
-    name: "Testing Lab 102 (West)",
-    totalSeats: 20,
-    occupiedSeats: 18,
-    currentExam: "CEFR Multilevel Standard Exam #08",
-    proctorName: "Dilshod Aliyev",
-    status: "in_session",
-  },
-  {
-    id: "lab-103",
-    name: "Speaking Lab 103",
-    totalSeats: 15,
-    occupiedSeats: 12,
-    currentExam: "IELTS Speaking One-on-One Recording",
-    proctorName: "Nodira Karimova",
-    status: "in_session",
-  },
-  {
-    id: "lab-104",
-    name: "Testing Lab 104 (East)",
-    totalSeats: 30,
-    occupiedSeats: 0,
-    currentExam: "Next Session Scheduled at 16:00",
-    proctorName: "System Ready",
-    status: "idle",
-  },
-];
-
 type Props = {
   onNavigate: (route: Route) => void;
 };
 
 export default function CenterOverview({ onNavigate }: Props) {
-  const [labs] = useState<LabStatus[]>(LABS_DATA);
+  const [labs, setLabs] = useState<LabStatus[]>([]);
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const res = await get<LabStatus[]>("/v1/admin/labs");
+        if (active && Array.isArray(res)) setLabs(res);
+      } catch {
+        // empty list when remote unavailable
+      }
+    })();
+    return () => { active = false; };
+  }, []);
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [broadcastText, setBroadcastText] = useState("");
   const [toast, setToast] = useState<string | null>(null);
@@ -65,12 +39,18 @@ export default function CenterOverview({ onNavigate }: Props) {
     setTimeout(() => setToast(null), 3000);
   }
 
-  function handleBroadcast(e: React.FormEvent) {
+  async function handleBroadcast(e: React.FormEvent) {
     e.preventDefault();
-    if (!broadcastText) return;
-    triggerToast(`Broadcast transmitted to all 3 active labs: "${broadcastText}"`);
-    setBroadcastText("");
-    setBroadcastOpen(false);
+    if (!broadcastText.trim()) return;
+    try {
+      await post("/v1/admin/broadcast", { message: broadcastText.trim() });
+      triggerToast(`Broadcast transmitted: "${broadcastText}"`);
+      setBroadcastText("");
+      setBroadcastOpen(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      triggerToast(`Xatolik: Xabar yuborilmadi (${msg})`);
+    }
   }
 
   const activeSeats = labs.reduce((sum, l) => sum + l.occupiedSeats, 0);

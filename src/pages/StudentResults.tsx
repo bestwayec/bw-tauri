@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { get } from "@/lib/api";
 import { useAssessmentOverview } from "@/lib/assessment-overview";
 
 export interface StudentResultRow {
@@ -19,147 +20,20 @@ export interface StudentResultRow {
   status: "certified" | "scored" | "flagged";
 }
 
-const RESULTS_DATA: StudentResultRow[] = [
-  {
-    id: "res-01",
-    studentId: "BW-9801",
-    studentName: "Azamat Karimov",
-    studentPhone: "+998 90 123 45 67",
-    examTitle: "IELTS Academic Full Mock 14",
-    program: "IELTS",
-    date: "2026-10-12 14:30",
-    listening: 7.5,
-    reading: 7.0,
-    writing: 7.0,
-    speaking: 7.5,
-    overallBand: 7.5,
-    cefrLevel: "C1",
-    cheatFlagsCount: 3,
-    status: "flagged",
-  },
-  {
-    id: "res-02",
-    studentId: "BW-9802",
-    studentName: "Madina Usmanova",
-    studentPhone: "+998 93 456 78 90",
-    examTitle: "IELTS Academic Full Mock 14",
-    program: "IELTS",
-    date: "2026-10-12 14:45",
-    listening: 8.5,
-    reading: 8.0,
-    writing: 7.5,
-    speaking: 8.0,
-    overallBand: 8.0,
-    cefrLevel: "C1",
-    cheatFlagsCount: 0,
-    status: "certified",
-  },
-  {
-    id: "res-03",
-    studentId: "BW-9803",
-    studentName: "Javohir Tursunov",
-    studentPhone: "+998 97 789 01 23",
-    examTitle: "CEFR Multilevel Standard Exam 08",
-    program: "MULTILEVEL",
-    date: "2026-10-11 16:20",
-    listening: 68,
-    reading: 64,
-    writing: 62,
-    speaking: 66,
-    overallBand: 65,
-    cefrLevel: "B2",
-    cheatFlagsCount: 8,
-    status: "flagged",
-  },
-  {
-    id: "res-04",
-    studentId: "BW-9804",
-    studentName: "Zarina Alimova",
-    studentPhone: "+998 99 234 56 78",
-    examTitle: "IELTS Academic Full Mock 13",
-    program: "IELTS",
-    date: "2026-10-10 11:15",
-    listening: 6.5,
-    reading: 6.0,
-    writing: 6.0,
-    speaking: 6.5,
-    overallBand: 6.5,
-    cefrLevel: "B2",
-    cheatFlagsCount: 0,
-    status: "certified",
-  },
-  {
-    id: "res-05",
-    studentId: "BW-9805",
-    studentName: "Sherzod Rakhimov",
-    studentPhone: "+998 91 345 67 89",
-    examTitle: "CEFR Multilevel Standard Exam 08",
-    program: "MULTILEVEL",
-    date: "2026-10-11 17:00",
-    listening: 72,
-    reading: 70,
-    writing: 65,
-    speaking: 68,
-    overallBand: 69,
-    cefrLevel: "C1",
-    cheatFlagsCount: 1,
-    status: "certified",
-  },
-  {
-    id: "res-06",
-    studentId: "BW-9806",
-    studentName: "Dilorom Boboeva",
-    studentPhone: "+998 90 987 65 43",
-    examTitle: "IELTS General Training Mock 05",
-    program: "IELTS",
-    date: "2026-10-09 13:00",
-    listening: 7.0,
-    reading: 7.0,
-    writing: 6.5,
-    speaking: 7.0,
-    overallBand: 7.0,
-    cefrLevel: "C1",
-    cheatFlagsCount: 0,
-    status: "certified",
-  },
-  {
-    id: "res-07",
-    studentId: "BW-9807",
-    studentName: "Bekzod Shukurov",
-    studentPhone: "+998 91 876 54 32",
-    examTitle: "IELTS Academic Full Mock 14",
-    program: "IELTS",
-    date: "2026-10-12 15:10",
-    listening: 7.5,
-    reading: 7.5,
-    writing: 6.5,
-    speaking: 7.5,
-    overallBand: 7.5,
-    cefrLevel: "C1",
-    cheatFlagsCount: 0,
-    status: "certified",
-  },
-  {
-    id: "res-08",
-    studentId: "BW-9808",
-    studentName: "Kamola Yuldasheva",
-    studentPhone: "+998 94 321 09 87",
-    examTitle: "IELTS Academic Full Mock 14",
-    program: "IELTS",
-    date: "2026-10-12 15:30",
-    listening: 6.0,
-    reading: 6.0,
-    writing: 5.5,
-    speaking: 6.0,
-    overallBand: 6.0,
-    cefrLevel: "B2",
-    cheatFlagsCount: 0,
-    status: "certified",
-  },
-];
-
 export default function StudentResults() {
-  const [results] = useState<StudentResultRow[]>(RESULTS_DATA);
+  const [results, setResults] = useState<StudentResultRow[]>([]);
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const res = await get<StudentResultRow[]>("/v1/teacher/results");
+        if (active && Array.isArray(res)) setResults(res);
+      } catch {
+        // empty when unavailable
+      }
+    })();
+    return () => { active = false; };
+  }, []);
   const [search, setSearch] = useState("");
   const [programFilter, setProgramFilter] = useState<"all" | "IELTS" | "MULTILEVEL">("all");
   const [cheatFilter, setCheatFilter] = useState<"all" | "clean" | "flagged">("all");

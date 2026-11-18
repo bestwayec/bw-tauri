@@ -11,8 +11,8 @@ android {
         applicationId "uz.bestwayec.app"
         minSdk 24
         targetSdk 34
-        versionCode 1060
-        versionName "1.0.6"
+        versionCode 10120
+        versionName "1.0.12"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
@@ -25,6 +25,10 @@ android {
         abi {
             enable false
         }
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     buildTypes {
@@ -40,6 +44,9 @@ android {
     kotlinOptions {
         jvmTarget = '17'
     }
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
     lint {
         abortOnError false
         checkReleaseBuilds false
@@ -54,4 +61,7 @@ dependencies {
     implementation 'androidx.webkit:webkit:1.10.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
     implementation 'androidx.browser:browser:1.8.0'
+
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20231013'
 }
