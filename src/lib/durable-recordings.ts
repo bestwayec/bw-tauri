@@ -74,17 +74,12 @@ export async function recoverRecording(key: string): Promise<Blob | undefined> {
   if (inMemory) {
     return inMemory;
   }
-  try {
-    const blob = await operation('readonly', (store) => store.get(key));
-    if (blob) {
-      durableKeys.add(key);
-      memoryOnlyKeys.delete(key);
-      return blob;
-    }
-    return undefined;
-  } catch {
-    return undefined;
+  const blob = await operation('readonly', (store) => store.get(key));
+  if (blob) {
+    durableKeys.add(key);
+    memoryOnlyKeys.delete(key);
   }
+  return blob;
 }
 
 /**
@@ -108,9 +103,10 @@ export async function releaseRecording(key: string) {
 export async function hasPendingRecordings(attempt: string): Promise<boolean> {
   if ([...retained.keys()].some((key) => key.startsWith(`${attempt}:`))) return true;
   try {
-    return (await operation('readonly', (store) => store.getAllKeys())).some((key) => String(key).startsWith(`${attempt}:`));
+    const keys = await operation('readonly', (store) => store.getAllKeys());
+    return keys.some((key) => String(key).startsWith(`${attempt}:`));
   } catch {
-    return false;
+    throw new Error('Local recording storage could not be checked. Retry before submitting.');
   }
 }
 

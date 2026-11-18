@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { RunnerQuestion } from "@/lib/tests";
-import { markActiveRecording } from '@/lib/durable-recordings';
+import { getRecordingDurability, markActiveRecording } from '@/lib/durable-recordings';
 import { microphoneTrack, openMicrophone, processingSummary } from '@/lib/audio-capture';
 import Waveform from './Waveform';
 
@@ -177,8 +177,12 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
     [],
   );
 
+  function hasRetainedTake() {
+    return Boolean(recordingKey && getRecordingDurability(recordingKey) !== 'unretained');
+  }
+
   async function startRecording() {
-    if (requesting.current || recorderRef.current?.state === 'recording') return;
+    if (hasRetainedTake() || requesting.current || recorderRef.current?.state === 'recording') return;
     setRecError(null);
     if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       setRecState("error");
@@ -360,6 +364,7 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
               <button
                 type="button"
                 onClick={() => void startRecording()}
+                disabled={hasRetainedTake()}
                 className="rounded-lg bg-[#10B981]/10 px-2.5 py-1 text-[11px] font-bold text-[#10B981] ring-1 ring-[#10B981]/30 hover:bg-[#10B981]/20"
               >
                 ● Record
@@ -396,6 +401,7 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
                 <button
                   type="button"
                   onClick={() => void startRecording()}
+                  disabled={hasRetainedTake()}
                   className="mt-1 inline-flex items-center gap-1 rounded-md bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-200 hover:bg-amber-500/30"
                 >
                   ↻ Retry Microphone Access

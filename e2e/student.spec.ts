@@ -87,3 +87,66 @@ test('a writing draft survives an API outage and restart, and finalization waits
   expect(acknowledgedAnswers.some(answer => answer.response === draft)).toBe(true);
   await expect(page.getByText('submitted ✓', { exact: true })).toBeVisible();
 });
+
+test('speaking storage retains an interrupted upload across reload and clears it after acknowledgement', async ({ page }) => {
+  await signIn(page);
+  const sources = {
+    exams: '/src/lib/mocks.ts',
+    recordings: '/src/lib/durable-recordings.ts',
+    upload: '/src/lib/mock-recordings.ts',
+  };
+  const bytes = 'synthetic speaking take';
+  const take = await page.evaluate(async (urls) => {
+    const exams = await import(urls.exams);
+    const start = await exams.startMockExam('mock-1', { section: 'speaking' });
+    return {
+      attempt: start.attemptId as string,
+      question: start.exam.sections[0].groups[0].questions[0].id as string,
+    };
+  }, sources);
+  const key = `${take.attempt}:${take.question}`;
+  const endpoint = `http://127.0.0.1:3102/v1/mock/attempts/${take.attempt}/speaking/${take.question}`;
+  await page.route(endpoint, route => route.abort());
+  const interrupted = await page.evaluate(async ({ sources, take, bytes }) => {
+    const { uploadRetainedMockRecording } = await import(sources.upload);
+    const blob = new Blob([bytes], { type: 'audio/webm' });
+    return await uploadRetainedMockRecording(take.attempt, take.question, blob, () => {})
+      .then(() => false, () => true);
+  }, { sources, take, bytes });
+  expect(interrupted).toBe(true);
+  await page.unroute(endpoint);
+
+  await page.reload();
+  const recovered = await page.evaluate(async ({ sources, key }) => {
+    const recordings = await import(sources.recordings);
+    return (await recordings.recoverRecording(key))?.text();
+  }, { sources, key });
+  expect(recovered).toBe(bytes);
+
+  const storageFailure = await page.evaluate(async ({ sources, key, take }) => {
+    const recordings = await import(sources.recordings);
+    const open = indexedDB.open;
+    indexedDB.open = () => { throw new DOMException('Storage disconnected', 'UnknownError'); };
+    try {
+      return await Promise.allSettled([
+        recordings.recoverRecording(key),
+        recordings.hasPendingRecordings(take.attempt),
+      ]).then(results => results.map(result => result.status));
+    } finally {
+      indexedDB.open = open;
+    }
+  }, { sources, key, take });
+  expect(storageFailure).toEqual(['rejected', 'rejected']);
+
+  const acknowledgement = page.waitForResponse(response => response.url() === endpoint && response.ok());
+  const afterRetry = await page.evaluate(async ({ sources, key, take }) => {
+    const recordings = await import(sources.recordings);
+    const { uploadRetainedMockRecording } = await import(sources.upload);
+    const blob = await recordings.recoverRecording(key);
+    if (!blob) throw new Error('Missing stored recording before retry');
+    await uploadRetainedMockRecording(take.attempt, take.question, blob, () => {});
+    return recordings.hasPendingRecordings(take.attempt);
+  }, { sources, key, take });
+  expect((await (await acknowledgement).json()).data.saved).toBe(true);
+  expect(afterRetry).toBe(false);
+});
