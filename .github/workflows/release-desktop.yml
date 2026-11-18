@@ -248,6 +248,30 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
+      - name: Verify Linux installer metadata and bundled WebKit helpers
+        if: runner.os == 'Linux'
+        env:
+          NATIVE_TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          shopt -s nullglob
+          bundle="src-tauri/target/$NATIVE_TARGET/release/bundle"
+          appimages=("$bundle"/appimage/*.AppImage)
+          debs=("$bundle"/deb/*.deb)
+          test "${#appimages[@]}" -eq 1
+          test "${#debs[@]}" -eq 1
+          test "$(dpkg-deb --field "${debs[0]}" Architecture)" = amd64
+          dpkg-deb --field "${debs[0]}" Depends | grep -F libwebkit2gtk-4.1-0
+          image=$(realpath "${appimages[0]}")
+          readelf --file-header "$image" | grep -F 'Advanced Micro Devices X86-64'
+          work=$(mktemp -d)
+          trap 'rm -rf "$work"' EXIT
+          cd "$work"
+          "$image" --appimage-extract > /dev/null
+          helpers=squashfs-root/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1
+          test -x "$helpers/WebKitNetworkProcess"
+          test -x "$helpers/WebKitWebProcess"
+
       - name: Verify macOS bundle microphone permission and native architecture
         if: runner.os == 'macOS'
         env:
