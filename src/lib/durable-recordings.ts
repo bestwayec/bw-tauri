@@ -31,13 +31,27 @@ export function retainRecording(key: string, blob: Blob) {
   return operation('readwrite', (store) => store.put(blob, key));
 }
 export async function recoverRecording(key: string): Promise<Blob | undefined> {
-  return retained.get(key) ?? operation('readonly', (store) => store.get(key));
+  const inMemory = retained.get(key);
+  if (inMemory) return inMemory;
+  try {
+    return await operation('readonly', (store) => store.get(key));
+  } catch {
+    return undefined;
+  }
 }
 export async function releaseRecording(key: string) {
-  await operation('readwrite', (store) => store.delete(key));
   retained.delete(key);
+  try {
+    await operation('readwrite', (store) => store.delete(key));
+  } catch {
+    /* store delete failure is non-fatal */
+  }
 }
 export async function hasPendingRecordings(attempt: string) {
   if ([...retained.keys()].some((key) => key.startsWith(`${attempt}:`))) return true;
-  return (await operation('readonly', (store) => store.getAllKeys())).some((key) => String(key).startsWith(`${attempt}:`));
+  try {
+    return (await operation('readonly', (store) => store.getAllKeys())).some((key) => String(key).startsWith(`${attempt}:`));
+  } catch {
+    return false;
+  }
 }

@@ -555,8 +555,11 @@ textarea.field {
 .exam-savestate-saved {
   color: var(--ex-accent-quiet);
 }
-.exam-savestate-saving {
+.exam-savestate-saving, .exam-savestate-saving_local {
   color: var(--ex-muted);
+}
+.exam-savestate-local_awaiting_sync, .exam-savestate-submitting {
+  color: var(--orange, #F59E0B);
 }
 .exam-savestate-offline, .exam-savestate-error {
   color: var(--ex-danger);
