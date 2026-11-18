@@ -5,7 +5,10 @@ import {
   persistActiveMockSession,
   persistActiveTestSession,
   clearActiveMockSession,
+  getSessionDeadline,
+  isSessionExpired,
   ACTIVE_MOCK_SESSION_KEY,
+  type ActiveExamSession,
 } from './ResumeExamModal';
 import { useSessionStore } from '@/lib/session-store';
 import type { MockExamListItem, MockStartResult } from '@/lib/mocks';
@@ -85,4 +88,52 @@ it('clears active session cleanly', () => {
   expect(getActiveExamSession('student-a')).not.toBeNull();
   clearActiveMockSession();
   expect(getActiveExamSession('student-a')).toBeNull();
+});
+
+it('detects session deadline and evaluates expiration correctly', () => {
+  const futureIso = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+  const pastIso = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+  const activeSession: ActiveExamSession = {
+    kind: 'mock',
+    studentId: 'student-a',
+    mock: { id: 'exam-future', title: 'Future' } as MockExamListItem,
+    start: { attemptId: 'att-future', deadlineAt: futureIso } as MockStartResult,
+    at: Date.now(),
+  };
+
+  const expiredSession: ActiveExamSession = {
+    kind: 'mock',
+    studentId: 'student-a',
+    mock: { id: 'exam-past', title: 'Past' } as MockExamListItem,
+    start: { attemptId: 'att-past', deadlineAt: pastIso } as MockStartResult,
+    at: Date.now(),
+  };
+
+  expect(getSessionDeadline(activeSession)).toBe(futureIso);
+  expect(isSessionExpired(activeSession)).toBe(false);
+
+  expect(getSessionDeadline(expiredSession)).toBe(pastIso);
+  expect(isSessionExpired(expiredSession)).toBe(true);
+});
+
+it('prioritizes section deadlines for scoped mock exams', () => {
+  const sectionDeadlineIso = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  const overallDeadlineIso = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+  const scopedSession: ActiveExamSession = {
+    kind: 'mock',
+    studentId: 'student-a',
+    mock: { id: 'exam-scoped', title: 'Scoped' } as MockExamListItem,
+    start: {
+      attemptId: 'att-scoped',
+      overallDeadlineAt: overallDeadlineIso,
+      sectionDeadlines: { writing: sectionDeadlineIso },
+    } as unknown as MockStartResult,
+    chosen: 'writing',
+    at: Date.now(),
+  };
+
+  expect(getSessionDeadline(scopedSession)).toBe(sectionDeadlineIso);
+  expect(isSessionExpired(scopedSession)).toBe(false);
 });

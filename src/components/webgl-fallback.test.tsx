@@ -48,6 +48,12 @@ describe("without WebGL (getContext returns null)", () => {
     expect(html).not.toContain("<canvas");
   });
 
+  it("shows static wordmark when reduced motion is requested even if WebGL is present", () => {
+    const html = renderToStaticMarkup(<BootSplash webgl={true} reduceMotion={true} />);
+    expect(html).toContain('data-testid="static-logo"');
+    expect(html).toContain("Best<span>Way</span>");
+  });
+
   it("reports WebGL when a context is available", () => {
     const loseContext = vi.fn();
     vi.stubGlobal("document", {

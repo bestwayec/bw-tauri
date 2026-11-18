@@ -9,6 +9,8 @@ type Props = {
   exiting?: boolean;
   /** Override for tests; defaults to the WebGL probe. */
   webgl?: boolean;
+  /** When true (e.g. user prefers reduced motion or low-end device), avoids loading Three.js */
+  reduceMotion?: boolean;
 };
 
 /** Same wordmark as the pre-hydration screen in index.html — no WebGL needed. */
@@ -32,8 +34,13 @@ export function StaticLogo() {
  *
  * Just the animated 3D logo, centered and large on the dark brand backdrop.
  */
-export default function BootSplash({ exiting = false, webgl }: Props) {
-  const canRender3D = webgl ?? hasWebGL();
+export default function BootSplash({ exiting = false, webgl, reduceMotion = false }: Props) {
+  const isLowMemory =
+    typeof navigator !== "undefined" &&
+    typeof (navigator as { deviceMemory?: number }).deviceMemory === "number" &&
+    (navigator as { deviceMemory?: number }).deviceMemory! < 4;
+
+  const canRender3D = !reduceMotion && !isLowMemory && (webgl ?? hasWebGL());
   return (
     <div
       className={`bw-boot${exiting ? " is-exiting" : ""}`}

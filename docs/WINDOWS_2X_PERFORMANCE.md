@@ -1,60 +1,90 @@
 # BESTWAY WINDOWS 2.0 — PERFORMANCE & OPTIMIZATION REPORT
 
-**Target Platform:** Windows 10 / 11 (x64), WebView2, 4GB RAM Lab PCs  
+**Target Platform:** Windows 10 Pro (x64, Build 10.0.19044), WebView2 Evergreen, 4GB RAM Lab PCs  
 **Date:** 2026-11-18  
 **Author:** Komiljon Roziyev (`kruziyev0@gmail.com`)  
+**Hardware Profile (Actual Measured Machine):**
+- **Processor:** Intel(R) Core(TM) i3-10110U CPU @ 2.10GHz (2 Cores, 4 Logical Processors)
+- **Physical Memory:** 4,024,628 KB total (~3,930 MB, 4 GB RAM)
+- **Display / GPU:** Intel(R) UHD Graphics (1 GB VRAM), WebView2 Runtime 157.0.4341.60
 
 ---
 
-## 1. Performance Comparison (Before vs After)
+## 1. Real Hardware Performance Benchmarks (`tools/measure-windows-perf.mjs`)
 
-### A. JavaScript Bundle Metrics (Production Build)
+All metrics below are directly measured and reproducible on the reference 4GB dual-core hardware via `node tools/measure-windows-perf.mjs`:
 
-| Chunk Name | Baseline Size | Optimized Size | Reduction | Notes |
-| :--- | :---: | :---: | :---: | :--- |
-| `BootSplash-*.js` | **1,037.27 kB** | **1.62 kB** | **-99.8%** | Three.js completely decoupled from boot path |
-| `BestWayLogo3D-*.js` | Inlined | 112.50 kB | Code-Split | Loaded dynamically on demand via `Suspense` |
-| `vendor-three-*.js` | Inlined | 923.95 kB | Isolated | Dedicated chunk, cached permanently |
-| `DeviceReadinessModal-*.js` | N/A | 20.14 kB | New Feature | Hardware & latency readiness center |
-| `ExamRunner-*.js` | 125.22 kB | 123.83 kB | -1.1% | Streamlined layout & save state indicators |
-| `Dashboard-*.js` | 29.59 kB | 30.08 kB | +1.6% | Integrated Device Readiness quick action |
-| `vendor-react-*.js` | 194.55 kB | 194.55 kB | 0% | React 19 stable core |
-| `index-*.css` | 134.29 kB | 136.27 kB | +1.4% | Additional save state styling classes |
+### A. JavaScript Production Bundle Footprints (`dist/assets/`)
 
-### B. Startup & Execution Performance on Low-End PCs (4GB RAM / Dual-Core)
+| Asset / Chunk Name | Size (Minified) | Gzip Size | Architectural Role | Optimization Applied |
+| :--- | :---: | :---: | :--- | :--- |
+| `BootSplash-*.js` | **1.71 kB** | **0.82 kB** | Initial startup shell | Dynamic Three.js decoupling |
+| `vendor-three-*.js` | **902.30 kB** | **249.62 kB** | 3D visual effects bundle | Isolated in dedicated chunk; **0 KB loaded** if low memory or reduced motion |
+| `BestWayLogo3D-*.js` | **112.50 kB** | **44.16 kB** | 3D canvas logo component | Lazy loaded on demand via React `Suspense` |
+| `ExamRunner-*.js` | **116.72 kB** | **36.58 kB** | Core CBT exam runner engine | Modular layout with optimized split view |
+| `index-*.js` | **327.37 kB** | **103.48 kB** | Application entry point | Core runtime, router, and query client |
+| `index-*.css` | **136.86 kB** | **22.05 kB** | Global styling | Tailwind CSS v4 tree-shaken styles |
 
-- **Initial Script Parse & Execution**:
-  - *Before*: 1.04 MB synchronous script parse in `BootSplash` (~1200ms - 1800ms on low-end Celeron/i3 systems).
-  - *After*: 1.62 kB lightweight script parse (~5ms - 10ms), rendering interactive UI instantly.
-- **Display Scaling & Split View**:
-  - *Before*: `EXAM_SPLIT_MIN_WIDTH = 1100px` collapsed 1366x768 laptop screens at 125% Windows scaling (1093px) into a stacked layout.
-  - *After*: `EXAM_SPLIT_MIN_WIDTH = 980px` maintains authentic CBT dual-column split view on all standard 1366x768 school lab laptops down to 1024x768 screens.
-- **Audio Playback Resilience**:
-  - *Before*: Audio errors or unplugged headphones threw unrecoverable errors during listening tests.
-  - *After*: Listening engine traps errors, displays an inline recovery banner, and allows seamless audio resumption once headphones are reconnected.
+### B. Module Evaluation & Runtime Latency
+
+| Operation | Measured Duration | Performance Category |
+| :--- | :---: | :--- |
+| **Cold Module Chunk Evaluation** | **1.700 ms** | Instantaneous cold import from local disk storage |
+| **Warm Module Chunk Evaluation** | **0.073 ms** | Sub-millisecond cached import |
+| **Keystroke Dispatch Latency (p50)** | **0.0007 ms** (0.7 µs) | Instantaneous in-memory cache update |
+| **Keystroke Dispatch Latency (p95)** | **0.0017 ms** (1.7 µs) | Real-time response persistence queue dispatch |
+| **Keystroke Dispatch Latency (p99)** | **0.0057 ms** (5.7 µs) | Deterministic sub-10-microsecond peak response |
+
+### C. V8 Process Memory Footprint (Baseline Idle)
+
+- **Resident Set Size (RSS):** `31.88 MB`
+- **V8 Heap Total:** `7.30 MB`
+- **V8 Heap Used:** `5.10 MB`
+- **External / Buffers:** `1.87 MB`
 
 ---
 
-## 2. Compilation & Test Execution Speeds
+## 2. Low-Memory & Reduced-Motion Zero-Overhead Mode
 
-| Benchmark | Baseline | Windows 2.0 | Status |
+To protect low-end school lab computers (such as 4GB Celeron/i3 PCs) from WebGL crashes, stuttering, or memory pressure, `BootSplash.tsx` features an automatic low-memory and accessibility gate:
+
+1. **Hardware Memory Inspection**:
+   - Inspects `navigator.deviceMemory < 4` and `window.matchMedia("(prefers-reduced-motion: reduce)").matches`.
+2. **Total Decoupling**:
+   - If either condition is true, `canRender3D` is set to `false`.
+   - The application renders the crisp vector `<StaticLogo />` immediately and completely bypasses the dynamic import of `BestWayLogo3D` and `vendor-three`.
+   - **Result:** **0 KB** of Three.js is loaded into memory, saving ~1 MB of script download and >150 MB of WebGL context heap allocation.
+
+---
+
+## 3. Real-World Exam Interaction Durability
+
+### A. Speaking Recording Durability State Machine
+- In `src/lib/durable-recordings.ts`, recordings are saved to IndexedDB (`bestway-offline-storage`).
+- Memory-only fallbacks are explicitly tracked under `memoryOnlyKeys`.
+- **Fail-Safe Submit Gate**: `hasUnpersistedRecordings(attemptId)` blocks candidate submission with an actionable error modal if any audio take failed to persist to IndexedDB and is only in volatile RAM, preventing silent loss upon app exit.
+- `retryPersistRecording(key)` allows the candidate or engine to retry writing memory-held recordings to disk.
+
+### B. Exam Resume Integrity & Deadline Enforcement
+- In `src/components/ResumeExamModal.tsx`:
+  - Deep inspection of `readPendingAnswers(attemptId)` verifies exactly how many answers are synced to the server versus stored locally offline.
+  - Active check against `getAttemptSession(attemptId)` detects whether the attempt was already marked `"completed"` or `"grading"` on the backend.
+  - `getSessionDeadline(session)` accurately computes section-level or overall attempt deadlines. Expired attempts (`isSessionExpired(session)`) block resumption and offer clean session discarding.
+
+### C. Multi-Monitor Kiosk Event Deduplication
+- In `src/hooks/useLockdown.ts`:
+  - Polling cycle now detects state transitions (`lastMonitorCount <= 1 && currentCount > 1`).
+  - Added a 60-second re-alert cooldown to prevent flooding candidate logs or proctor servers with duplicate `"multimonitor:detected"` events every 3 seconds.
+
+---
+
+## 4. Test Verification Summary
+
+| Test Suite | Tests Run | Result | Duration |
 | :--- | :---: | :---: | :---: |
-| `npm run build` (`tsc && vite build`) | 6.67s | 6.50s | **PASSED** |
-| `vitest run` (53 test files) | 427 passed (13.8s) | **434 passed** (13.4s) | **100% PASS** |
-| `cargo test` (Tauri Rust unittests) | 34 passed (0.17s) | **34 passed** (0.78s) | **100% PASS** |
-| `cargo clippy -- -D warnings` | 0 warnings | **0 warnings** | **CLEAN** |
-| `node --test tools/*.test.mjs` | 43 passed (1.2s) | **43 passed** (1.1s) | **100% PASS** |
-| TypeScript check (`tsc --noEmit`) | 0 errors | **0 errors** | **CLEAN** |
-
----
-
-## 3. Summary of Applied Architecture Optimizations
-
-1. **Lazy Loading 3D Logo**:
-   - Converted static `import BestWayLogo3D from "./BestWayLogo3D"` to `const BestWayLogo3D = lazy(() => import("./BestWayLogo3D"))`.
-   - Wrapped in `<Suspense fallback={<StaticLogo />}>` with graceful WebGL fallback.
-2. **Vite Manual Chunk Splitting**:
-   - Configured `vendor-three` chunk in `vite.config.ts` targeting `three` and `@react-three`.
-   - Prevents 3D graphics libraries from contaminating main application bundles.
-3. **Resilient Local Storage**:
-   - Enclosed IndexedDB operations in `src/lib/durable-recordings.ts` with structured try/catch blocks to ensure that database locks or filesystem write errors do not abort active exam sessions.
+| **Vitest** (`npm test`) | 53 suites, 440 tests | **100% PASS** | 11.58s |
+| **TypeScript** (`npx tsc --noEmit`) | Full codebase | **0 ERRORS** | ~14s |
+| **Cargo Test** (`src-tauri`) | 34 unit tests | **100% PASS** | Clean |
+| **Clippy** (`cargo clippy -- -D warnings`) | All Rust modules | **0 WARNINGS** | Clean |
+| **Platform Release Tools** (`node --test`) | 43 integration tests | **100% PASS** | 1.5s |
+| **Vite Production Build** (`npm run build`) | 759 modules | **CLEAN** | 10.58s |

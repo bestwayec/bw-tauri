@@ -595,7 +595,7 @@ export default function App() {
     {showSplash && (
       <ErrorBoundary fallback={null}>
         <Suspense fallback={null}>
-          <BootSplash exiting={introLeaving} webgl={webgl} />
+          <BootSplash exiting={introLeaving} webgl={webgl} reduceMotion={reduceMotion} />
         </Suspense>
       </ErrorBoundary>
     )}

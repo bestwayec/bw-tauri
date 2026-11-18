@@ -345,6 +345,8 @@ export function useLockdown(options: UseLockdownOptions): UseLockdownResult {
     let disposed = false;
     let unlistenTauriFocus: (() => void) | null = null;
     let monitorTimer: number | null = null;
+    let lastMonitorCount = 1;
+    let lastMonitorViolationAt = 0;
 
     if (typeof window !== "undefined") {
       monitorTimer = window.setInterval(async () => {
@@ -353,8 +355,15 @@ export function useLockdown(options: UseLockdownOptions): UseLockdownResult {
           const invoke = (mod as { invoke?: unknown } | null)?.invoke;
           if (typeof invoke === "function") {
             const count = await (invoke as (cmd: string) => Promise<number>)("check_monitors");
-            if (typeof count === "number" && count > 1 && !disposed) {
-              report("multimonitor:detected");
+            if (typeof count === "number" && !disposed) {
+              const now = Date.now();
+              // Transition-based detection: fire only on transition from <= 1 to > 1
+              // or on periodic re-alert after at least 60 seconds (prevents flood on every 3s tick)
+              if (count > 1 && (lastMonitorCount <= 1 || now - lastMonitorViolationAt > 60_000)) {
+                lastMonitorViolationAt = now;
+                report("multimonitor:detected");
+              }
+              lastMonitorCount = count;
             }
           }
         } catch {
