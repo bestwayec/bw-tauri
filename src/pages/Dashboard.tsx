@@ -30,6 +30,7 @@ import LiveExamPinJoin from "@/components/LiveExamPinJoin";
 import MockSectionPicker, { type MockStartChoice } from "@/components/exam-ui/MockSectionPicker";
 import { belongsToProgram, programQueryKey, type ExamProgram } from "@/lib/programs";
 import { useSessionStore } from "@/lib/session-store";
+import DeviceReadinessModal from "@/components/DeviceReadinessModal";
 
 type Props = {
   studentName: string | null;
@@ -101,6 +102,7 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
   const [startMockError, setStartMockError] = useState<string | null>(null);
   const [picker, setPicker] = useState<{ mock: MockExamListItem; mode: MockAttemptMode; defaultSection?: MockSkill } | null>(null);
   const [watchdogExpired, setWatchdogExpired] = useState(false);
+  const [showReadiness, setShowReadiness] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setWatchdogExpired(true), 4500);
@@ -376,6 +378,16 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" aria-hidden />
             Auto-sync
           </span>
+
+          <button
+            type="button"
+            onClick={() => setShowReadiness(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-all shadow-sm"
+            title="Audio, mikrofon va tarmoqni tekshirish"
+          >
+            <span>🛡️</span>
+            <span>Device Readiness</span>
+          </button>
 
           <button
             onClick={() => onNavigate("exams")}
@@ -736,6 +748,12 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
           onStart={confirmStartMock}
         />
       )}
+
+      {/* Modal: Device Readiness */}
+      <DeviceReadinessModal
+        open={showReadiness}
+        onClose={() => setShowReadiness(false)}
+      />
     </section>
   );
 }

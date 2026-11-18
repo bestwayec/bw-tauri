@@ -39,6 +39,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.json.JSONObject
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
+import java.net.URI
 import java.net.URL
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -51,6 +52,15 @@ class MainActivity : AppCompatActivity() {
         const val API_BASE_URL = "https://api.bestwayec.uz/v1"
         const val APP_VERSION = "1.0.12"
         private val TRUSTED_HOSTS = setOf("bestwayec.uz", "api.bestwayec.uz")
+        private val GOOGLE_OAUTH_HOSTS = setOf("accounts.google.com", "oauth2.googleapis.com")
+
+        private fun hasHttpsOrigin(url: String, hosts: Set<String>): Boolean {
+            val uri = try { URI(url) } catch (_: java.net.URISyntaxException) { return false }
+            val host = uri.host?.lowercase() ?: return false
+            val authority = uri.rawAuthority?.lowercase()
+            return uri.scheme.equals("https", ignoreCase = true) && host in hosts &&
+                (authority == host || authority == "$host:443")
+        }
         private val USER_AGENT_SUFFIX = " BestWayApp/$APP_VERSION BestWay-Android/$APP_VERSION MobileApp"
         private const val REQUEST_RECORD_AUDIO = 1001
 
@@ -58,17 +68,8 @@ class MainActivity : AppCompatActivity() {
          * Validates whether a URL or origin belongs strictly to an approved HTTPS host.
          * Cleartext HTTP is never trusted.
          */
-        fun isTrustedOrigin(urlOrOrigin: String?): Boolean {
-            if (urlOrOrigin.isNullOrBlank()) return false
-            return try {
-                val uri = Uri.parse(urlOrOrigin)
-                val scheme = uri.scheme?.lowercase()
-                val host = uri.host?.lowercase()
-                scheme == "https" && host != null && TRUSTED_HOSTS.contains(host)
-            } catch (_: Exception) {
-                false
-            }
-        }
+        fun isTrustedOrigin(urlOrOrigin: String?): Boolean =
+            !urlOrOrigin.isNullOrBlank() && hasHttpsOrigin(urlOrOrigin, TRUSTED_HOSTS)
     }
 
     /**
@@ -751,9 +752,11 @@ class MainActivity : AppCompatActivity() {
         // 2. OAuth Initiation Interception:
         // When navigating to external OAuth identity providers or in-app OAuth initiation endpoints,
         // locally create a PKCE-S256 login attempt with bound state & verifier, then launch in Custom Tab.
-        if (url.contains("accounts.google.com") || url.contains("oauth2.googleapis.com") ||
-            (isTrustedOrigin(url) && (uri.path?.contains("/oauth/desktop") == true || uri.path?.contains("/auth/google") == true))) {
-            val provider = if (url.contains("google")) "google" else null
+        val isGoogleOAuth = hasHttpsOrigin(url, GOOGLE_OAUTH_HOSTS)
+        val path = uri.path?.trimEnd('/')
+        val isBestwayOAuth = isTrustedOrigin(url) && (path == "/oauth/desktop" || path == "/auth/google")
+        if (isGoogleOAuth || isBestwayOAuth) {
+            val provider = if (isGoogleOAuth || path == "/auth/google") "google" else null
             initiateOAuthLogin(provider)
             return true
         }
@@ -773,16 +776,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         // 4. HTTPS Navigation: Strict Trusted Origin Boundary
-        if (scheme == "https") {
-            val host = uri.host?.lowercase() ?: ""
-            if (TRUSTED_HOSTS.contains(host)) {
-                val path = uri.path?.lowercase() ?: ""
-                if (path == "/logout" || path == "/auth/logout" || path == "/account/logout") {
-                    handleLogout()
-                }
-                // Allowed within privileged WebView
-                return false
+        if (isTrustedOrigin(url)) {
+            val logoutPath = path?.lowercase()
+            if (logoutPath == "/logout" || logoutPath == "/auth/logout" || logoutPath == "/account/logout") {
+                handleLogout()
             }
+            return false
         }
 
         // 5. Untrusted external origin: Route outside privileged WebView

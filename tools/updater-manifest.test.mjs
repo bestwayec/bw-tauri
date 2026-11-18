@@ -5,19 +5,21 @@ import { buildUpdaterManifest, verifyUpdaterManifest } from './updater-manifest.
 const asset = (id, name) => ({ id, name, state: 'uploaded', size: 10 });
 const complete = [
   asset(1, 'Bestway.App_1.0.13_x64-setup.exe'), asset(2, 'Bestway.App_1.0.13_x64-setup.exe.sig'),
-  asset(3, 'Bestway.App_1.0.13_amd64.AppImage'), asset(4, 'Bestway.App_1.0.13_amd64.AppImage.sig'), asset(5, 'Bestway.App_1.0.13_amd64.deb'),
+  asset(3, 'Bestway.App_1.0.13_amd64.AppImage'), asset(4, 'Bestway.App_1.0.13_amd64.AppImage.sig'), asset(5, 'Bestway.App_1.0.13_amd64.deb'), asset(12, 'Bestway.App_1.0.13_amd64.deb.sig'),
   asset(6, 'Bestway.App_x64.app.tar.gz'), asset(7, 'Bestway.App_x64.app.tar.gz.sig'), asset(8, 'Bestway.App_1.0.13_x64.dmg'),
   asset(9, 'Bestway.App_aarch64.app.tar.gz'), asset(10, 'Bestway.App_aarch64.app.tar.gz.sig'), asset(11, 'Bestway.App_1.0.13_aarch64.dmg'),
 ];
 const readSignature = async (a) => `sig-for-${a.id}`;
 const input = { version: '1.0.13', tag: 'v1.0.13', repository: 'bestwayec/bw-tauri', pubDate: '2026-11-14T00:00:00Z', assets: complete, readSignature };
 
-test('one manifest names all four updater platforms with their own signature and download URL', async () => {
+test('one manifest preserves all updater platform keys and installer aliases', async () => {
   const manifest = await buildUpdaterManifest(input);
-  assert.deepEqual(Object.keys(manifest.platforms).sort(), ['darwin-aarch64', 'darwin-x86_64', 'linux-x86_64', 'windows-x86_64']);
+  assert.deepEqual(Object.keys(manifest.platforms).sort(), ['darwin-aarch64', 'darwin-aarch64-app', 'darwin-x86_64', 'darwin-x86_64-app', 'linux-x86_64', 'linux-x86_64-appimage', 'linux-x86_64-deb', 'windows-x86_64', 'windows-x86_64-nsis']);
   assert.equal(manifest.platforms['darwin-aarch64'].signature, 'sig-for-10');
   assert.equal(manifest.platforms['darwin-aarch64'].url, 'https://github.com/bestwayec/bw-tauri/releases/download/v1.0.13/Bestway.App_aarch64.app.tar.gz');
   assert.equal(manifest.platforms['windows-x86_64'].url.endsWith('/Bestway.App_1.0.13_x64-setup.exe'), true);
+  assert.deepEqual(manifest.platforms['windows-x86_64-nsis'], manifest.platforms['windows-x86_64']);
+  assert.equal(manifest.platforms['linux-x86_64-deb'].signature, 'sig-for-12');
   assert.equal(verifyUpdaterManifest(manifest, '1.0.13'), true);
 });
 

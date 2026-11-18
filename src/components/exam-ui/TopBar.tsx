@@ -1,6 +1,14 @@
 import { fmtCountdown, type ContrastTheme, type SimulatorMode } from "./model";
 
-export type SaveState = "checking" | "saved" | "saving" | "offline" | "error";
+export type SaveState =
+  | "checking"
+  | "saved"
+  | "saving"
+  | "saving_local"
+  | "local_awaiting_sync"
+  | "offline"
+  | "error"
+  | "submitting";
 
 type Props = {
   candidateName: string | null;
@@ -139,6 +147,12 @@ export default function TopBar(p: Props) {
         >
           {p.saveState === "checking"
             ? "Checking saved answers…"
+            : p.saveState === "saving_local"
+            ? "Saving locally…"
+            : p.saveState === "local_awaiting_sync"
+            ? "Saved locally / awaiting sync"
+            : p.saveState === "submitting"
+            ? "Submission pending…"
             : p.saveState === "saved"
             ? "Saved"
             : p.saveState === "saving"

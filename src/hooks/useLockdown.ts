@@ -14,7 +14,8 @@ export type LockdownCheatEvent =
   | "keydown:save"
   | "keydown:view-source"
   | "visibilitychange:hidden"
-  | "window:blur";
+  | "window:blur"
+  | "multimonitor:detected";
 
 export type LockdownOrientation =
   | "any"
@@ -53,6 +54,7 @@ export function mapCheatEventToKind(
     case "visibilitychange:hidden":
       return "tab_switch";
     case "window:blur":
+    case "multimonitor:detected":
       return "blur";
     case "copy":
     case "cut":
@@ -342,6 +344,33 @@ export function useLockdown(options: UseLockdownOptions): UseLockdownResult {
 
     let disposed = false;
     let unlistenTauriFocus: (() => void) | null = null;
+    let monitorTimer: number | null = null;
+    let lastMonitorCount = 1;
+    let lastMonitorViolationAt = 0;
+
+    if (typeof window !== "undefined") {
+      monitorTimer = window.setInterval(async () => {
+        try {
+          const mod = await import("@tauri-apps/api/core").catch(() => null);
+          const invoke = (mod as { invoke?: unknown } | null)?.invoke;
+          if (typeof invoke === "function") {
+            const count = await (invoke as (cmd: string) => Promise<number>)("check_monitors");
+            if (typeof count === "number" && !disposed) {
+              const now = Date.now();
+              // Transition-based detection: fire only on transition from <= 1 to > 1
+              // or on periodic re-alert after at least 60 seconds (prevents flood on every 3s tick)
+              if (count > 1 && (lastMonitorCount <= 1 || now - lastMonitorViolationAt > 60_000)) {
+                lastMonitorViolationAt = now;
+                report("multimonitor:detected");
+              }
+              lastMonitorCount = count;
+            }
+          }
+        } catch {
+          /* ignore outside tauri */
+        }
+      }, 3000);
+    }
     void (async () => {
       try {
         const eventMod = await import("@tauri-apps/api/event").catch(() => null);
@@ -367,6 +396,7 @@ export function useLockdown(options: UseLockdownOptions): UseLockdownResult {
 
     return () => {
       disposed = true;
+      if (monitorTimer !== null) window.clearInterval(monitorTimer);
       unlistenTauriFocus?.();
       document.removeEventListener("contextmenu", onContextMenu);
       document.removeEventListener("copy", onCopy);
@@ -380,7 +410,7 @@ export function useLockdown(options: UseLockdownOptions): UseLockdownResult {
       if (requestFullscreen) tryExitFullscreen();
       void tryTauriInvoke("set_locked", { locked: false });
     };
-  }, [locked, requestFullscreen, clearClipboard, lockOrientation, report]);
+  }, [effectiveLocked, requestFullscreen, clearClipboard, lockOrientation, report]);
 
   return { cheatCount, relock };
 }

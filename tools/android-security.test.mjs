@@ -47,14 +47,17 @@ test('P0-3: OAuth authorization code deep-link requires strict state CSRF valida
 
 test('P0-4: WebView navigation is strictly locked to trusted HTTPS origins', () => {
   assert.ok(mainActivity.includes('TRUSTED_HOSTS = setOf("bestwayec.uz", "api.bestwayec.uz")'), 'Trusted hosts must be strictly bestwayec.uz and api.bestwayec.uz');
-  assert.ok(mainActivity.includes('scheme == "https"'), 'isTrustedOrigin must require HTTPS scheme');
+  assert.match(mainActivity, /uri\.scheme\.equals\("https", ignoreCase = true\) && host in hosts/);
+  assert.ok(mainActivity.includes('(authority == host || authority == "$host:443")'));
+  assert.ok(mainActivity.includes('hasHttpsOrigin(urlOrOrigin, TRUSTED_HOSTS)'));
 
   // handleUrl must route untrusted external domains outside privileged WebView
   const handleUrlMatch = mainActivity.match(/private fun handleUrl[\s\S]*?\{([\s\S]*?)\n    \}/);
   assert.ok(handleUrlMatch, 'handleUrl must exist');
   const handleUrlBody = handleUrlMatch[1];
   assert.ok(handleUrlBody.includes('openCustomTabOrBrowser(uri)'), 'External links must open in Custom Tab / browser');
-  assert.ok(handleUrlBody.includes('TRUSTED_HOSTS.contains(host)'), 'Must check host against TRUSTED_HOSTS');
+  assert.ok(handleUrlBody.includes('if (isTrustedOrigin(url))'), 'Navigation must use the same trusted HTTPS origin check as permissions');
+  assert.ok(handleUrlBody.includes('hasHttpsOrigin(url, GOOGLE_OAUTH_HOSTS)'), 'OAuth initiation must check the complete Google origin');
 });
 
 test('P0-5: Hardware permission requests validate origin and allow only explicit audio/video resources', () => {

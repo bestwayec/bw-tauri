@@ -38,6 +38,9 @@ describe("reading/listening desktop layout", () => {
     expect(examLayout(true, EXAM_SPLIT_MIN_WIDTH)).toBe("split");
     expect(examLayout(true, EXAM_SPLIT_MIN_WIDTH - 1)).toBe("stacked");
     expect(examLayout(true, 1280)).toBe("split");
+    // 1366x768 display at 125% scaling (~1093px) and 1024x768 lab monitors stay split
+    expect(examLayout(true, 1093)).toBe("split");
+    expect(examLayout(true, 1024)).toBe("split");
     expect(examLayout(true, 900)).toBe("stacked");
     // No passage (Listening) is always one column, whatever the width.
     expect(examLayout(false, 2560)).toBe("single");

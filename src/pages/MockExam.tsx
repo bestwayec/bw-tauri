@@ -5,7 +5,7 @@ import ExamLoadError from "@/components/exam/ExamLoadError";
 import RunnerSkeleton from "@/components/exam-ui/RunnerSkeleton";
 import { proctorSupported, type SecurityLogEntry } from "@/lib/proctoring";
 import { cacheExamPayload, readCachedExam } from "@/lib/offline-exam";
-import { hasActiveRecording, hasPendingRecordings, recordingKey, recoverRecording } from '@/lib/durable-recordings';
+import { hasActiveRecording, hasPendingRecordings, hasUnpersistedRecordings, recordingKey, recoverRecording } from '@/lib/durable-recordings';
 import { uploadRetainedMockRecording } from '@/lib/mock-recordings';
 import { post } from '@/lib/api';
 import { mockSectionToParts, type UIPart } from "@/components/exam-ui/model";
@@ -163,7 +163,7 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
     setUploadNotes((n) => ({ ...n, [qid]: "Uploading…" }));
     try {
       await uploadRetainedMockRecording(attemptId, qid, blob, () => {
-        setRecoveryError('Could not persist the recording locally. Keep this page open until upload succeeds.');
+        setRecoveryError('OGOHLANTIRISH: Ovoz yozuvi diskka saqlanmadi (faqat vaqtinchalik xotirada). Ilovani yopmang, serverga to\'liq yuklanishini kuting.');
       });
       setPendingTakes((takes) => { const next = { ...takes }; delete next[qid]; return next; });
       setAudioDoneMap((s) => ({ ...s, [qid]: true }));
@@ -171,7 +171,7 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
     } catch (e) {
       setUploadNotes((n) => ({
         ...n,
-        [qid]: `Upload or local cleanup failed (${friendlyError(e)}). Your take is retained; retry the saved recording below.`,
+        [qid]: `Upload failed (${friendlyError(e)}). Your take is retained; retry upload below.`,
       }));
     } finally { uploading.current.delete(qid); }
   }
@@ -220,7 +220,28 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
       {securityEvent?.kind === "webcam_snapshot" ? ` Last check: ${new Date(securityEvent.at).toLocaleTimeString()}.` : ""}
       {integrity.skipped ? " Camera check skipped for this attempt." : ""}
     </p>
-    {Object.entries(pendingTakes).length > 0 && <section className="card my-2 rounded-xl p-3" aria-label="Saved recordings awaiting upload"><p className="text-sm">Saved recordings must finish uploading before submission.</p>{Object.entries(pendingTakes).map(([qid, blob]) => <button key={qid} type="button" disabled={uploading.current.has(qid)} className="btn-ghost mt-2 rounded-lg px-3 py-2 text-sm" onClick={() => void handleBlob(qid, blob)}>Retry saved recording · {section.groups.flatMap((group) => group.questions).find((question) => question.id === qid)?.number ?? qid}</button>)}</section>}
+    {Object.entries(pendingTakes).length > 0 && (
+      <section className="card my-2 rounded-xl p-3 border border-amber-500/30 bg-amber-500/10" aria-label="Recordings awaiting upload">
+        <p className="text-xs font-semibold text-amber-300">
+          {hasUnpersistedRecordings(attemptId)
+            ? "OGOHLANTIRISH: Ovoz yozuvlari diskka saqlanmagan (faqat vaqtinchalik xotirada). Ilovani yopmasdan turib ularni serverga yuklang!"
+            : "Saqlangan ovoz yozuvlari imtihon topshirilishidan oldin serverga yuklanishi shart."}
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {Object.entries(pendingTakes).map(([qid, blob]) => (
+            <button
+              key={qid}
+              type="button"
+              disabled={uploading.current.has(qid)}
+              className="btn-ghost rounded-lg px-3 py-1.5 text-xs font-semibold"
+              onClick={() => void handleBlob(qid, blob)}
+            >
+              Qayta yuklash · {section.groups.flatMap((group) => group.questions).find((question) => question.id === qid)?.number ?? qid}
+            </button>
+          ))}
+        </div>
+      </section>
+    )}
     <ExamRunner
       attemptId={attemptId}
       candidateName={studentName}
@@ -239,7 +260,15 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
       saveOne={(qid, value) => saveMockAnswer(attemptId, qid, value).then(() => undefined)}
       saveMany={(items) => bulkMockAnswers(attemptId, items).then(() => undefined)}
       submit={async () => {
-        if ((start.exam.specificationVersion || skill === 'speaking') && (hasActiveRecording(attemptId) || await hasPendingRecordings(attemptId))) throw new Error('Finish recording and upload saved takes before submitting.');
+        if (hasActiveRecording(attemptId)) {
+          throw new Error('Ovoz yozish jarayoni davom etmoqda. Iltimos, avval yozishni yakunlang.');
+        }
+        if (hasUnpersistedRecordings(attemptId)) {
+          throw new Error('Imtihonni topshirib bo\'lmaydi: Ovoz yozuvlari diskka saqlanmagan va faqat vaqtinchalik xotirada turibdi. Iltimos, ularni serverga yuklab bo\'lgach topshiring.');
+        }
+        if ((start.exam.specificationVersion || skill === 'speaking') && await hasPendingRecordings(attemptId)) {
+          throw new Error('Finish recording and upload saved takes before submitting.');
+        }
         if (start.exam.specificationVersion && start.flowMode === 'full_test' && skill !== 'speaking') {
           const next = await post<{ currentSkill: MockShapedSection['skill']; serverTime: string; sectionDeadlines: MockStartResult['sectionDeadlines']; overallDeadlineAt: string | null }>(`/mock/attempts/${attemptId}/advance`, {});
           onAdvance?.({ ...start, ...next }); return;

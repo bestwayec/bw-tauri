@@ -10,6 +10,20 @@ import org.junit.Test
 
 class OAuthSecurityManagerTest {
 
+    @Test
+    fun trustedWebViewOriginRequiresDefaultHttpsAuthority() {
+        assertTrue(MainActivity.isTrustedOrigin("https://bestwayec.uz/dashboard"))
+        assertTrue(MainActivity.isTrustedOrigin("HTTPS://API.BESTWAYEC.UZ:443/v1"))
+        listOf(
+            "http://bestwayec.uz",
+            "https://bestwayec.uz:444",
+            "https://user@bestwayec.uz",
+            "https://bestwayec.uz.evil.example",
+            "https://evil.example/?url=https://bestwayec.uz",
+            "https://bestwayec.uz:abc",
+        ).forEach { assertFalse(it, MainActivity.isTrustedOrigin(it)) }
+    }
+
     @Before
     fun setUp() {
         MainActivity.OAuthSecurityManager.clear(null)

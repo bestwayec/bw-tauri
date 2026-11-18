@@ -14,8 +14,12 @@
 
 export type ExamLayout = "split" | "stacked" | "single";
 
-/** Below this window width two reading panes stop being readable side by side. */
-export const EXAM_SPLIT_MIN_WIDTH = 1100;
+/**
+ * Below this window width two reading panes stop being readable side by side.
+ * Tuned to 980px so 1366×768 screens at 125% and 133% Windows display scaling
+ * (~1093px and ~1027px CSS width) remain in CBT dual-column split view.
+ */
+export const EXAM_SPLIT_MIN_WIDTH = 980;
 
 /** Divider bounds and defaults, in percent of the exam width given to the passage. */
 export const SPLIT_MIN = 30;

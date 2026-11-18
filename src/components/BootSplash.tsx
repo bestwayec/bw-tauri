@@ -1,12 +1,21 @@
-import BestWayLogo3D from "./BestWayLogo3D";
+import { lazy, Suspense } from "react";
 import { ErrorBoundary } from "./common/ErrorBoundary";
 import { hasWebGL } from "@/lib/webgl";
+import { isLowEndSystem } from "@/lib/device-capability";
+
+export { isLowEndSystem };
+
+const BestWayLogo3D = lazy(() => import("./BestWayLogo3D"));
 
 type Props = {
   /** When true, plays the quick exit transition (fade + scale). */
   exiting?: boolean;
   /** Override for tests; defaults to the WebGL probe. */
   webgl?: boolean;
+  /** When true (e.g. user prefers reduced motion or low-end device), avoids loading Three.js */
+  reduceMotion?: boolean;
+  /** Explicit override to test or force 3D rendering */
+  force3D?: boolean;
 };
 
 /** Same wordmark as the pre-hydration screen in index.html — no WebGL needed. */
@@ -29,9 +38,13 @@ export function StaticLogo() {
  * regardless of how long session restore / network takes underneath.
  *
  * Just the animated 3D logo, centered and large on the dark brand backdrop.
+ * On 4 GB RAM systems or reduced-motion environments, completely bypasses Three.js
+ * and renders the crisp vector StaticLogo immediately.
  */
-export default function BootSplash({ exiting = false, webgl }: Props) {
-  const canRender3D = webgl ?? hasWebGL();
+export default function BootSplash({ exiting = false, webgl, reduceMotion = false, force3D = false }: Props) {
+  const isLowMemory = !force3D && isLowEndSystem();
+  const canRender3D = force3D || (!reduceMotion && !isLowMemory && (webgl ?? hasWebGL()));
+
   return (
     <div
       className={`bw-boot${exiting ? " is-exiting" : ""}`}
@@ -50,12 +63,9 @@ export default function BootSplash({ exiting = false, webgl }: Props) {
           <div className="bw-logo-enter">
             {canRender3D ? (
               <ErrorBoundary fallback={<StaticLogo />}>
-                <BestWayLogo3D
-                  className="bw-logo-3d bw-logo-3d-solo"
-                  glow={false}
-                  particles={false}
-                  style={{ width: "min(1100px, 94vw)", height: "auto", aspectRatio: "3 / 1" }}
-                />
+                <Suspense fallback={<StaticLogo />}>
+                  <BestWayLogo3D />
+                </Suspense>
               </ErrorBoundary>
             ) : (
               <StaticLogo />

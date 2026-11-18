@@ -59,6 +59,7 @@ export default function ListeningEngine({
   const [duration, setDuration] = useState(0);
   const [reviewLeft, setReviewLeft] = useState<number | null>(null);
   const [vol, setVol] = useState(() => getVolume());
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
   const doneRef = useRef(false);
   const lastTimeRef = useRef(0);
   const onEndedRef = useRef(onEnded);
@@ -74,6 +75,7 @@ export default function ListeningEngine({
     setCurrentTime(0);
     setDuration(0);
     setReviewLeft(null);
+    setPlaybackError(null);
     doneRef.current = false;
     lastTimeRef.current = 0;
   }, [src]);
@@ -145,6 +147,19 @@ export default function ListeningEngine({
     }
   }
 
+  function handleAudioError(e: React.SyntheticEvent<HTMLAudioElement, Event>) {
+    const mediaError = (e.currentTarget as HTMLAudioElement).error;
+    let message = "Audio playback interrupted. Check your headphones or sound settings.";
+    if (mediaError) {
+      if (mediaError.code === 2) {
+        message = "Network error while loading audio. Retrying...";
+      } else if (mediaError.code === 3) {
+        message = "Audio decode error. Please resume playback.";
+      }
+    }
+    setPlaybackError(message);
+  }
+
   // Anti-tamper: prevent pausing while playing in strict mode
   function handlePause() {
     if (strict && started && !ended && audioRef.current) {
@@ -202,6 +217,7 @@ export default function ListeningEngine({
           preload="none"
           onLoadedMetadata={handleLoadedMetadata}
           onEnded={handleEnded}
+          onError={handleAudioError}
           className="exam-audio-el"
         >
           <track kind="captions" />
@@ -226,6 +242,7 @@ export default function ListeningEngine({
         onPause={handlePause}
         onSeeking={handleSeeking}
         onEnded={handleEnded}
+        onError={handleAudioError}
         onContextMenu={(e) => e.preventDefault()}
       >
         <track kind="captions" />
@@ -238,6 +255,28 @@ export default function ListeningEngine({
           </span>
         )}
       </div>
+
+      {playbackError && (
+        <div className="flex items-center justify-between gap-2 my-2 px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs animate-fade-in">
+          <span>⚠️ {playbackError}</span>
+          <button
+            type="button"
+            onClick={async () => {
+              setPlaybackError(null);
+              if (audioRef.current && !ended) {
+                try {
+                  await audioRef.current.play();
+                } catch {
+                  setPlaybackError("Unable to resume playback. Please verify your audio output device.");
+                }
+              }
+            }}
+            className="underline hover:text-white font-semibold ml-auto"
+          >
+            Qayta ijro etish (Resume)
+          </button>
+        </div>
+      )}
 
       {/* Real-time Tamper-Proof Progress Bar */}
       <div className="w-full my-2 pointer-events-none select-none">

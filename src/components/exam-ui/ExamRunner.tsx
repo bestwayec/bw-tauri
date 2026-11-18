@@ -514,6 +514,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
       if (submittingRef.current || submittedRef.current) return;
       submittingRef.current = true;
       setSubmitting(true);
+      setSaveState("submitting");
       setError(null);
       try {
         // Flush every unsaved draft first: the server must hold the final
