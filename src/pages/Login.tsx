@@ -1,3 +1,4 @@
+import { isAllowedClientRole } from "@/lib/auth";
 import { useEffect, useRef, useState } from "react";
 import { API_BASE_URL, clearSession, get, isApiMisconfigured, login, normalizePhone, setSession, type MeResponse } from "@/lib/api";
 import {
@@ -125,8 +126,7 @@ export default function Login({ onLogin }: Props) {
       await clearBrowserLoginState();
       // Fail-closed role gate: missing role must NOT pass.
       const role = String((session.user as { role?: unknown } | undefined)?.role ?? "");
-      const ALLOWED_ROLES = ["student", "teacher", "instructor", "admin", "super_admin"];
-      if (!ALLOWED_ROLES.includes(role)) {
+      if (!isAllowedClientRole(role)) {
         await clearSession();
         setError(`Access denied: unauthorized role (${role || "none"}).`);
         setBusy("idle");
@@ -257,8 +257,7 @@ export default function Login({ onLogin }: Props) {
       const session = await exchangeCode(p.code, s.verifier, s.deviceId);
       await clearBrowserLoginState();
       const role = String((session.user as { role?: unknown } | undefined)?.role ?? "");
-      const ALLOWED_ROLES = ["student", "teacher", "instructor", "admin", "super_admin"];
-      if (!ALLOWED_ROLES.includes(role)) {
+      if (!isAllowedClientRole(role)) {
         await clearSession();
         setError(`Access denied: unauthorized role (${role || "none"}).`);
         setBusy("idle");
@@ -309,8 +308,7 @@ export default function Login({ onLogin }: Props) {
       const session = await login(normalizedPhone, password);
       // Fail-closed: missing/unknown role must NOT default to student.
       const role = String(session.user?.role ?? "");
-      const ALLOWED_ROLES = ["student", "teacher", "instructor", "admin", "super_admin"];
-      if (!ALLOWED_ROLES.includes(role)) {
+      if (!isAllowedClientRole(role)) {
         await clearSession();
         setError(`Access denied: unauthorized role (${role || "none"}).`);
         setBusy("idle");

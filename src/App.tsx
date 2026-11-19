@@ -36,7 +36,7 @@ import ClickSpark from "@/components/ClickSpark";
 import CrashRecovery from "@/components/CrashRecovery";
 import ResumeExamModal, { persistActiveMockSession, persistActiveTestSession, clearActiveMockSession } from "@/components/ResumeExamModal";
 import { logout } from "@/lib/api";
-import { isAdminRole, isStaffRole, isTeacherRole } from "@/lib/auth";
+import { isAdminRole, isAllowedClientRole, isStaffRole, isTeacherRole, normalizeRole } from "@/lib/auth";
 import { useSessionStore } from "@/lib/session-store";
 import { tryTauriInvoke } from "@/hooks/useLockdown";
 import { usePrograms } from '@/lib/programs';
@@ -121,20 +121,8 @@ export default function App() {
     completed: number;
     avgScore: number | null;
   } | null>(null);
-  const cachedStudent = useRef<string | null>(null);
+  const sessionIdentity = useRef<string | null>(null);
   useEffect(() => { setStats(null); }, [programs.data?.activeProgram]);
-  useEffect(() => {
-    const id = student?.id ?? null;
-    if (cachedStudent.current === id) return;
-    if (id === null) queryClient.clear();
-    else queryClient.removeQueries({ predicate: (query) => query.queryKey[1] !== id });
-    if (cachedStudent.current !== null) {
-      setActiveTest(null); setActiveStart(null); setActiveMock(null); setActiveMockStart(null);
-      setActiveMockSection(null); setLastMockResult(null); setLastScore(null); setStats(null);
-    }
-    cachedStudent.current = id;
-  }, [student?.id, queryClient]);
-
   const [introLeaving, setIntroLeaving] = useState(false);
   const [introDone, setIntroDone] = useState(false);
   useEffect(() => {
@@ -184,15 +172,33 @@ export default function App() {
     let dead = false;
     const applySession = (status: string, profile: { id: string; name?: string | null; phone?: string | null; role?: string } | null) => {
       if (dead) return;
-      if (status !== "ready" || !profile?.id) {
-        if (status === "logged-out") {
+      if (status === "ready" || status === "logged-out") {
+        const allowed = status === "ready" && profile?.id && isAllowedClientRole(profile.role);
+        const identity = allowed ? JSON.stringify([profile.id, normalizeRole(profile.role)]) : null;
+        if (sessionIdentity.current !== identity) {
+          queryClient.clear();
+          setActiveTest(null);
+          setActiveStart(null);
+          setActiveMock(null);
+          setActiveMockStart(null);
+          setActiveMockSection(null);
+          setLastMockResult(null);
+          setLastScore(null);
+          setStats(null);
+          setShowExitConfirm(false);
+          setRoute("login");
+          sessionIdentity.current = identity;
+        }
+        if (!allowed) {
           setStudent(null);
           setRoute("login");
         }
+      }
+      if (status !== "ready" || !profile?.id || !isAllowedClientRole(profile.role)) {
         setRestoring(false);
         return;
       }
-      const role = profile.role || "student";
+      const role = normalizeRole(profile.role);
       setStudent({
         id: profile.id,
         name: typeof profile.name === "string" ? profile.name : null,
@@ -217,7 +223,7 @@ export default function App() {
       dead = true;
       unsub();
     };
-  }, []);
+  }, [queryClient]);
 
   const navigate = (next: Route) => {
     const isExamRunning =
@@ -358,8 +364,9 @@ export default function App() {
   };
 
   const handleLogin = (s: Student) => {
-    setStudent(s);
-    const role = s.role || "student";
+    if (!isAllowedClientRole(s.role)) return;
+    const role = normalizeRole(s.role);
+    setStudent({ ...s, role });
     if (isTeacherRole(role)) setRoute("proctoring");
     else if (isAdminRole(role)) setRoute("centerOverview");
     else setRoute("dashboard");
@@ -519,7 +526,7 @@ export default function App() {
           <ClickSpark sparkColor="#10B981" sparkSize={10} sparkRadius={22} sparkCount={8} duration={420} className="flex min-h-0 flex-1 flex-col">
           <main className="min-h-0 flex-1 overflow-y-auto px-6 pb-8 pt-6 2xl:px-10">
             <motion.div
-              key={activeRoute + (activeRoute === "result" ? historyKey : "")}
+              key={`${student?.id}:${activeRoute}:${activeRoute === "result" ? historyKey : ""}`}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.18, ease: "easeOut" }}

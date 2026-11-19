@@ -165,3 +165,61 @@ export type VocabularySubmission = {
   answer: string;
 }>;
 };
+
+export type BestwayRole = "student" | "teacher" | "parent" | "admin" | "super_admin";
+
+export type RosterMemberInput = {
+  studentId: string;
+};
+
+export type RosterMemberAdded = {
+  groupId: string;
+  studentId: string;
+  added: boolean;
+};
+
+export type RosterMemberRemoved = {
+  removed: boolean;
+};
+
+export type AttendanceMark = "present" | "absent" | "late";
+
+export type ClassroomAttendanceRow = {
+  studentId: string;
+  date: string;
+  state: AttendanceMark;
+};
+
+export type ClassroomAttendanceInput = {
+  groupId: string;
+  date: string;
+  records: Array<{
+  studentId: string;
+  state: "present" | "absent" | "late" | "blank" | "empty";
+}>;
+};
+
+export type ClassroomAttendanceSaved = {
+  updated: number;
+  cleared: number;
+};
+
+export type StandaloneVocabularyQuiz = {
+  sessionId: string;
+  setId: string;
+  setTitle: string;
+  level: string;
+  mode: VocabularyMode;
+  totalQuestions: number;
+  questions: Array<VocabularyQuestion>;
+};
+
+export type StandaloneVocabularySubmission = {
+  sessionId?: string;
+  mode?: VocabularyMode;
+  answers: Array<{
+  wordId: string;
+  answer: string;
+  type?: string;
+}>;
+};

@@ -1,4 +1,6 @@
-export type ClientRole = "student" | "teacher" | "instructor" | "admin" | "super_admin";
+import type { BestwayRole } from "./group-contract.generated";
+
+export type ClientRole = Exclude<BestwayRole, "parent"> | "instructor";
 
 export const ALLOWED_CLIENT_ROLES: readonly ClientRole[] = [
   "student",
