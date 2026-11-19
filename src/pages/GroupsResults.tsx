@@ -187,8 +187,8 @@ export default function GroupsResults({ userId, role }: { userId: string; role?:
           )}
         </div>
       )}
-      {!groups.isError && group && !archived && <ClassroomWorkspace key={group.id} group={group} userId={userId} role={role} />}
-      {!groups.isError && group && <ClassroomHistory key={group.id} groupId={group.id} userId={userId} />}
+      {!groups.isError && group && !archived && <ClassroomWorkspace key={`workspace-${group.id}`} group={group} userId={userId} role={role} />}
+      {!groups.isError && group && <ClassroomHistory key={`history-${group.id}`} groupId={group.id} userId={userId} />}
     </section>
   );
 }
