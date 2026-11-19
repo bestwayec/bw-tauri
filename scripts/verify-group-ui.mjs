@@ -28,7 +28,7 @@ if (!phone || !password) throw new Error("Set the disposable local teacher crede
     await field.fill(name);
     await page.locator('form').filter({has:field}).locator('select').selectOption('thu');
     const form = page.locator('form').filter({has:field});
-    const groups = new URL('groups', api).href;
+    const groups = new URL('groups', api.href.replace(/\/?$/, '/')).href;
     await page.route(groups, async route => {
       if (route.request().method() === 'POST') await route.abort();
       else await route.continue();
