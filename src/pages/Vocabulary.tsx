@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, patch, post } from "../lib/api";
 import type {
@@ -98,15 +98,35 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
   });
   const [revealed, setRevealed] = useState(false);
   const [muted, setMuted] = useState(false);
+  const [audioErrorFor, setAudioErrorFor] = useState<string>();
+  const audio = useRef<HTMLAudioElement>(null);
   const order = progress.data?.order.length ? progress.data.order : words.data?.map(word => word.id) ?? [];
   const index = Math.max(0, order.indexOf(progress.data?.lastWordId ?? ""));
   const word = words.data?.find(item => item.id === order[index]);
-  const canSpeak = typeof window !== "undefined" && "speechSynthesis" in window;
+  const canSpeak = !!window.speechSynthesis && !!window.SpeechSynthesisUtterance;
 
-  function speak() {
-    if (!canSpeak || muted || !word) return;
+  async function pronounce() {
+    if (muted || !word) return;
+    setAudioErrorFor(undefined);
+    const recording = audio.current;
+    if (recording) {
+      try {
+        if (recording.readyState) recording.currentTime = 0;
+        await recording.play();
+        return;
+      } catch (error) {
+        if (recording !== audio.current || recording.muted || (error instanceof DOMException && error.name === "AbortError")) return;
+      }
+    }
+    if (!canSpeak) {
+      setAudioErrorFor(word.id);
+      return;
+    }
     const utterance = new SpeechSynthesisUtterance(word.english);
     utterance.lang = "en-US";
+    utterance.onerror = event => {
+      if (event.error !== "canceled" && event.error !== "interrupted") setAudioErrorFor(word.id);
+    };
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
   }
@@ -166,15 +186,17 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
                       aria-pressed={progress.data.familiarity[word.id] === status}
                       onClick={() => saveProgress.mutate({ lastWordId: word.id, wordId: word.id, status })}>{status === "known" ? "Known" : "Need practice"}</button>
                   ))}
-                  {canSpeak && <>
-                    <button className={control} type="button" onClick={speak} disabled={muted}>Pronounce</button>
+                  {(word.audioUrl || canSpeak) && <>
+                    <button className={control} type="button" onClick={() => void pronounce()} disabled={muted}>Pronounce</button>
                     <button className={control} type="button" aria-pressed={muted} onClick={() => {
-                      window.speechSynthesis.cancel();
+                      audio.current?.pause();
+                      window.speechSynthesis?.cancel();
                       setMuted(!muted);
                     }}>{muted ? "Unmute" : "Mute"}</button>
                   </>}
                 </div>
-                {word.audioUrl && <audio key={word.id} controls preload="none" src={word.audioUrl} aria-label="Vocabulary audio" />}
+                {word.audioUrl && <audio key={word.id} ref={audio} muted={muted} preload="none" src={word.audioUrl} />}
+                {audioErrorFor === word.id && <p role="status">Pronunciation audio is unavailable.</p>}
                 {saveProgress.isPending && <p role="status">Saving study progress…</p>}
                 {saveProgress.isSuccess && <p role="status">Study progress saved</p>}
                 {saveProgress.isError && <p role="alert">{errorMessage(saveProgress.error)}</p>}

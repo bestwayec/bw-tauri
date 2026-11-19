@@ -66,12 +66,12 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
     enabled: Boolean(reportId),
   });
   const exportReport = useMutation({
-    mutationFn: () => downloadBlob(reportPath + "?download=csv"),
-    onSuccess: ({ blob, filename }) => {
+    mutationFn: (format: "csv" | "xlsx") => downloadBlob(reportPath + "?download=" + format),
+    onSuccess: ({ blob, filename }, format) => {
       const source = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = source;
-      anchor.download = filename || "vocabulary-results.csv";
+      anchor.download = filename || `vocabulary-results.${format}`;
       anchor.click();
       setTimeout(() => URL.revokeObjectURL(source), 0);
     },
@@ -273,7 +273,8 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
         {reportId && report.data && !report.isError && <div className="space-y-2 rounded-lg border border-white/15 p-3">
           <p>{report.data.completedCount} / {report.data.assignedCount} o‘quvchi yakunladi</p>
           <p>{report.data.overdueCount} ta muddati o‘tgan</p>
-          <button className={inputStyle} type="button" disabled={exportReport.isPending} onClick={() => exportReport.mutate()}>CSV</button>
+          <button className={inputStyle} type="button" disabled={exportReport.isPending} onClick={() => exportReport.mutate("csv")}>CSV</button>
+          <button className={inputStyle} type="button" disabled={exportReport.isPending} onClick={() => exportReport.mutate("xlsx")}>XLSX</button>
           {exportReport.isError && <p role="alert">{errorMessage(exportReport.error)}</p>}
           <label className="grid gap-1">Search results
             <input className={inputStyle} value={reportSearch} onChange={event => { setReportSearch(event.target.value); setReportPage(1); }} />

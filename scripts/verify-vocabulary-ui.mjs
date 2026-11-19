@@ -84,6 +84,11 @@ async function answer(page, questions, resolve, button = 'Submit answers') {
     await learner.getByRole('button',{name:/Vocabulary/}).first().click();
     await expect(learner.getByRole('listitem').filter({hasText:collectionTitle})).toBeVisible();
     await learner.getByRole('listitem').filter({hasText:collectionTitle}).getByRole('button',{name:'Study vocabulary'}).click();
+    const mute = learner.getByRole('button',{name:'Mute',exact:true});
+    await mute.press('Enter');
+    await expect(learner.getByRole('button',{name:'Pronounce',exact:true})).toBeDisabled();
+    await learner.getByRole('button',{name:'Unmute',exact:true}).press('Enter');
+    await expect(learner.getByRole('button',{name:'Pronounce',exact:true})).toBeEnabled();
     const flash = learner.getByRole('button',{name:/^English item/}).first();
     await flash.click();
     await expect(learner.getByRole('button',{name:/^Uzbek item/}).first()).toBeVisible();
@@ -127,6 +132,11 @@ async function answer(page, questions, resolve, button = 'Submit answers') {
     await teacherDesktop.getByRole('combobox').first().selectOption(group.id);
     await teacherDesktop.getByRole('button',{name:'Lug‘at natijalari'}).click();
     await expect(teacherDesktop.getByText(studentName+' · 100%',{exact:true})).toBeVisible();
+    for (const page of [site, teacherDesktop]) {
+      const download = page.waitForEvent('download');
+      await page.getByRole(page === site ? 'link' : 'button',{name:'XLSX',exact:true}).last().click();
+      expect((await download).suggestedFilename()).toBe('vocabulary-results.xlsx');
+    }
     console.log('PASS website and desktop teacher reports show the same server result');
 
     const uniqueReview = 'local review '+Date.now();
