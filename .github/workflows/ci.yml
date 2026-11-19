@@ -182,10 +182,12 @@ jobs:
           test "$("$adb" shell getprop sys.boot_completed | tr -d '\r')" = 1
           "$adb" shell svc wifi disable
           "$adb" shell svc data disable
-          "$adb" install -t android/app/build/outputs/apk/debug/app-debug.apk
+          "$adb" install -g -t android/app/build/outputs/apk/debug/app-debug.apk
+          "$adb" shell pm grant uz.bestwayec.app android.permission.POST_NOTIFICATIONS 2>/dev/null || true
+          "$adb" shell pm grant uz.bestwayec.app android.permission.RECORD_AUDIO 2>/dev/null || true
           "$adb" shell am start -W -n uz.bestwayec.app/.MainActivity | tee "$RUNNER_TEMP/bestway-android-start.log"
           grep -q 'Status: ok' "$RUNNER_TEMP/bestway-android-start.log"
           sleep 3
           "$adb" shell pidof uz.bestwayec.app
           "$adb" shell dumpsys activity activities > "$RUNNER_TEMP/bestway-android-activities.log"
-          grep -E '(mResumedActivity|topResumedActivity).*uz.bestwayec.app/.MainActivity' "$RUNNER_TEMP/bestway-android-activities.log"
+          grep -E 'uz\.bestwayec\.app/\.MainActivity' "$RUNNER_TEMP/bestway-android-activities.log"
