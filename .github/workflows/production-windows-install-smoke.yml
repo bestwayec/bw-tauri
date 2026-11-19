@@ -1,0 +1,101 @@
+name: Production Windows installer smoke test
+
+on:
+  push:
+    branches: [release-preflight/v1.0.13]
+    paths: [.github/workflows/production-windows-install-smoke.yml]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  install-and-upgrade:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - name: Download verified previous stable and main-commit installers
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $root = $env:RUNNER_TEMP
+          $stable = Join-Path $root 'previous.exe'
+          $archive = Join-Path $root 'main-nsis.zip'
+          Invoke-WebRequest 'https://github.com/bestwayec/bw-tauri/releases/download/v1.0.11/Bestway.App_1.0.11_x64-setup.exe' -OutFile $stable
+          if ((Get-FileHash $stable).Hash -ne 'd0f92cd8572880768b174f70ab906b45453cd3833a275ca3fca749f080326f12') {
+            throw 'Previous installer SHA-256 mismatch'
+          }
+          $metadata = gh api repos/bestwayec/bw-tauri/actions/artifacts/14465184036 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $metadata.workflow_run.head_sha -ne '7f97f9ed1a480f27fd2b83d32a4defeb26b936b7') {
+            throw 'Expected installer artifact from the verified main commit'
+          }
+          cmd /d /c "gh api repos/bestwayec/bw-tauri/actions/artifacts/14465184036/zip > ""$archive"""
+          if ($LASTEXITCODE -ne 0 -or (Get-FileHash $archive).Hash -ne 'a0d72a96ada832ce6f82a8056cebb55070991e812c52d9a6ddc8a4c941a511a6') {
+            throw 'Main installer archive SHA-256 mismatch'
+          }
+          Expand-Archive $archive (Join-Path $root 'main-nsis')
+
+      - name: Fresh installation of the main build
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:RUNNER_TEMP 'bestway-clean'
+          $installer = @(Get-ChildItem (Join-Path $env:RUNNER_TEMP 'main-nsis') -Filter '*.exe')
+          if ($installer.Count -ne 1) { throw 'Expected one NSIS installer' }
+          $result = Start-Process $installer[0].FullName -ArgumentList @('/S', "/D=$target") -Wait -PassThru
+          if ($result.ExitCode) { throw "NSIS exited $($result.ExitCode)" }
+          $app = Join-Path $target 'bestway-app.exe'
+          if ((Get-Item $app).VersionInfo.ProductVersion -notmatch '^1\.0\.12(?:\.0)?$') {
+            throw 'Unexpected installed product version'
+          }
+          $process = Start-Process $app -PassThru
+          try {
+            $deadline = (Get-Date).AddSeconds(45)
+            do {
+              Start-Sleep -Seconds 2
+              $process.Refresh()
+              if ($process.HasExited) { throw "Installed application exited $($process.ExitCode)" }
+            } until ($process.MainWindowHandle -ne 0 -or (Get-Date) -ge $deadline)
+            if ($process.MainWindowHandle -eq 0) { throw 'Installed application never opened a window' }
+            Write-Host 'Clean install opened a native window'
+          } finally {
+            Stop-Process -Id $process.Id -ErrorAction SilentlyContinue
+          }
+          $uninstall = Get-ChildItem $target -Filter 'uninstall*.exe'
+          if (-not $uninstall) { throw 'Missing NSIS uninstaller' }
+          $result = Start-Process $uninstall.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($result.ExitCode) { throw "Uninstaller exited $($result.ExitCode)" }
+          for ($i = 0; $i -lt 30 -and (Test-Path $app); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path $app) { throw 'The clean install was not removed' }
+
+      - name: Upgrade the previous stable installation
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:RUNNER_TEMP 'bestway-upgrade'
+          $app = Join-Path $target 'bestway-app.exe'
+          $stable = Join-Path $env:RUNNER_TEMP 'previous.exe'
+          $result = Start-Process $stable -ArgumentList @('/S', "/D=$target") -Wait -PassThru
+          if ($result.ExitCode) { throw "Previous NSIS exited $($result.ExitCode)" }
+          if ((Get-Item $app).VersionInfo.ProductVersion -notmatch '^1\.0\.11(?:\.0)?$') {
+            throw 'Expected an installed v1.0.11 baseline'
+          }
+          $before = (Get-FileHash $app).Hash
+          $installer = Get-ChildItem (Join-Path $env:RUNNER_TEMP 'main-nsis') -Filter '*.exe'
+          $result = Start-Process $installer.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($result.ExitCode) { throw "Upgrade NSIS exited $($result.ExitCode)" }
+          if ((Get-Item $app).VersionInfo.ProductVersion -notmatch '^1\.0\.12(?:\.0)?$' -or (Get-FileHash $app).Hash -eq $before) {
+            throw 'Upgrade did not replace the baseline executable in its original directory'
+          }
+          $process = Start-Process $app -PassThru
+          try {
+            $deadline = (Get-Date).AddSeconds(45)
+            do {
+              Start-Sleep -Seconds 2
+              $process.Refresh()
+              if ($process.HasExited) { throw "Upgraded application exited $($process.ExitCode)" }
+            } until ($process.MainWindowHandle -ne 0 -or (Get-Date) -ge $deadline)
+            if ($process.MainWindowHandle -eq 0) { throw 'Upgraded application never opened a window' }
+            Write-Host 'Upgrade replaced v1.0.11 in place and opened a native window'
+          } finally {
+            Stop-Process -Id $process.Id -ErrorAction SilentlyContinue
+          }
