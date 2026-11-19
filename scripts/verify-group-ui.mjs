@@ -24,18 +24,19 @@ if (!phone || !password) throw new Error("Set the disposable local teacher crede
     await expect(page.getByRole('heading',{name:'Guruhlar va natijalar'})).toBeVisible();
     await page.getByRole('button',{name:'Yangi guruh yaratish'}).click();
     const name = 'Local Stage 01 ' + Date.now();
-    const field = page.getByRole('textbox',{name:'Guruh nomi'});
+    const field = page.getByRole('textbox',{name:'Guruh nomi',exact:true});
     await field.fill(name);
-    await page.locator('form select').selectOption('thu');
+    await page.locator('form').filter({has:field}).locator('select').selectOption('thu');
+    const form = page.locator('form').filter({has:field});
     const groups = new URL('groups', api).href;
     await page.route(groups, async route => {
       if (route.request().method() === 'POST') await route.abort();
       else await route.continue();
     });
     await page.getByRole('button',{name:'Saqlash',exact:true}).click();
-    await expect(page.locator('form [role=alert]')).toBeVisible();
+    await expect(form.locator('[role=alert]')).toBeVisible();
     await expect(field).toHaveValue(name);
-    await expect(page.locator('form select')).toHaveValue('thu');
+    await expect(form.locator('select')).toHaveValue('thu');
     await expect(page.getByRole('option',{name})).toHaveCount(0);
     console.log('PASS simulated transport failure leaves form values and creates no displayed group');
     await page.unroute(groups);

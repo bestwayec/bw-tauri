@@ -810,7 +810,7 @@ mod tests {
         write_file_store(dir, &data).unwrap();
         assert_eq!(read_file_store(dir), Some(data));
         assert!(
-            !session_file(&dir).with_extension("tmp").exists()
+            !session_file(dir).with_extension("tmp").exists()
                 && !dir.join("session.json.tmp").exists()
         );
         remove_file_store(dir);

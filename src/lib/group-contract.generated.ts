@@ -96,6 +96,11 @@ export type VocabularyCard = {
   uzbek: string;
   contextSentence: string | null;
   partOfSpeech: string | null;
+  definition?: string;
+  synonyms?: Array<string>;
+  level?: string;
+  pronunciation?: string;
+  audioUrl?: string;
 };
 
 export type VocabularyQuestion = {
@@ -145,12 +150,20 @@ export type VocabularyAssignmentReports = {
   totalWords: number;
   percentage: number;
   isPassed: boolean;
+  currentlyEnrolled: boolean;
 }>;
   missedWords: Array<{
   english: string;
   count: number;
 }>;
   overdueCount: number;
+  page: number;
+  hasNext: boolean;
+  overdueStudents: Array<{
+  studentId: string;
+  name: string;
+  currentlyEnrolled: boolean;
+}>;
 };
 
 export type ClassroomVocabularyCollection = {
@@ -285,5 +298,77 @@ export type ClassroomStudentHistory = {
   skill: string;
   approved_feedback: unknown;
   final_score: number | null;
+}>;
+};
+
+export type VocabularyCollectionWordInput = {
+  id?: string;
+  english: string;
+  uzbek: string;
+  contextSentence?: string | null;
+  partOfSpeech?: string | null;
+  definition?: string;
+  synonyms?: Array<string>;
+  level?: string;
+  pronunciation?: string;
+  audioUrl?: string;
+};
+
+export type VocabularyCollection = {
+  id: string;
+  revision: number;
+  title: string;
+  description: string | null;
+  isPublic: boolean;
+  level: string;
+  words: Array<VocabularyCard>;
+};
+
+export type VocabularyCollectionEdit = {
+  revision: number;
+  title?: string;
+  description?: string;
+  isPublic?: boolean;
+  level?: string;
+  words?: Array<VocabularyCollectionWordInput>;
+};
+
+export type VocabularyFlashcards = {
+  lastWordId: string;
+  familiarity: Record<string, "known" | "practice">;
+  order: Array<string>;
+  lastStudiedAt: string | null;
+};
+
+export type VocabularyFlashcardChange = {
+  lastWordId?: string;
+  wordId?: string;
+  status?: "known" | "practice";
+  order?: Array<string>;
+};
+
+export type VocabularyReviewHistory = {
+  page: number;
+  hasNext: boolean;
+  entries: Array<{
+  id: number;
+  review__word__english: string;
+  reviewed_at: string;
+  next_review_at: string;
+  correct: boolean;
+  interval_days: number;
+  mastered: boolean;
+}>;
+};
+
+export type VocabularyLearnerHistory = {
+  page: number;
+  hasNext: boolean;
+  entries: Array<{
+  assignment_id: string;
+  assignment__title: string;
+  score_percent: number;
+  completed_at: string;
+  is_passed: boolean;
 }>;
 };

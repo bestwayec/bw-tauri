@@ -1,9 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { get, post } from "../lib/api";
+import { get, patch, post } from "../lib/api";
 import type {
-  VocabularyCard, VocabularyMode, VocabularyQuestion, VocabularyResult,
-  VocabularyReview, VocabularySession, VocabularySubmission,
+  VocabularyCard, VocabularyFlashcardChange, VocabularyFlashcards, VocabularyMode, VocabularyQuestion, VocabularyResult,
+  VocabularyLearnerHistory, VocabularyReview, VocabularyReviewHistory, VocabularySession, VocabularySubmission,
 } from "../lib/group-contract.generated";
 
 const control = "rounded-lg border border-white/15 bg-surface px-3 py-2 text-sm disabled:opacity-50";
@@ -85,11 +85,22 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
     queryFn: ({ signal }) => get<VocabularyCard[]>(root + "/words", undefined, { signal }),
   });
   const session = useMutation({ mutationFn: (mode: VocabularyMode) => post<VocabularySession>(root, { mode }) });
-  const [index, setIndex] = useState(0);
+  const queryClient = useQueryClient();
+  const progressKey = ["vocabulary-flashcards", userId, id] as const;
+  const progress = useQuery({
+    queryKey: progressKey,
+    queryFn: ({ signal }) => get<VocabularyFlashcards>(root + "/flashcards", undefined, { signal }),
+    refetchOnWindowFocus: true,
+  });
+  const saveProgress = useMutation({
+    mutationFn: (body: VocabularyFlashcardChange) => patch<VocabularyFlashcards>(root + "/flashcards", body),
+    onSuccess: data => queryClient.setQueryData(progressKey, data),
+  });
   const [revealed, setRevealed] = useState(false);
-  const [known, setKnown] = useState<Set<string>>(new Set());
   const [muted, setMuted] = useState(false);
-  const word = words.data?.[index];
+  const order = progress.data?.order.length ? progress.data.order : words.data?.map(word => word.id) ?? [];
+  const index = Math.max(0, order.indexOf(progress.data?.lastWordId ?? ""));
+  const word = words.data?.find(item => item.id === order[index]);
   const canSpeak = typeof window !== "undefined" && "speechSynthesis" in window;
 
   function speak() {
@@ -101,8 +112,18 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
   }
 
   function cardBy(step: number) {
-    const count = words.data?.length ?? 0;
-    if (count) setIndex(current => (current + step + count) % count);
+    if (!order.length || saveProgress.isPending) return;
+    saveProgress.mutate({ lastWordId: order[(index + step + order.length) % order.length] });
+    setRevealed(false);
+  }
+
+  function shuffle() {
+    const shuffled = [...order];
+    for (let index = shuffled.length - 1; index > 0; index--) {
+      const other = Math.floor(Math.random() * (index + 1));
+      [shuffled[index], shuffled[other]] = [shuffled[other], shuffled[index]];
+    }
+    saveProgress.mutate({ order: shuffled, lastWordId: shuffled[0] });
     setRevealed(false);
   }
 
@@ -120,24 +141,31 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
           {session.isError && <p role="alert">{errorMessage(session.error)}</p>}
           <section className="card space-y-3 rounded-2xl p-4">
             <h2 className="text-lg font-semibold">Flashcards</h2>
-            {words.isPending && <p role="status">Loading words…</p>}
+            {(words.isPending || progress.isPending) && <p role="status">Loading words…</p>}
             {words.isError && <p role="alert">{errorMessage(words.error)} <button className={control} onClick={() => void words.refetch()}>Retry</button></p>}
-            {word && (
+            {progress.isError && <p role="alert">{errorMessage(progress.error)} <button className={control} onClick={() => void progress.refetch()}>Retry</button></p>}
+            {word && progress.isSuccess && (
               <>
                 <button className={control + " min-h-20 w-full text-lg"} type="button" aria-pressed={revealed} onClick={() => setRevealed(!revealed)}>
                   {revealed ? word.uzbek : word.english}
                 </button>
-                {revealed && word.contextSentence && <p>{word.contextSentence}</p>}
+                {revealed && <div className="space-y-1 text-sm">
+                  {word.definition && <p>{word.definition}</p>}
+                  {word.contextSentence && <p>{word.contextSentence}</p>}
+                  {word.synonyms?.length ? <p>{word.synonyms.join(", ")}</p> : null}
+                  {word.pronunciation && <p>{word.pronunciation}</p>}
+                  {word.level && <p>{word.level}</p>}
+                </div>}
                 <div className="flex flex-wrap items-center gap-2">
-                  <button className={control} type="button" onClick={() => cardBy(-1)}>Previous card</button>
-                  <span aria-live="polite">{index + 1} / {words.data?.length}</span>
-                  <button className={control} type="button" onClick={() => cardBy(1)}>Next card</button>
-                  <button className={control} type="button" onClick={() => {
-                    const updated = new Set(known);
-                    if (updated.has(word.id)) updated.delete(word.id);
-                    else updated.add(word.id);
-                    setKnown(updated);
-                  }}>{known.has(word.id) ? "Needs practice" : "Mark known for this study session"}</button>
+                  <button className={control} type="button" disabled={saveProgress.isPending} onClick={() => cardBy(-1)}>Previous card</button>
+                  <span aria-live="polite">{index + 1} / {order.length}</span>
+                  <button className={control} type="button" disabled={saveProgress.isPending} onClick={() => cardBy(1)}>Next card</button>
+                  <button className={control} type="button" disabled={saveProgress.isPending} onClick={shuffle}>Shuffle cards</button>
+                  {(["known", "practice"] as const).map(status => (
+                    <button className={control} key={status} type="button" disabled={saveProgress.isPending}
+                      aria-pressed={progress.data.familiarity[word.id] === status}
+                      onClick={() => saveProgress.mutate({ lastWordId: word.id, wordId: word.id, status })}>{status === "known" ? "Known" : "Need practice"}</button>
+                  ))}
                   {canSpeak && <>
                     <button className={control} type="button" onClick={speak} disabled={muted}>Pronounce</button>
                     <button className={control} type="button" aria-pressed={muted} onClick={() => {
@@ -146,12 +174,43 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
                     }}>{muted ? "Unmute" : "Mute"}</button>
                   </>}
                 </div>
+                {word.audioUrl && <audio key={word.id} controls preload="none" src={word.audioUrl} aria-label="Vocabulary audio" />}
+                {saveProgress.isPending && <p role="status">Saving study progress…</p>}
+                {saveProgress.isSuccess && <p role="status">Study progress saved</p>}
+                {saveProgress.isError && <p role="alert">{errorMessage(saveProgress.error)}</p>}
               </>
             )}
           </section>
         </>
       )}
     </div>
+  );
+}
+
+function LearningHistory({ userId, review = false }: { userId: string; review?: boolean }) {
+  const [page, setPage] = useState(1);
+  const history = useQuery<VocabularyReviewHistory | VocabularyLearnerHistory>({
+    queryKey: ["vocabulary-history", userId, review, page],
+    queryFn: () => review
+      ? get<VocabularyReviewHistory>("/v1/vocabulary/srs/history", { page, limit: 10 })
+      : get<VocabularyLearnerHistory>("/v1/student/vocabulary/history", { page, limit: 10 }),
+  });
+  return (
+    <section className="card space-y-3 rounded-2xl p-4">
+      <h2 className="font-semibold">{review ? "Review history" : "Vocabulary results history"}</h2>
+      {history.isPending && <p role="status">Loading history…</p>}
+      {history.isError && <p role="alert">{errorMessage(history.error)} <button className={control} onClick={() => void history.refetch()}>Retry</button></p>}
+      {history.data && !history.data.entries.length && <p>No activity yet.</p>}
+      <ul className="space-y-1">{history.data?.entries.map(row => "review__word__english" in row ? (
+        <li key={row.id}>{row.review__word__english} · {row.correct ? "Correct" : "Incorrect"} · {row.interval_days} day(s) · {row.mastered ? "Mastered" : "Learning"} · Next {new Date(row.next_review_at).toLocaleString()}</li>
+      ) : (
+        <li key={row.assignment_id}>{row.assignment__title} · {row.score_percent}% · {new Date(row.completed_at).toLocaleDateString()}</li>
+      ))}</ul>
+      {history.data && (page > 1 || history.data.hasNext) && <div className="flex gap-2">
+        <button className={control} disabled={page === 1} onClick={() => setPage(page - 1)}>Previous</button>
+        <button className={control} disabled={!history.data.hasNext} onClick={() => setPage(page + 1)}>Next</button>
+      </div>}
+    </section>
   );
 }
 
@@ -186,7 +245,10 @@ export default function Vocabulary({ userId }: { userId: string }) {
           </li>
         ))}</ul>
       </section>
-      {assignment && <Assignment key={assignment.id} id={assignment.id} userId={userId} onComplete={() => void queryClient.invalidateQueries({ queryKey: taskKey })} />}
+      {assignment && <Assignment key={assignment.id} id={assignment.id} userId={userId} onComplete={() => {
+        void queryClient.invalidateQueries({ queryKey: taskKey });
+        void queryClient.invalidateQueries({ queryKey: ["vocabulary-history", userId] });
+      }} />}
       <section className="card space-y-3 rounded-2xl p-4">
         <h2 className="text-lg font-semibold">Daily review</h2>
         <button className={control} type="button" disabled={review.isPending} onClick={() => { setAssignmentId(""); review.mutate(); }}>
@@ -194,9 +256,11 @@ export default function Vocabulary({ userId }: { userId: string }) {
         </button>
         {review.isError && <p role="alert">{errorMessage(review.error)}</p>}
         {review.data && (review.data.sessionId ? (
-          <Practice key={review.data.sessionId} sessionId={review.data.sessionId} questions={review.data.questions} path="/v1/vocabulary/srs/submit" onComplete={() => undefined} />
+          <Practice key={review.data.sessionId} sessionId={review.data.sessionId} questions={review.data.questions} path="/v1/vocabulary/srs/submit" onComplete={() => void queryClient.invalidateQueries({ queryKey: ["vocabulary-history", userId] })} />
         ) : <p>No words are due for review.</p>)}
       </section>
+      <LearningHistory userId={userId} />
+      <LearningHistory userId={userId} review />
     </section>
   );
 }

@@ -17,6 +17,7 @@ const Locked = lazy(() => import("@/pages/Locked"));
 const Result = lazy(() => import("@/pages/Result"));
 const LiveProctoring = lazy(() => import("@/pages/LiveProctoring"));
 const GradingQueue = lazy(() => import("@/pages/GradingQueue"));
+const VocabularyStudio = lazy(() => import("@/pages/VocabularyStudio"));
 const Vocabulary = lazy(() => import("@/pages/Vocabulary"));
 const GroupsResults = lazy(() => import("@/pages/GroupsResults"));
 const CenterOverview = lazy(() => import("@/pages/CenterOverview"));
@@ -548,6 +549,7 @@ export default function App() {
                 />
               )}
               {activeRoute === "vocabulary" && student?.role === "student" && <Vocabulary key={student.id} userId={student.id} />}
+              {activeRoute === "vocabulary" && student && isStaffRole(student.role) && <VocabularyStudio key={student.id} userId={student.id} />}
               {activeRoute === "history" && (
                 <History refreshKey={historyKey} onStats={setStats} />
               )}

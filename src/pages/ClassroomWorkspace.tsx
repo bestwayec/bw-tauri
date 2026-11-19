@@ -40,6 +40,9 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
   const [deadline, setDeadline] = useState("");
   const [minimum, setMinimum] = useState("80");
   const [reportId, setReportId] = useState("");
+  const [reportPage, setReportPage] = useState(1);
+  const [reportSearch, setReportSearch] = useState("");
+
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [date, setDate] = useState(todayInTashkent);
@@ -58,8 +61,8 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
   });
   const reportPath = groupUrl + "/assignments/" + encodeURIComponent(reportId) + "/vocabulary-results";
   const report = useQuery({
-    queryKey: ["classroom-vocabulary-report", userId, group.id, reportId],
-    queryFn: () => get<VocabularyAssignmentReports>(reportPath),
+    queryKey: ["classroom-vocabulary-report", userId, group.id, reportId, reportPage, reportSearch],
+    queryFn: () => get<VocabularyAssignmentReports>(reportPath, { page: reportPage, search: reportSearch }),
     enabled: Boolean(reportId),
   });
   const exportReport = useMutation({
@@ -142,7 +145,7 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
     setSelection(previous => checked ? [...previous, id] : previous.filter(item => item !== id));
   }
   return (
-    <section className="grid gap-4 lg:grid-cols-2" aria-label="Guruh ish maydoni">
+    <section className="grid gap-4 lg:grid-cols-2" aria-label={`${group.name} guruh ish maydoni`}>
       <section className="card space-y-3 rounded-2xl p-4">
         <h2 className="text-lg font-semibold">Guruh tarkibi</h2>
         <form className="flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); if (name.trim().length >= 2) rename.mutate(); }}>
@@ -262,7 +265,7 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
         {tasks.isSuccess && (tasks.data.length ? <ul>
           {tasks.data.map(task => <li className="flex flex-wrap items-center gap-2" key={task.id}>
             {task.title} · <time dateTime={task.deadline}>{new Date(task.deadline).toLocaleString()}</time>
-            {task.vocabulary_set_id && <button className={inputStyle} type="button" aria-expanded={reportId === task.id} onClick={() => setReportId(reportId === task.id ? "" : task.id)}>Lug‘at natijalari</button>}
+            {task.vocabulary_set_id && <button className={inputStyle} type="button" aria-expanded={reportId === task.id} onClick={() => { setReportId(reportId === task.id ? "" : task.id); setReportPage(1); setReportSearch(""); }}>Lug‘at natijalari</button>}
           </li>)}
         </ul> : <p>Hozircha vazifalar yo‘q.</p>)}
         {reportId && report.isPending && <p role="status">Natijalar yuklanmoqda…</p>}
@@ -272,7 +275,15 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
           <p>{report.data.overdueCount} ta muddati o‘tgan</p>
           <button className={inputStyle} type="button" disabled={exportReport.isPending} onClick={() => exportReport.mutate()}>CSV</button>
           {exportReport.isError && <p role="alert">{errorMessage(exportReport.error)}</p>}
-          <ul>{report.data.students.map(student => <li key={student.studentId}>{student.name} · {student.percentage}%</li>)}</ul>
+          <label className="grid gap-1">Search results
+            <input className={inputStyle} value={reportSearch} onChange={event => { setReportSearch(event.target.value); setReportPage(1); }} />
+          </label>
+          <ul>{report.data.students.map(student => <li key={student.studentId}>{student.name} · {student.percentage}%{!student.currentlyEnrolled && " · Former member"}</li>)}</ul>
+          <div className="flex gap-2">
+            <button className={inputStyle} type="button" disabled={reportPage === 1} onClick={() => setReportPage(reportPage - 1)}>Previous</button>
+            <button className={inputStyle} type="button" disabled={!report.data.hasNext} onClick={() => setReportPage(reportPage + 1)}>Next</button>
+          </div>
+          {report.data.overdueStudents.length > 0 && <ul>{report.data.overdueStudents.map(student => <li key={student.studentId}>{student.name} · Overdue</li>)}</ul>}
           {report.data.missedWords.length > 0 && <div><h3>Ko‘p xato qilingan so‘zlar</h3>
             <ul>{report.data.missedWords.map(word => <li key={word.english}>{word.english} · {word.count}</li>)}</ul>
           </div>}
