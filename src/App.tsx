@@ -543,7 +543,7 @@ export default function App() {
               {activeRoute === "examTrack" && <ExamTrack onBrowse={() => navigate('exams')} />}
               {activeRoute === "proctoring" && <LiveProctoring />}
               {activeRoute === "grading" && <GradingQueue />}
-              {activeRoute === "groups" && <GroupsResults />}
+              {activeRoute === "groups" && student && <GroupsResults key={student.id} userId={student.id} />}
               {activeRoute === "centerOverview" && <CenterOverview onNavigate={navigate} />}
               {activeRoute === "studentResults" && <StudentResults />}
               {activeRoute === "profile" && (
