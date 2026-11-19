@@ -416,12 +416,22 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
             userId={userId}
             onNavigate={onNavigate}
             onStartExamById={(examId) => {
-              const matched = publishedMocks.find((m) => m.id === examId);
-              if (matched) {
-                handleStartMockChoice(matched);
-              } else {
-                onNavigate("exams");
+              const matchedMock = publishedMocks.find((m) => m.id === examId);
+              if (matchedMock) {
+                handleStartMockChoice(matchedMock);
+                return;
               }
+              const matchedTest = tVisible.find((t) => t.id === examId);
+              if (matchedTest) {
+                setResumingId(matchedTest.id);
+                setResumeError(null);
+                startTest(matchedTest.id)
+                  .then((start) => onStart(matchedTest, start))
+                  .catch((e) => setResumeError(friendlyError(e)))
+                  .finally(() => setResumingId(null));
+                return;
+              }
+              onNavigate("exams");
             }}
           />
         </div>
