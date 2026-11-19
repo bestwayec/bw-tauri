@@ -1,0 +1,118 @@
+name: Production signing preflight
+
+on:
+  push:
+    branches: [release-preflight/v1.0.13]
+    paths: [.github/workflows/production-signing-preflight.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  configuration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check production variables
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_WEB_URL: ${{ vars.VITE_WEB_URL }}
+          DESKTOP_RELEASE_MODE: ${{ vars.DESKTOP_RELEASE_MODE || 'signed_updater' }}
+        run: |
+          node <<'NODE'
+          let failed = false;
+          for (const name of ['VITE_API_URL', 'VITE_WEB_URL']) {
+            try {
+              const url = new URL(process.env[name]);
+              if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash ||
+                  (name === 'VITE_API_URL' && url.pathname.replace(/\/+$/, '') !== '/v1')) {
+                throw new Error();
+              }
+              console.log(name + ': configured');
+            } catch {
+              console.log('::error::' + name + ' is missing or invalid');
+              failed = true;
+            }
+          }
+          if (process.env.DESKTOP_RELEASE_MODE !== 'signed_updater') {
+            console.log('::error::DESKTOP_RELEASE_MODE must enable signed updates');
+            failed = true;
+          }
+          process.exitCode = failed ? 1 : 0;
+          NODE
+
+  desktop-signing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24.13.0"
+      - run: npm ci
+      - run: sudo apt-get update -qq && sudo apt-get install -y minisign
+      - name: Test the configured updater identity
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [[ -z "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
+            echo '::error::TAURI_SIGNING_PRIVATE_KEY is missing or unavailable'
+            exit 1
+          fi
+          work=$(mktemp -d)
+          trap 'rm -rf "$work"' EXIT
+          printf 'BESTWAY updater signing preflight\n' > "$work/fixture"
+          node -p "require('./src-tauri/tauri.conf.json').plugins.updater.pubkey" | base64 -d > "$work/updater.pub"
+          if ! timeout 30s npm run tauri signer sign -- "$work/fixture" </dev/null >"$work/signer.log" 2>&1; then
+            echo '::error::Tauri signing failed with the configured key and password'
+            exit 1
+          fi
+          base64 -d "$work/fixture.sig" > "$work/fixture.minisig"
+          minisign -Vm "$work/fixture" -p "$work/updater.pub" -x "$work/fixture.minisig" >/dev/null
+          echo 'Configured Tauri key verified against the application updater public key'
+
+  android-signing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Test official Android credentials and certificate
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          missing=0
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::$name is missing or unavailable"
+              missing=1
+            fi
+          done
+          if ((missing)); then exit 1; fi
+          umask 077
+          work=$(mktemp -d)
+          trap 'rm -rf "$work"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$work/official.keystore"
+          printf 'BESTWAY Android signing preflight\n' > "$work/fixture"
+          jar --create --file "$work/fixture.jar" -C "$work" fixture
+          if ! jarsigner -keystore "$work/official.keystore" \
+              -storepass:env ANDROID_KEYSTORE_PASSWORD -keypass:env ANDROID_KEY_PASSWORD \
+              "$work/fixture.jar" "$ANDROID_KEY_ALIAS" > "$work/signer.log" 2>&1; then
+            echo '::error::Android signing failed with the configured credentials'
+            exit 1
+          fi
+          jarsigner -verify "$work/fixture.jar" >/dev/null 2>&1
+          keytool -exportcert -keystore "$work/official.keystore" \
+            -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" \
+            -file "$work/certificate.der" >/dev/null 2>&1
+          actual=$(sha256sum "$work/certificate.der")
+          if [[ "${actual%% *}" != 08e71e33d2f2bf5c412ce745cda205f2707bf656a705202c17f54c9b9eaf6262 ]]; then
+            echo '::error::Android certificate differs from the previous published APK'
+            exit 1
+          fi
+          echo 'Configured Android credentials match the previous published APK certificate'
