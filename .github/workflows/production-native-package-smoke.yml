@@ -124,5 +124,5 @@ jobs:
           test "$(lipo -archs "$app/Contents/MacOS/$binary")" = "$expected"
           codesign --verify --strict "$app"
           codesign -d --entitlements :- "$app" 2>/dev/null | \
-            plutil -extract com.apple.security.device.audio-input raw -expect bool -o - -
+            python3 -c 'import plistlib, sys; assert plistlib.load(sys.stdin.buffer).get("com.apple.security.device.audio-input") is True'
           echo "Verified mounted DMG for $expected"
