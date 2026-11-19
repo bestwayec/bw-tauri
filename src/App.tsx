@@ -18,6 +18,7 @@ const Result = lazy(() => import("@/pages/Result"));
 const LiveProctoring = lazy(() => import("@/pages/LiveProctoring"));
 const GradingQueue = lazy(() => import("@/pages/GradingQueue"));
 const VocabularyStudio = lazy(() => import("@/pages/VocabularyStudio"));
+const TeacherDashboard = lazy(() => import("@/pages/TeacherDashboard"));
 const Vocabulary = lazy(() => import("@/pages/Vocabulary"));
 const GroupsResults = lazy(() => import("@/pages/GroupsResults"));
 const CenterOverview = lazy(() => import("@/pages/CenterOverview"));
@@ -208,7 +209,7 @@ export default function App() {
       });
       setRoute((r) => {
         if (r === "login") {
-          if (isTeacherRole(role)) return "proctoring";
+          if (isTeacherRole(role)) return "dashboard";
           if (isAdminRole(role)) return "centerOverview";
           return "dashboard";
         }
@@ -378,7 +379,7 @@ export default function App() {
     if (!isAllowedClientRole(s.role)) return;
     const role = normalizeRole(s.role);
     setStudent({ ...s, role });
-    if (isTeacherRole(role)) setRoute("proctoring");
+    if (isTeacherRole(role)) setRoute("dashboard");
     else if (isAdminRole(role)) setRoute("centerOverview");
     else setRoute("dashboard");
   };
@@ -544,12 +545,20 @@ export default function App() {
             >
               <Suspense fallback={null}>
               {activeRoute === "dashboard" && (
-                <Dashboard
-                  studentName={student?.name ?? null}
-                  onNavigate={navigate}
-                  onStart={handleStartExam}
-                  onStartMock={handleStartMock}
-                />
+                isTeacherRole(student?.role) ? (
+                  <TeacherDashboard
+                    teacherName={student?.name ?? null}
+                    userId={student?.id ?? ""}
+                    onNavigate={navigate}
+                  />
+                ) : (
+                  <Dashboard
+                    studentName={student?.name ?? null}
+                    onNavigate={navigate}
+                    onStart={handleStartExam}
+                    onStartMock={handleStartMock}
+                  />
+                )
               )}
               {activeRoute === "exams" && (
                 <Exams
