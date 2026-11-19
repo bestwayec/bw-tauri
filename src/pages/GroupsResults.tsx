@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import ClassroomWorkspace from "./ClassroomWorkspace";
 import { downloadBlob, get, post } from "../lib/api";
 import type { GroupDetail, GroupInput, GroupListItem, ScheduleItem, WeekDay } from "../lib/group-contract.generated";
 
@@ -176,6 +177,7 @@ export default function GroupsResults({ userId }: { userId: string }) {
           )}
         </div>
       )}
+      {!groups.isError && group && <ClassroomWorkspace key={group.id} group={group} userId={userId} />}
     </section>
   );
 }

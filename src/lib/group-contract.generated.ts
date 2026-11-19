@@ -62,3 +62,25 @@ export type ApiFailure = {
   message: string;
 };
 };
+
+export type ClassroomAssignment = {
+  id: string;
+  cohort_id: string;
+  cohort_name: string;
+  title: string;
+  deadline: string;
+  min_pass_percent: number;
+  created_at: string;
+  lesson_id: string | null;
+  lesson_title: string | null;
+  exam_id: string | null;
+  exam_title: string | null;
+};
+
+export type ClassroomAssignmentInput = {
+  title: string;
+  deadline?: string;
+  min_pass_percent?: number;
+  lesson_id?: string;
+  exam_id?: string;
+};
