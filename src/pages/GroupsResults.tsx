@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClassroomSchedule } from "../components/ClassroomSchedule";
+import { UnifiedStudentProfileModal } from "../components/UnifiedStudentProfileModal";
 import { ClassroomHistory } from "./ClassroomHistory";
 import ClassroomWorkspace from "./ClassroomWorkspace";
 import { downloadBlob, get, post, put } from "../lib/api";
@@ -37,6 +38,7 @@ export default function GroupsResults({ userId, role }: { userId: string; role?:
   const [search, setSearch] = useState("");
   const [exportError, setExportError] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [profileStudentId, setProfileStudentId] = useState<string | null>(null);
 
   const createGroup = useMutation({
     mutationFn: async (input: GroupInput) => {
@@ -175,7 +177,17 @@ export default function GroupsResults({ userId, role }: { userId: string; role?:
                 <tbody>
                   {students.map(student => (
                     <tr className="border-t border-white/10" key={student.studentId}>
-                      <th className="p-2 font-medium" scope="row">{student.name}{student.phone && <span className="block text-xs">{student.phone}</span>}</th>
+                      <th className="p-2 font-medium" scope="row">
+                        <button
+                          type="button"
+                          onClick={() => setProfileStudentId(student.studentId)}
+                          className="text-left font-medium hover:text-emerald-400 hover:underline transition-colors"
+                          title="To‘liq o‘quvchi profilini ochish"
+                        >
+                          {student.name}
+                        </button>
+                        {student.phone && <span className="block text-xs text-slate-400">{student.phone}</span>}
+                      </th>
                       {[student.completedExamsCount, student.listeningScore, student.readingScore, student.writingScore, student.speakingScore, student.overallBand].map((score, index) =>
                         <td className="p-2" key={index}>{score ?? "—"}</td>,
                       )}
@@ -189,6 +201,14 @@ export default function GroupsResults({ userId, role }: { userId: string; role?:
       )}
       {!groups.isError && group && !archived && <ClassroomWorkspace key={`workspace-${group.id}`} group={group} userId={userId} role={role} />}
       {!groups.isError && group && <ClassroomHistory key={`history-${group.id}`} groupId={group.id} userId={userId} />}
+      {profileStudentId && groupId && (
+        <UnifiedStudentProfileModal
+          groupId={groupId}
+          studentId={profileStudentId}
+          userId={userId}
+          onClose={() => setProfileStudentId(null)}
+        />
+      )}
     </section>
   );
 }

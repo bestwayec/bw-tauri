@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClassroomSchedule } from "../components/ClassroomSchedule";
+import { UnifiedStudentProfileModal } from "../components/UnifiedStudentProfileModal";
 import { del, downloadBlob, get, patch, post, put } from "../lib/api";
 import type { ClassroomAssignment, ClassroomAssignmentInput, ClassroomBulkMembership, ClassroomVocabularyCollection, GroupDetail, ScheduleItem, VocabularyAssignmentReports } from "../lib/group-contract.generated";
 
@@ -49,6 +50,7 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
   const [studentId, setStudentId] = useState("");
   const [state, setState] = useState<AttendanceState>("present");
   const [removeId, setRemoveId] = useState("");
+  const [viewStudentId, setViewStudentId] = useState<string | null>(null);
 
   const tasks = useQuery({ queryKey: tasksKey, queryFn: () => get<ClassroomAssignment[]>(groupUrl + "/assignments") });
   const collections = useQuery({
@@ -178,7 +180,17 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
         </ul>)}
         <ul className="space-y-2">
           {group.students.map(student => <li className="flex justify-between gap-2" key={student.studentId}>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={selection.includes(student.studentId)} onChange={event => toggleMember(student.studentId, event.target.checked)} />{student.name}</label>
+            <div className="flex items-center gap-2">
+              <input type="checkbox" checked={selection.includes(student.studentId)} onChange={event => toggleMember(student.studentId, event.target.checked)} />
+              <button
+                type="button"
+                onClick={() => setViewStudentId(student.studentId)}
+                className="text-left font-medium hover:text-emerald-400 hover:underline transition-colors"
+                title="O‘quvchi to‘liq profilini ko‘rish"
+              >
+                {student.name}
+              </button>
+            </div>
             {removeId === student.studentId ? <span className="flex gap-2">
               <button className={inputStyle} type="button" disabled={membership.isPending} onClick={() => membership.mutate({ id: student.studentId, remove: true })}>Olib tashlashni tasdiqlash</button>
               <button type="button" onClick={() => setRemoveId("")}>Bekor qilish</button>
@@ -290,6 +302,15 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
           </div>}
         </div>}
       </section>
+
+      {viewStudentId && (
+        <UnifiedStudentProfileModal
+          groupId={group.id}
+          studentId={viewStudentId}
+          userId={userId}
+          onClose={() => setViewStudentId(null)}
+        />
+      )}
     </section>
   );
 }
