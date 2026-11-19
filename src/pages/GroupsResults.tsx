@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ClassroomSchedule } from "../components/ClassroomSchedule";
+import { ClassroomHistory } from "./ClassroomHistory";
 import ClassroomWorkspace from "./ClassroomWorkspace";
-import { downloadBlob, get, post } from "../lib/api";
-import type { GroupDetail, GroupInput, GroupListItem, ScheduleItem, WeekDay } from "../lib/group-contract.generated";
+import { downloadBlob, get, post, put } from "../lib/api";
+import type { ClassroomArchiveState, GroupDetail, GroupInput, GroupListItem, ScheduleItem } from "../lib/group-contract.generated";
 
-const days: WeekDay[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const inputStyle = "rounded-lg border border-white/15 bg-surface px-3 py-2 text-sm";
 const reportRoutes = { xlsx: "export/excel", csv: "export", pdf: "report/pdf" } as const;
 
@@ -15,10 +16,13 @@ function errorMessage(error: unknown) {
   return "So‘rov bajarilmadi. Qayta urinib ko‘ring.";
 }
 
-export default function GroupsResults({ userId }: { userId: string }) {
+export default function GroupsResults({ userId, role }: { userId: string; role?: string }) {
   const queryClient = useQueryClient();
-  const listKey = ["groups", userId] as const;
-  const groups = useQuery({ queryKey: listKey, queryFn: ({ signal }) => get<GroupListItem[]>("/v1/groups", undefined, { signal }) });
+  const [archived, setArchived] = useState(false);
+  const [groupSearch, setGroupSearch] = useState("");
+  const listPrefix = ["groups", userId] as const;
+  const listKey = [...listPrefix, archived, groupSearch] as const;
+  const groups = useQuery({ queryKey: listKey, queryFn: ({ signal }) => get<GroupListItem[]>("/v1/groups", { archived, search: groupSearch }, { signal }) });
   const [selected, setSelected] = useState("");
   const groupId = groups.data?.find(group => group.id === selected)?.id ?? groups.data?.[0]?.id;
   const groupPath = `/v1/groups/${encodeURIComponent(groupId ?? "")}`;
@@ -29,7 +33,7 @@ export default function GroupsResults({ userId }: { userId: string }) {
   });
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
-  const [schedule, setSchedule] = useState<ScheduleItem>({ day: "mon", startTime: "09:00", endTime: "11:00" });
+  const [schedule, setSchedule] = useState<ScheduleItem[]>([{ day: "mon", startTime: "09:00", endTime: "11:00" }]);
   const [search, setSearch] = useState("");
   const [exportError, setExportError] = useState("");
   const [exporting, setExporting] = useState(false);
@@ -43,7 +47,7 @@ export default function GroupsResults({ userId }: { userId: string }) {
       return group;
     },
     onSuccess: (group) => {
-      queryClient.setQueryData<GroupListItem[]>(listKey, current => [
+      if (!archived && !groupSearch) queryClient.setQueryData<GroupListItem[]>(listKey, current => [
         ...(current ?? []).filter(item => item.id !== group.id),
         { ...group, studentsCount: group.students.length },
       ]);
@@ -51,14 +55,21 @@ export default function GroupsResults({ userId }: { userId: string }) {
       setSelected(group.id);
       setCreating(false);
       setName("");
-      void queryClient.invalidateQueries({ queryKey: listKey });
+      setGroupSearch("");
+      setArchived(false);
+      void queryClient.invalidateQueries({ queryKey: listPrefix });
     },
+  });
+
+  const archive = useMutation({
+    mutationFn: () => put<ClassroomArchiveState>(groupPath + "/archive", { archived: !archived }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: listPrefix }),
   });
 
   function submitGroup(event: FormEvent) {
     event.preventDefault();
     const trimmed = name.trim();
-    if (trimmed.length >= 2 && !createGroup.isPending) createGroup.mutate({ name: trimmed, schedule: [schedule] });
+    if (trimmed.length >= 2 && !createGroup.isPending) createGroup.mutate({ name: trimmed, schedule });
   }
 
   async function exportReport(format: keyof typeof reportRoutes) {
@@ -98,20 +109,7 @@ export default function GroupsResults({ userId }: { userId: string }) {
           <label className="grid gap-1">Guruh nomi
             <input className={inputStyle} value={name} onChange={event => setName(event.target.value)} minLength={2} maxLength={100} required />
           </label>
-          <fieldset className="flex flex-wrap gap-3">
-            <legend className="mb-2 font-medium">Dars jadvali</legend>
-            <label className="grid gap-1">Kun
-              <select className={inputStyle} value={schedule.day} onChange={event => setSchedule({ ...schedule, day: event.target.value as WeekDay })}>
-                {days.map(day => <option key={day} value={day}>{day}</option>)}
-              </select>
-            </label>
-            <label className="grid gap-1">Boshlanish
-              <input className={inputStyle} type="time" value={schedule.startTime} onChange={event => setSchedule({ ...schedule, startTime: event.target.value })} required />
-            </label>
-            <label className="grid gap-1">Tugash
-              <input className={inputStyle} type="time" value={schedule.endTime} onChange={event => setSchedule({ ...schedule, endTime: event.target.value })} required />
-            </label>
-          </fieldset>
+          <ClassroomSchedule slots={schedule} onChange={setSchedule} />
           {createGroup.isError && <p role="alert" className="text-red-300">{errorMessage(createGroup.error)}</p>}
           <div className="flex gap-3">
             <button className="btn-brand px-4 py-2 disabled:opacity-50" disabled={createGroup.isPending || name.trim().length < 2}>
@@ -122,6 +120,14 @@ export default function GroupsResults({ userId }: { userId: string }) {
         </form>
       )}
 
+      <div className="flex flex-wrap gap-3">
+        <label className="flex items-center gap-2">Guruh qidirish
+          <input className={inputStyle} type="search" maxLength={100} value={groupSearch} onChange={event => setGroupSearch(event.target.value)} />
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={archived} onChange={event => setArchived(event.target.checked)} />Arxivlangan guruhlar
+        </label>
+      </div>
       {groups.isPending && <p role="status">Guruhlar yuklanmoqda…</p>}
       {groups.isError && <p role="alert">{errorMessage(groups.error)} <button type="button" onClick={() => void groups.refetch()}>Qayta urinish</button></p>}
       {groups.isSuccess && !groupId && <p>Guruhlar yo‘q.</p>}
@@ -149,6 +155,10 @@ export default function GroupsResults({ userId }: { userId: string }) {
               ))}
             </div>
           </header>
+          <button className={inputStyle} type="button" disabled={archive.isPending} onClick={() => {
+            if (window.confirm(archived ? "Guruhni tiklash?" : "Guruh arxivlansinmi? Tarix saqlanadi.")) archive.mutate();
+          }}>{archived ? "Guruhni tiklash" : "Guruhni arxivlash"}</button>
+          {archive.isError && <p role="alert">{errorMessage(archive.error)}</p>}
           {exportError && <p role="alert">{exportError}</p>}
           <dl className="flex flex-wrap gap-6 text-sm">
             <div><dt>O‘quvchilar</dt><dd>{group.students.length}</dd></div>
@@ -177,7 +187,8 @@ export default function GroupsResults({ userId }: { userId: string }) {
           )}
         </div>
       )}
-      {!groups.isError && group && <ClassroomWorkspace key={group.id} group={group} userId={userId} />}
+      {!groups.isError && group && !archived && <ClassroomWorkspace key={group.id} group={group} userId={userId} role={role} />}
+      {!groups.isError && group && <ClassroomHistory key={group.id} groupId={group.id} userId={userId} />}
     </section>
   );
 }

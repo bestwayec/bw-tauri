@@ -22,6 +22,7 @@ export type GroupListItem = {
   schedule: Array<ScheduleItem> | null;
   createdAt: string;
   studentsCount: number;
+  archived?: boolean;
 };
 
 export type GroupStudent = {
@@ -221,5 +222,68 @@ export type StandaloneVocabularySubmission = {
   wordId: string;
   answer: string;
   type?: string;
+}>;
+};
+
+export type ClassroomArchiveState = {
+  archived: boolean;
+};
+
+export type ClassroomBulkMembership = {
+  action: "add" | "remove";
+  studentIds: Array<string>;
+};
+
+export type ClassroomHistoryPage = {
+  members: Array<{
+  id: string;
+  name: string;
+  currentlyEnrolled: boolean;
+}>;
+  page: number;
+  hasNext: boolean;
+};
+
+export type ClassroomStudentHistory = {
+  studentId: string;
+  name: string | null;
+  groupId: string;
+  groupName: string;
+  currentlyEnrolled: boolean;
+  membership: Array<{
+  startedAt: string | null;
+  endedAt: string | null;
+}>;
+  attendance: Array<{
+  date: string;
+  state: AttendanceMark;
+}>;
+  homework: Array<{
+  assignment_id: string;
+  assignment__title: string;
+  assignment__vocabulary_set_id: string | null;
+  status: string;
+  score_percent: number;
+  is_passed: boolean;
+  completed_at: string;
+}>;
+  mockExams: Array<{
+  id: string;
+  exam__title: string;
+  started_at: string;
+  overall_band: number | null;
+  overall_score: number | null;
+}>;
+  tests: Array<{
+  id: string;
+  test__title: string;
+  started_at: string;
+  total_score: number | null;
+}>;
+  feedback: Array<{
+  attempt_id: string;
+  skill: string;
+  approved_feedback: unknown;
+  final_score: number | null;
 }>;
 };
