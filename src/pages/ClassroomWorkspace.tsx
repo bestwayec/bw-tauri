@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { del, get, patch, post, put } from "../lib/api";
-import type { ClassroomAssignment, GroupDetail } from "../lib/group-contract.generated";
+import { del, downloadBlob, get, patch, post, put } from "../lib/api";
+import type { ClassroomAssignment, ClassroomAssignmentInput, ClassroomVocabularyCollection, GroupDetail, VocabularyAssignmentReports } from "../lib/group-contract.generated";
 
 const inputStyle = "rounded-lg border border-white/15 bg-surface px-3 py-2 text-sm";
 type AttendanceState = "present" | "absent" | "late";
@@ -25,6 +25,10 @@ export default function ClassroomWorkspace({ group, userId }: { group: GroupDeta
   const marksKey = ["classroom-attendance", userId, group.id] as const;
   const [name, setName] = useState(group.name);
   const [title, setTitle] = useState("");
+  const [vocabularySet, setVocabularySet] = useState("");
+  const [deadline, setDeadline] = useState("");
+  const [minimum, setMinimum] = useState("80");
+  const [reportId, setReportId] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [date, setDate] = useState(todayInTashkent);
@@ -33,6 +37,27 @@ export default function ClassroomWorkspace({ group, userId }: { group: GroupDeta
   const [removeId, setRemoveId] = useState("");
 
   const tasks = useQuery({ queryKey: tasksKey, queryFn: () => get<ClassroomAssignment[]>(groupUrl + "/assignments") });
+  const collections = useQuery({
+    queryKey: ["classroom-vocabulary-collections", userId, group.id],
+    queryFn: () => get<ClassroomVocabularyCollection[]>(groupUrl + "/vocabulary-collections"),
+  });
+  const reportPath = groupUrl + "/assignments/" + encodeURIComponent(reportId) + "/vocabulary-results";
+  const report = useQuery({
+    queryKey: ["classroom-vocabulary-report", userId, group.id, reportId],
+    queryFn: () => get<VocabularyAssignmentReports>(reportPath),
+    enabled: Boolean(reportId),
+  });
+  const exportReport = useMutation({
+    mutationFn: () => downloadBlob(reportPath + "?download=csv"),
+    onSuccess: ({ blob, filename }) => {
+      const source = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = source;
+      anchor.download = filename || "vocabulary-results.csv";
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(source), 0);
+    },
+  });
   const candidates = useQuery({
     queryKey: ["classroom-candidates", userId, search],
     queryFn: () => get<Candidate[]>("/v1/users", { role: "student", search, limit: 10 }),
@@ -67,9 +92,11 @@ export default function ClassroomWorkspace({ group, userId }: { group: GroupDeta
     },
   });
   const createTask = useMutation({
-    mutationFn: () => post<ClassroomAssignment>(groupUrl + "/assignments", { title: title.trim() }),
+    mutationFn: (input: ClassroomAssignmentInput) => post<ClassroomAssignment>(groupUrl + "/assignments", input),
     onSuccess: async () => {
       setTitle("");
+      setVocabularySet("");
+      setDeadline("");
       await queryClient.invalidateQueries({ queryKey: tasksKey });
     },
   });
@@ -150,18 +177,54 @@ export default function ClassroomWorkspace({ group, userId }: { group: GroupDeta
 
       <section className="card space-y-3 rounded-2xl p-4 lg:col-span-2">
         <h2 className="text-lg font-semibold">Guruh vazifalari</h2>
-        <form className="flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); if (title.trim()) createTask.mutate(); }}>
+        <form className="flex flex-wrap items-end gap-2" onSubmit={event => {
+          event.preventDefault();
+          if (!title.trim() || createTask.isPending) return;
+          createTask.mutate({
+            title: title.trim(),
+            ...(deadline ? { deadline: new Date(deadline).toISOString() } : {}),
+            ...(vocabularySet ? { vocabulary_set_id: vocabularySet, min_pass_percent: Number(minimum) } : {}),
+          });
+        }}>
           <label className="grid gap-1">Vazifa nomi
             <input className={inputStyle} value={title} onChange={event => setTitle(event.target.value)} maxLength={255} required />
           </label>
+          <label className="grid gap-1">Muddat (ixtiyoriy)
+            <input className={inputStyle} type="datetime-local" value={deadline} onChange={event => setDeadline(event.target.value)} />
+          </label>
+          <label className="grid gap-1">Lug‘at to‘plami
+            <select className={inputStyle} value={vocabularySet} onChange={event => setVocabularySet(event.target.value)}>
+              <option value="">To‘plam tanlanmagan</option>
+              {collections.data?.map(set => <option key={set.id} value={set.id}>{set.title} ({set.wordCount})</option>)}
+            </select>
+          </label>
+          {vocabularySet && <label className="grid gap-1">Minimal ball (%)
+            <input className={inputStyle} type="number" min={0} max={100} value={minimum} required onChange={event => setMinimum(event.target.value)} />
+          </label>}
           <button className={inputStyle} disabled={!title.trim() || createTask.isPending}>Vazifa berish</button>
         </form>
+        {collections.isError && <p role="alert">{errorMessage(collections.error)} <button type="button" onClick={() => void collections.refetch()}>Qayta urinish</button></p>}
         {createTask.isError && <p role="alert">{errorMessage(createTask.error)}</p>}
         {tasks.isPending && <p role="status">Vazifalar yuklanmoqda…</p>}
         {tasks.isError && <p role="alert">{errorMessage(tasks.error)} <button type="button" onClick={() => void tasks.refetch()}>Qayta urinish</button></p>}
         {tasks.isSuccess && (tasks.data.length ? <ul>
-          {tasks.data.map(task => <li key={task.id}>{task.title} · <time dateTime={task.deadline}>{new Date(task.deadline).toLocaleString()}</time></li>)}
+          {tasks.data.map(task => <li className="flex flex-wrap items-center gap-2" key={task.id}>
+            {task.title} · <time dateTime={task.deadline}>{new Date(task.deadline).toLocaleString()}</time>
+            {task.vocabulary_set_id && <button className={inputStyle} type="button" aria-expanded={reportId === task.id} onClick={() => setReportId(reportId === task.id ? "" : task.id)}>Lug‘at natijalari</button>}
+          </li>)}
         </ul> : <p>Hozircha vazifalar yo‘q.</p>)}
+        {reportId && report.isPending && <p role="status">Natijalar yuklanmoqda…</p>}
+        {reportId && report.isError && <p role="alert">{errorMessage(report.error)} <button type="button" onClick={() => void report.refetch()}>Qayta urinish</button></p>}
+        {reportId && report.data && !report.isError && <div className="space-y-2 rounded-lg border border-white/15 p-3">
+          <p>{report.data.completedCount} / {report.data.assignedCount} o‘quvchi yakunladi</p>
+          <p>{report.data.overdueCount} ta muddati o‘tgan</p>
+          <button className={inputStyle} type="button" disabled={exportReport.isPending} onClick={() => exportReport.mutate()}>CSV</button>
+          {exportReport.isError && <p role="alert">{errorMessage(exportReport.error)}</p>}
+          <ul>{report.data.students.map(student => <li key={student.studentId}>{student.name} · {student.percentage}%</li>)}</ul>
+          {report.data.missedWords.length > 0 && <div><h3>Ko‘p xato qilingan so‘zlar</h3>
+            <ul>{report.data.missedWords.map(word => <li key={word.english}>{word.english} · {word.count}</li>)}</ul>
+          </div>}
+        </div>}
       </section>
     </section>
   );

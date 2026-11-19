@@ -75,6 +75,7 @@ export type ClassroomAssignment = {
   lesson_title: string | null;
   exam_id: string | null;
   exam_title: string | null;
+  vocabulary_set_id: string | null;
 };
 
 export type ClassroomAssignmentInput = {
@@ -83,4 +84,84 @@ export type ClassroomAssignmentInput = {
   min_pass_percent?: number;
   lesson_id?: string;
   exam_id?: string;
+  vocabulary_set_id?: string;
+};
+
+export type VocabularyMode = "mixed" | "spelling" | "eng_uzb" | "uzb_eng";
+
+export type VocabularyCard = {
+  id: string;
+  english: string;
+  uzbek: string;
+  contextSentence: string | null;
+  partOfSpeech: string | null;
+};
+
+export type VocabularyQuestion = {
+  id: string;
+  wordId: string;
+  prompt: string;
+  type: "spelling" | "eng_uzb" | "uzb_eng";
+  options: Array<string>;
+};
+
+export type VocabularyResult = {
+  score: number;
+  totalWords: number;
+  percentage: number;
+  pointsAwarded: number;
+  mode: string;
+  wrongAnswers: Array<{
+  wordId: string;
+  english: string;
+  uzbek: string;
+  userAnswer: string;
+  correctAnswer: string;
+}>;
+  isPassed?: boolean;
+};
+
+export type VocabularySession = {
+  sessionId: string;
+  mode: VocabularyMode;
+  result: VocabularyResult | null;
+  questions: Array<VocabularyQuestion>;
+};
+
+export type VocabularyReview = {
+  sessionId?: string;
+  totalQuestions: number;
+  questions: Array<VocabularyQuestion>;
+};
+
+export type VocabularyAssignmentReports = {
+  assignedCount: number;
+  completedCount: number;
+  students: Array<{
+  studentId: string;
+  name: string;
+  score: number;
+  totalWords: number;
+  percentage: number;
+  isPassed: boolean;
+}>;
+  missedWords: Array<{
+  english: string;
+  count: number;
+}>;
+  overdueCount: number;
+};
+
+export type ClassroomVocabularyCollection = {
+  id: string;
+  title: string;
+  wordCount: number;
+};
+
+export type VocabularySubmission = {
+  sessionId: string;
+  answers: Array<{
+  wordId: string;
+  answer: string;
+}>;
 };

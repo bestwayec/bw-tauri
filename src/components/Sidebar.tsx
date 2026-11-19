@@ -14,6 +14,7 @@ export type NavId =
   | "dashboard"
   | "exams"
   | "history"
+  | "vocabulary"
   | "examTrack"
   | "profile"
   | "settings"
@@ -97,6 +98,12 @@ const STUDENT_NAV: NavItem[] = [
         <path d="M4 7h16M16 3l4 4-4 4M20 17H4M8 13l-4 4 4 4" />
       </>
     ),
+  },
+  {
+    id: "vocabulary",
+    label: "Vocabulary",
+    hint: "Assignments and review",
+    icon: icon(<><path d="M4 19V5a2 2 0 0 1 2-2h14v18H6a2 2 0 0 1 0-4h14" /><path d="M8 7h8M8 11h6" /></>),
   },
   {
     id: "profile",

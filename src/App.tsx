@@ -17,6 +17,7 @@ const Locked = lazy(() => import("@/pages/Locked"));
 const Result = lazy(() => import("@/pages/Result"));
 const LiveProctoring = lazy(() => import("@/pages/LiveProctoring"));
 const GradingQueue = lazy(() => import("@/pages/GradingQueue"));
+const Vocabulary = lazy(() => import("@/pages/Vocabulary"));
 const GroupsResults = lazy(() => import("@/pages/GroupsResults"));
 const CenterOverview = lazy(() => import("@/pages/CenterOverview"));
 const StudentResults = lazy(() => import("@/pages/StudentResults"));
@@ -56,6 +57,7 @@ export type Route =
   | "dashboard"
   | "exams"
   | "history"
+  | "vocabulary"
   | "examTrack"
   | "profile"
   | "settings"
@@ -81,6 +83,7 @@ const TITLES: Record<Exclude<Route, "login">, string> = {
   dashboard: "Dashboard",
   exams: "Exams",
   history: "History",
+  vocabulary: "Vocabulary",
   examTrack: "Exam Track",
   profile: "Profile",
   settings: "Settings",
@@ -537,6 +540,7 @@ export default function App() {
                   onStartMock={handleStartMock}
                 />
               )}
+              {activeRoute === "vocabulary" && student?.role === "student" && <Vocabulary key={student.id} userId={student.id} />}
               {activeRoute === "history" && (
                 <History refreshKey={historyKey} onStats={setStats} />
               )}
