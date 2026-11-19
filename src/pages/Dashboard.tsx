@@ -31,6 +31,10 @@ import MockSectionPicker, { type MockStartChoice } from "@/components/exam-ui/Mo
 import { belongsToProgram, programQueryKey, type ExamProgram } from "@/lib/programs";
 import { useSessionStore } from "@/lib/session-store";
 import DeviceReadinessModal from "@/components/DeviceReadinessModal";
+import { StudentClassroomWidget } from "@/components/StudentClassroomWidget";
+import { StudentAssignmentsWidget } from "@/components/StudentAssignmentsWidget";
+import { StudentAttendanceWidget } from "@/components/StudentAttendanceWidget";
+import { StudentOfflineVocabWidget } from "@/components/StudentOfflineVocabWidget";
 
 type Props = {
   studentName: string | null;
@@ -403,6 +407,29 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
         onJoinedMock={onStartMock}
         onNavigateExams={() => onNavigate("exams")}
       />
+
+      {/* Unified Student Workspace: Classroom, Assignments, Attendance & Offline Vocab */}
+      <div className="grid gap-4 lg:grid-cols-12">
+        <div className="space-y-4 lg:col-span-8">
+          <StudentClassroomWidget />
+          <StudentAssignmentsWidget
+            userId={userId}
+            onNavigate={onNavigate}
+            onStartExamById={(examId) => {
+              const matched = publishedMocks.find((m) => m.id === examId);
+              if (matched) {
+                handleStartMockChoice(matched);
+              } else {
+                onNavigate("exams");
+              }
+            }}
+          />
+        </div>
+        <div className="space-y-4 lg:col-span-4">
+          <StudentAttendanceWidget />
+          <StudentOfflineVocabWidget onNavigate={onNavigate} />
+        </div>
+      </div>
 
       {/* Hero CEFR / IELTS Level & Goal Progress Banner */}
       <div className="relative overflow-hidden rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-[#111827] via-[#0F172A] to-[#0B0F17] p-6 shadow-xl">
