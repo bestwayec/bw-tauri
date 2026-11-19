@@ -65,6 +65,27 @@ BestWay Windows desktop ilovasini (Tauri v2 / Rust, Win32, React 19, TypeScript,
      - `src/pages/Vocabulary.tsx`: Oflayn status nishoni, pending mutations soni, oflayn yuklab olish tugmasi va to'liq klaviatura boshqaruvi (Space, Arrow keys, 1/K, 2/P).
      - Testlar: `src/lib/offline-vocabulary.test.ts` (7 ta test, 100% PASS), vitest (55 ta fayl, 458 ta test, 100% PASS), TypeScript 0 ta xato, build 100% muvaffaqiyatli.
    - Hujjatlar: `docs/BESTWAY_NEXT_STAGE03_OFFLINE_REPORT.md` va `docs/BESTWAY_NEXT_AGENT_HANDOFF.md` yaratildi.
+10. **BESTWAY NEXT — Stage 04: Unified Workspaces, Easy Classroom & Student Deep Linking (PR #38, feat/bestway-next-00-03)**:
+    - **Student Workspace & Dashboard (Phase 04.1)**:
+      - Talaba Dashboard'iga `StudentClassroomWidget`, `StudentAssignmentsWidget`, `StudentAttendanceWidget`, va `StudentOfflineVocabWidget` komponentlari integratsiya qilindi.
+      - Taklif kodi orqali guruhga qo'shilish modali (`joinCohortByCode`) va topshiriqlarni yuklash (`fetchMyAssignments`) yaratildi.
+      - Unit testlar: `src/lib/assignments.test.ts` (4/4 ta test, 100% PASS).
+    - **Teacher Command Center (Phase 04.2)**:
+      - `src/pages/TeacherDashboard.tsx` yaratildi: real KPI ko'rsatkichlari (faol guruhlar, jami o'quvchilar, baholash navbati, lug'at studiyasi) va guruhlar kartochkalari.
+      - `src/components/Sidebar.tsx` navigatsiyasi kengaytirildi, mavjud 4 ta asosiy indeks (`proctoring`, `grading`, `groups`, `exams`) test shartnomasi qat'iy saqlandi.
+      - Navigatsiya testi: `src/components/navigation.test.tsx` (5/5 ta test, 100% PASS).
+    - **Classroom Workspace & Unified Student Profile (Phase 04.3 & 04.4)**:
+      - `src/components/UnifiedStudentProfileModal.tsx` yaratildi: `GET /v1/groups/<id>/member-history/<student_id>` orqali o'quvchi profili, davomat, uy vazifalari, imtihon ko'rsatkichlari va o'qituvchi/AI diagnostik xulosalari ochiladi.
+      - `ClassroomWorkspace.tsx` va `GroupsResults.tsx` dagi o'quvchi ismlari bosilganda to'g'ridan-to'g'ri profil modalini ochish ta'minlandi.
+    - **Exams & Assignments Deep Linking (Phase 04.5)**:
+      - Topshiriqlardan "Imtihonni boshlash" bosilganda mos mock exam yoki test bevosita ishga tushiriladi (`onStartExamById`), qo'lda qidirish talab etilmaydi.
+      - Boshlangan imtihonlarni xavfsiz davom ettirish (resume) saqlandi.
+    - **Sifat va Testlar**:
+      - `npm test`: **56 ta test fayli, 462 ta vitest testi (100% PASS)**.
+      - `npx tsc --noEmit`: **0 ta xato**.
+      - `npm run build`: **Vite bundle 100% muvaffaqiyatli build bo'ldi**.
+      - `cargo check`: **0 ta xato, 0 ta ogohlantirish**.
+      - Hujjatlar: `docs/BESTWAY_NEXT_STAGE04_PROGRESS.md` yaratildi.
 
 ## 3. Jarayonda
 - Barcha talablar to'liq bajarildi, PR #38 (Desktop/Mobile) va PR #206 (Backend) xavfsiz holda DRAFT rejimida saqlanmoqda.
