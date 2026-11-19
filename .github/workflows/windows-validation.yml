@@ -44,6 +44,9 @@ jobs:
       # Use the existing manual-installer overlay only for this CI artifact.
       # Production updater signing stays enabled in the base configuration.
       - name: Build x64 NSIS installer without publishing a release
+        env:
+          VITE_API_URL: https://bestway-native.test/v1
+          VITE_WEB_URL: https://bestway-native.test
         run: npm run tauri build -- --target x86_64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.manual-installer.conf.json
       - name: Require a nonempty installer and record its checksum
         shell: pwsh
@@ -51,6 +54,38 @@ jobs:
           $installers = @(Get-ChildItem src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe)
           if ($installers.Count -ne 1 -or $installers[0].Length -eq 0) { throw 'Expected one nonempty NSIS installer' }
           Get-FileHash $installers[0].FullName -Algorithm SHA256 | Format-List
+      - name: Install and launch the Windows app on a clean runner
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe | Select-Object -First 1
+          $installDir = Join-Path $env:RUNNER_TEMP 'Bestway-Native-Acceptance'
+          if (Test-Path $installDir) { throw 'Expected an empty install destination' }
+          $install = Start-Process $installer.FullName -ArgumentList '/S', "/D=$installDir" -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer exited with $($install.ExitCode)" }
+          $executable = Join-Path $installDir 'bestway-app.exe'
+          if (!(Test-Path $executable)) { throw 'Executable missing after installation' }
+          $startup = [Diagnostics.Stopwatch]::StartNew()
+          $app = Start-Process $executable -PassThru
+          try {
+            do {
+              Start-Sleep -Milliseconds 250
+              $app.Refresh()
+              if ($app.HasExited) { throw "App exited during startup with $($app.ExitCode)" }
+              if ($app.MainWindowHandle -ne 0) { break }
+            } while ($startup.Elapsed.TotalSeconds -lt 45)
+            if ($app.MainWindowHandle -eq 0 -or $app.MainWindowTitle -ne 'Bestway Exam') {
+              throw 'The Bestway Exam window did not appear'
+            }
+            $startup.Stop()
+            Start-Sleep -Seconds 3
+            $app.Refresh()
+            if ($app.HasExited) { throw 'App exited shortly after window creation' }
+            $webviews = @(Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe' AND ParentProcessId = $($app.Id)")
+            if (!$webviews.Count) { throw 'WebView2 child process did not start' }
+            Write-Host "Commit $env:GITHUB_SHA; first window $($startup.ElapsedMilliseconds) ms; app working set $([Math]::Round($app.WorkingSet64 / 1MB, 1)) MiB; WebView2 children $($webviews.Count)"
+          } finally {
+            if (!$app.HasExited) { Stop-Process -Id $app.Id -Force }
+          }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: bestway-windows-x64-validation

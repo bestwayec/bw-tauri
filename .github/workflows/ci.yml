@@ -114,3 +114,29 @@ jobs:
       - name: Test and Assemble Android Release
         run: |
           cd android && gradle :app:testReleaseUnitTest :app:assembleRelease --no-daemon
+      - name: Install and launch the Android app offline on an emulator
+        timeout-minutes: 18
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          image='system-images;android-34;google_apis;x86_64'
+          sdkmanager --install emulator "$image"
+          printf 'no\n' | avdmanager create avd --force --name bestway-pr --package "$image"
+          gradle -p android :app:assembleDebug --no-daemon
+          emulator -avd bestway-pr -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect >"$RUNNER_TEMP/bestway-emulator.log" 2>&1 &
+          trap 'adb emu kill || true' EXIT
+          timeout 180 adb wait-for-device
+          for attempt in $(seq 1 90); do
+            [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ] && break
+            sleep 2
+          done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1
+          adb shell svc wifi disable
+          adb shell svc data disable
+          adb install -t android/app/build/outputs/apk/debug/app-debug.apk
+          adb shell am start -W -n uz.bestwayec.app/.MainActivity | tee "$RUNNER_TEMP/bestway-android-start.log"
+          grep -q 'Status: ok' "$RUNNER_TEMP/bestway-android-start.log"
+          sleep 3
+          adb shell pidof uz.bestwayec.app
+          adb shell dumpsys activity activities > "$RUNNER_TEMP/bestway-android-activities.log"
+          grep -E '(mResumedActivity|topResumedActivity).*uz.bestwayec.app/.MainActivity' "$RUNNER_TEMP/bestway-android-activities.log"
