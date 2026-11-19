@@ -10,7 +10,7 @@ const { BW_TEACHER_PHONE: teacher, BW_STUDENT_PHONE: student, BW_TEST_PASSWORD: 
 if (!teacher || !student || !password) throw new Error("Provide synthetic account credentials");
 
 async function webLogin(page, phone, reauth = false) {
-  await page.goto(new URL("/en/login" + (reauth ? "?reauth=1" : ""), web).href);
+  await page.goto(new URL("/en/login" + (reauth ? "?reauth=1" : ""), web).href, { waitUntil: "domcontentloaded" });
   await page.locator("#phone").fill(phone);
   await page.locator("#password").fill(password);
   await page.locator("form button[type=submit]").click();
@@ -18,11 +18,13 @@ async function webLogin(page, phone, reauth = false) {
 }
 
 async function desktopLogin(page, phone) {
-  await page.goto(desktop.href);
+  await page.goto(desktop.href, { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "Sign in manually" }).click();
   await page.getByRole("textbox", { name: "Phone number" }).fill(phone);
   await page.getByLabel("Password", { exact: true }).fill(password);
+  const login = page.waitForResponse(response => new URL(response.url()).pathname === "/v1/auth/login" && response.request().method() === "POST");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  return login;
 }
 
 const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH, headless: true });
@@ -60,6 +62,22 @@ try {
   await expect(nativeFrontend.getByRole("button", { name: /Groups & Results/ })).toHaveCount(0);
   await expect(nativeFrontend.getByText(name, { exact: true })).toHaveCount(0);
   console.log("PASS desktop teacher → student account switch clears teacher data and navigation");
+
+  const revokedDevice = await browser.newPage();
+  const login = await desktopLogin(revokedDevice, teacher);
+  const loginUrl = new URL(login.url());
+  if (!loopback.has(loginUrl.hostname)) throw new Error("Revocation fixture requires the local API");
+  const { refreshToken } = (await login.json()).data;
+  await revokedDevice.getByRole("button", { name: /Groups & Results/ }).first().click();
+  await revokedDevice.getByRole("combobox").first().selectOption(group.id);
+  await expect(revokedDevice.getByRole("heading", { name, exact: true })).toBeVisible();
+  const revocation = await browser.newContext();
+  expect((await revocation.request.post(new URL("logout-refresh", loginUrl).href, { data: { refreshToken } })).status()).toBe(200);
+  await revokedDevice.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(revokedDevice.getByRole("button", { name: "Sign in manually" })).toBeVisible();
+  await expect(revokedDevice.getByRole("heading", { name, exact: true })).toHaveCount(0);
+  await expect(nativeFrontend.getByRole("heading", { name: "Assigned vocabulary" })).toBeVisible();
+  console.log("PASS server-revoked desktop removes cached teacher data on focus without affecting the other account");
 } finally {
   await browser.close();
 }

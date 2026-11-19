@@ -252,7 +252,17 @@ export default function App() {
       }
     };
     window.addEventListener("exam:reauth-required", onReauth);
-    return () => window.removeEventListener("exam:reauth-required", onReauth);
+    function checkSessionOnFocus() {
+      const r = routeRef.current;
+      if (r === "runner" || r === "mockSections" || r === "mockRunner" || r === "locked") return;
+      const session = useSessionStore.getState();
+      if (navigator.onLine && session.status === "ready") void session.revalidate();
+    }
+    window.addEventListener("focus", checkSessionOnFocus);
+    return () => {
+      window.removeEventListener("exam:reauth-required", onReauth);
+      window.removeEventListener("focus", checkSessionOnFocus);
+    };
   }, []);
 
   useEffect(() => {

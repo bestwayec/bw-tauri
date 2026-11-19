@@ -297,6 +297,7 @@ export type ClassroomStudentHistory = {
   attempt_id: string;
   skill: string;
   approved_feedback: unknown;
+  feedback_text?: string;
   final_score: number | null;
 }>;
 };

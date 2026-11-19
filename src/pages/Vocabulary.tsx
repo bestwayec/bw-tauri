@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, patch, post } from "../lib/api";
 import type {
@@ -6,7 +6,7 @@ import type {
   VocabularyLearnerHistory, VocabularyReview, VocabularyReviewHistory, VocabularySession, VocabularySubmission,
 } from "../lib/group-contract.generated";
 
-const control = "rounded-lg border border-white/15 bg-surface px-3 py-2 text-sm disabled:opacity-50";
+const control = "rounded-lg border border-white/15 bg-surface px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-emerald-300 disabled:opacity-50";
 const labels: Record<VocabularyMode, string> = {
   mixed: "Mixed practice", spelling: "Spelling", eng_uzb: "English to Uzbek", uzb_eng: "Uzbek to English",
 };
@@ -32,6 +32,8 @@ function Practice({
 }: { sessionId: string; questions: VocabularyQuestion[]; path: string; onComplete: () => void }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [index, setIndex] = useState(0);
+  const prompt = useRef<HTMLLegendElement>(null);
+  useEffect(() => { prompt.current?.focus(); }, [index]);
   const save = useMutation({
     mutationFn: (payload: VocabularySubmission) => post<VocabularyResult>(path, payload),
     onSuccess: onComplete,
@@ -55,7 +57,7 @@ function Practice({
     <form className="card space-y-4 rounded-2xl p-4" onSubmit={submit}>
       <p aria-live="polite">Question {index + 1} / {questions.length}</p>
       <fieldset className="space-y-2" disabled={save.isPending}>
-        <legend className="mb-2 text-lg font-semibold">{question.prompt}</legend>
+        <legend ref={prompt} tabIndex={-1} className="mb-2 text-lg font-semibold focus-visible:outline-2 focus-visible:outline-emerald-300">{question.prompt}</legend>
         {question.options.length ? question.options.map(option => (
           <label className="flex gap-2" key={option}>
             <input name="answer" type="radio" checked={answers[question.wordId] === option} onChange={() => setAnswers({ ...answers, [question.wordId]: option })} />

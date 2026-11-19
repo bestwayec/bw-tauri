@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { secureSetItemAsync } from "./secure-storage";
 import {
   backoffMs,
@@ -40,6 +40,7 @@ beforeEach(() => {
     profile: null,
   });
 });
+afterEach(() => vi.unstubAllGlobals());
 
 describe("logout verdicts + backoff (pure)", () => {
   it("wipes only on definitive verdicts", () => {
@@ -83,6 +84,19 @@ describe("single-flight refresh", () => {
 });
 
 describe("definitive verdict handling", () => {
+  it("renews an expired access token before revalidating the profile", async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 }))
+      .mockResolvedValueOnce(Response.json({ data: { user: { id: "teacher-1", role: "teacher" } } }));
+    vi.stubGlobal("fetch", request);
+    await useSessionStore.getState().setSession({ accessToken: "expired", refreshToken: "rt" });
+    await useSessionStore.getState().revalidate();
+    expect(request).toHaveBeenLastCalledWith(expect.stringContaining("/auth/me"), expect.objectContaining({
+      headers: { Authorization: "Bearer fresh-access" },
+    }));
+    expect(useSessionStore.getState().profile?.id).toBe("teacher-1");
+  });
+
   it("wipes local session on SESSION_EXPIRED when nothing newer exists", async () => {
     await useSessionStore.getState().setSession({ accessToken: "stale", refreshToken: "rt" });
     vi.mocked(rustAuthRefresh).mockRejectedValue("SESSION_EXPIRED");

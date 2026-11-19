@@ -464,10 +464,23 @@ export const useSessionStore = create<SessionState>()((set, get) => {
 
     revalidate: async () => {
       const token = get().accessToken;
-      const generation = sessionGeneration;
+      let generation = sessionGeneration;
+      let renewedAccess = false;
       if (!token) return;
       try {
-        const user = await rawGetMe(token);
+        let user;
+        try {
+          user = await rawGetMe(token);
+        } catch (error) {
+          if (generation !== sessionGeneration) return;
+          if ((error as ApiErrorLike)?.status !== 401) throw error;
+          const current = get().accessToken;
+          const renewed = current && current !== token ? current : await get().refreshNow();
+          if (get().accessToken !== renewed) return;
+          generation = sessionGeneration;
+          renewedAccess = true;
+          user = await rawGetMe(renewed);
+        }
         if (generation !== sessionGeneration) return;
         if (user.role && !isAllowedClientRole(user.role)) {
           await get().wipeLocal();
@@ -485,7 +498,7 @@ export const useSessionStore = create<SessionState>()((set, get) => {
         else await persist(get().accessToken, undefined, profile).catch(() => undefined);
       } catch (e) {
         if (generation !== sessionGeneration) return;
-        if (isDefinitiveLogout(verdictOf(e))) {
+        if (isDefinitiveLogout(verdictOf(e)) || (renewedAccess && (e as ApiErrorLike)?.status === 401)) {
           await get().wipeLocal();
         } else {
           // Network/timeout/5xx: stay signed in on the cached profile.

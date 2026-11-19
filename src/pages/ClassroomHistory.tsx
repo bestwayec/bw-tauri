@@ -43,7 +43,10 @@ export function ClassroomHistory({ groupId, userId }: { groupId: string; userId:
           {history.data.mockExams.map(exam => <li key={exam.id}>{exam.exam__title} · {exam.overall_band ?? exam.overall_score ?? "—"}</li>)}
         </ul>
         {history.data.feedback.length > 0 && <><h4>Tasdiqlangan izoh</h4><ul>
-          {history.data.feedback.map((row, index) => <li key={index}>{row.skill} · {row.final_score ?? "—"}{typeof row.approved_feedback === "string" && ` · ${row.approved_feedback}`}</li>)}
+          {history.data.feedback.map((row, index) => <li key={index}>
+            {row.skill} · {row.final_score ?? "—"}
+            <p className="whitespace-pre-wrap">{row.feedback_text ?? (typeof row.approved_feedback === "string" ? row.approved_feedback : "")}</p>
+          </li>)}
         </ul></>}
       </div>}
     </section>

@@ -21,7 +21,7 @@ const pairs = Array.from({length:30}, (_, i) => [`English item ${i+1}`, `Uzbek i
 const answerFor = new Map(pairs.flatMap(([en, uz]) => [[en,uz],[uz,en]]));
 
 async function webLogin(page, phone) {
-  await page.goto(web + '/en/login');
+  await page.goto(web + '/en/login', {waitUntil:'domcontentloaded'});
   await page.locator('#phone').fill(phone);
   await page.locator('#password').fill(password);
   await page.locator('form button[type=submit]').click();
@@ -39,6 +39,7 @@ async function desktopLogin(page, phone) {
 async function answer(page, questions, resolve, button = 'Submit answers') {
   for (const [i, q] of questions.entries()) {
     await expect(page.getByText(`Question ${i+1} / ${questions.length}`, {exact:true})).toBeVisible();
+    await expect(page.locator('legend')).toBeFocused();
     const value = resolve(q,i);
     if (q.options.length) await page.getByRole('radio',{name:value,exact:true}).check();
     else await page.getByRole('textbox',{name:'Answer',exact:true}).fill(value);
@@ -105,6 +106,10 @@ async function answer(page, questions, resolve, button = 'Submit answers') {
     await expect(studentWeb.getByRole("button",{name:"Known",exact:true})).toHaveAttribute("aria-pressed","true");
     await studentWeb.getByRole("button",{name:answerFor.get(savedCard),exact:true}).click();
     await expect(studentWeb.getByRole("button",{name:savedCard,exact:true})).toBeVisible();
+    await studentWeb.goto(web + "/uz/vocabulary/assignment/" + encodeURIComponent(task.id), {waitUntil:"domcontentloaded"});
+    await expect(studentWeb.getByRole("button",{name:"Bilaman",exact:true})).toHaveAttribute("aria-pressed","true");
+    await studentWeb.getByRole("button",{name:"Ovozni o‘chirish",exact:true}).press("Enter");
+    await expect(studentWeb.getByRole("button",{name:"Talaffuz qilish",exact:true})).toBeDisabled();
 
     const issued = learner.waitForResponse(r => /\/student\/assignments\/[^/]+\/vocabulary$/.test(r.url()) && r.request().method()==='POST');
     await learner.getByRole('button',{name:'Mixed practice',exact:true}).click();
