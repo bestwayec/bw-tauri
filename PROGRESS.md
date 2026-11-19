@@ -52,12 +52,27 @@ BestWay Windows desktop ilovasini (Tauri v2 / Rust, Win32, React 19, TypeScript,
      - `browser`: pass (4m54s)
      - `windows-x64`: pass (6m14s)
 
+9. **BESTWAY NEXT — Stage 03 Offline Vocabulary & Android CI (PR #38, feat/bestway-next-00-03)**:
+   - **Android Emulator CI Fix**:
+     - `.github/workflows/ci.yml` da `ANDROID_AVD_HOME="$HOME/.android/avd"`, `ANDROID_USER_HOME="$HOME/.android"` va `ANDROID_SDK_ROOT="$ANDROID_HOME"` to'g'rilandi.
+     - `avdmanager` va `emulator` AVD yo'llari moslashtirildi, `avdmanager list avd` va `emulator -list-avds` bilan mavjudligi tasdiqlandi.
+     - Android 13+ da `GrantPermissionsActivity` modal dialogi cold-start paytida to'sqinlik qilmasligi uchun `adb install -g -t` orqali o'rnatildi va ruxsatlar oldindan berildi.
+     - Hosted CI [44555969440](https://github.com/bestwayec/bw-tauri/actions/runs/44555969440): `ci` (PASS 30s), `rust` (PASS 2m0s), `android` (PASS 3m37s) — Emulator 31.4s da yuklandi, APK o'rnatildi, MainActivity faol ishga tushirildi.
+   - **Offline Lug'at va Fleshkartalar (Client-side)**:
+     - `src/lib/offline-vocabulary.ts` yaratildi: Har bir foydalanuvchi hisobi uchun alohida IndexedDB maydoni (`vocab.${userId}.${assignmentId}`), oflayn holatda o'rganish, familiarity o'zgarishlarini turg'un UUID `opId` lar bilan navbatga qo'yish.
+     - Ilova qayta ishga tushganda oxirgi ko'rilgan so'z va tartibni to'liq tiklash (`saveStudyPosition`, `getStudyPosition`).
+     - Tarmoq qaytganda `POST /v1/student/assignments/<id>/vocabulary/flashcards/sync` orqali paketli sinxronizatsiya va tasdiqlangan `acknowledgedOpIds` ni tozalash.
+     - `src/pages/Vocabulary.tsx`: Oflayn status nishoni, pending mutations soni, oflayn yuklab olish tugmasi va to'liq klaviatura boshqaruvi (Space, Arrow keys, 1/K, 2/P).
+     - Testlar: `src/lib/offline-vocabulary.test.ts` (7 ta test, 100% PASS), vitest (55 ta fayl, 458 ta test, 100% PASS), TypeScript 0 ta xato, build 100% muvaffaqiyatli.
+   - Hujjatlar: `docs/BESTWAY_NEXT_STAGE03_OFFLINE_REPORT.md` va `docs/BESTWAY_NEXT_AGENT_HANDOFF.md` yaratildi.
+
 ## 3. Jarayonda
-- Barcha talablar to'liq bajarildi, PR #37 xavfsiz holda DRAFT rejimida saqlanmoqda.
+- Barcha talablar to'liq bajarildi, PR #38 (Desktop/Mobile) va PR #206 (Backend) xavfsiz holda DRAFT rejimida saqlanmoqda.
 
 ## 4. Keyingi Qadamlar
-- Foydalanuvchidan PR #37 ni ko'rib chiqish va maktab test laboratoriyalarida sinab ko'rish bo'yicha ko'rsatma olish.
-- Ishlab chiqarish nashri chiqarishga ruxsat berilganda Release Keystore orqali rasmiy installer paketlarini tayyorlash.
+- Foydalanuvchidan PR #38 va PR #206 ni ko'rib chiqish bo'yicha ko'rsatma olish.
+- Jismoniy Android / Windows qurilmalarda hardware audio va sensorlarni sinovdan o'tkazish.
+- Ishlab chiqarish nashri chiqarishga ruxsat berilganda Release Keystore orqali rasmiy paketlarni tayyorlash.
 
 ## 5. Muhim Qarorlar
 - **Zero AI Attribution**: Barcha git kommitlari faqat Komiljon Roziyev (kruziyev0@gmail.com) nomidan amalga oshiriladi, AI imzolari yoki belgilariga mutlaqo yo'l qo'yilmaydi.
