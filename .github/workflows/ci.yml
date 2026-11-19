@@ -127,11 +127,16 @@ jobs:
           "$sdkmanager_bin" --install emulator "$image"
           printf 'no\n' | "$sdk_bin/avdmanager" create avd --force --name bestway-pr --package "$image"
           gradle -p android :app:assembleDebug --no-daemon
-          "$ANDROID_HOME/emulator/emulator" -avd bestway-pr -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect >"$RUNNER_TEMP/bestway-emulator.log" 2>&1 &
-          trap '"$adb" emu kill || true' EXIT
-          timeout 180 "$adb" wait-for-device
+          emulator="$ANDROID_HOME/emulator/emulator"
+          log="$RUNNER_TEMP/bestway-emulator.log"
+          "$adb" start-server
+          "$emulator" -accel-check
+          "$emulator" -avd bestway-pr -port 5554 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader -memory 2048 -cores 2 >"$log" 2>&1 &
+          emulator_pid=$!
+          trap 'result=$?; if [ "$result" -ne 0 ]; then tail -80 "$log"; { echo "### Emulator diagnostics"; echo "~~~text"; tail -40 "$log"; echo "~~~"; } >> "$GITHUB_STEP_SUMMARY"; fi; kill "$emulator_pid" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 90); do
-            [ "$("$adb" shell getprop sys.boot_completed | tr -d '\r')" = 1 ] && break
+            kill -0 "$emulator_pid" 2>/dev/null || { echo 'Emulator exited before boot'; exit 1; }
+            [ "$(timeout 5 "$adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && break
             sleep 2
           done
           test "$("$adb" shell getprop sys.boot_completed | tr -d '\r')" = 1

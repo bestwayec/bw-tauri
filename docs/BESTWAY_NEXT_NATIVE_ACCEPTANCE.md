@@ -4,9 +4,9 @@ Use the commit shown on [desktop PR #38](https://github.com/bestwayec/bw-tauri/p
 
 ## Install and start
 
-- Linux desktop. Run the development binary against the local Vite frontend and a disposable Django API. For packaged acceptance, install the built app and point it at the disposable HTTPS endpoint.
+- Linux desktop. Run the development binary against the local Vite frontend and a disposable Django API. For packaged acceptance, set `VITE_API_URL` to an isolated HTTPS endpoint on port 443 with a certificate trusted by WebKitGTK. Run `npm run tauri -- build --debug --bundles deb --no-sign --ci --config src-tauri/tauri.manual-installer.conf.json`, then install the generated Debian package in a clean test environment. Use the official release configuration for release acceptance.
 - Windows x64. Use the NSIS validation artifact from the PR workflow when it targets the acceptance environment. To build a test installer for a different API, set `VITE_API_URL` and `VITE_WEB_URL`, then run `npm ci` and `npm run tauri build -- --target x86_64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.manual-installer.conf.json`.
-- Android. With JDK 17 and Android SDK configured, start an emulator or attach a test device, check `adb devices`, and run `npm ci` and `npm run tauri -- android dev` with the acceptance API and website variables. Use the PR Android job for unit and package evidence. Record touchscreen, device secure storage, and audio cases on supported hardware when release policy requires it.
+- Android. With JDK 17 and Android SDK configured, start an emulator or attach a test device, check `adb devices`, run `gradle -p android :app:assembleDebug` from the repository root, and install the debug APK using `adb install -t android/app/build/outputs/apk/debug/app-debug.apk`. Launch with `adb shell am start -W -n uz.bestwayec.app/.MainActivity`. The current Android wrapper has fixed website and API endpoints. Keep the hosted smoke offline and use an approved acceptance configuration before running authenticated Android journeys. Use the PR Android job for unit and package evidence. Record touchscreen, device secure storage, and audio cases on supported hardware when release policy requires it.
 
 ## Run the same scenarios on each platform
 
@@ -22,6 +22,8 @@ Use the commit shown on [desktop PR #38](https://github.com/bestwayec/bw-tauri/p
 
 ## Evidence boundary
 
-The Linux WebKitGTK development window exercised real Django login, classroom navigation and Studio reads. The Linux container used file fallback because Secret Service was absent. The hosted Windows installer, Android builds and Chromium check use separate acceptance scopes. Packaged login and secure storage, Android runtime, audible pronunciation, physical-device keyboard or touch, native exam resume, native installation of updates, and low-resource runs remain **UNVERIFIED**.
+The installed Linux Debian test package completed HTTPS login, classroom and Studio navigation, process restart with the existing file fallback, and recorded-audio playback into a virtual PulseAudio sink. The Windows job installs and launches the NSIS test artifact on the hosted Windows runner and records startup and app working-set measurements. The Android runner attempts offline emulator install and launch using the debug APK. See the PR Checks page for the selected commit's outcome. Physical hardware, signed release artifacts, Windows and Android authenticated integration, and native exam recovery remain open.
+
+[Desktop checks](https://github.com/bestwayec/bw-tauri/pull/38/checks)
 
 [Cross-repository release gates](https://github.com/bestwayec/bestway/blob/feat/bestway-next-00-03/docs/BESTWAY_NEXT_RELEASE_GATES.md)

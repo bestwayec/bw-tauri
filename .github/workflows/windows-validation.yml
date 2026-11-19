@@ -82,7 +82,9 @@ jobs:
             if ($app.HasExited) { throw 'App exited shortly after window creation' }
             $webviews = @(Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe' AND ParentProcessId = $($app.Id)")
             if (!$webviews.Count) { throw 'WebView2 child process did not start' }
-            Write-Host "Commit $env:GITHUB_SHA; first window $($startup.ElapsedMilliseconds) ms; app working set $([Math]::Round($app.WorkingSet64 / 1MB, 1)) MiB; WebView2 children $($webviews.Count)"
+            $metrics = "Commit $env:GITHUB_SHA; first window $($startup.ElapsedMilliseconds) ms; app working set $([Math]::Round($app.WorkingSet64 / 1MB, 1)) MiB; WebView2 children $($webviews.Count)"
+            Write-Host $metrics
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $metrics
           } finally {
             if (!$app.HasExited) { Stop-Process -Id $app.Id -Force }
           }
