@@ -117,6 +117,12 @@ jobs:
       - name: Install and launch the Android app offline on an emulator
         timeout-minutes: 18
         run: |
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          export ANDROID_USER_HOME="$HOME/.android"
+          export ANDROID_AVD_HOME="$HOME/.android/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+
           test -e /dev/kvm
           sudo chmod a+rw /dev/kvm
           sdkmanager_bin=$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -1)
@@ -124,18 +130,52 @@ jobs:
           sdk_bin=$(dirname "$sdkmanager_bin")
           adb="$ANDROID_HOME/platform-tools/adb"
           image='system-images;android-34;google_apis;x86_64'
+
+          yes | "$sdkmanager_bin" --licenses >/dev/null 2>&1 || true
           "$sdkmanager_bin" --install emulator "$image"
           printf 'no\n' | "$sdk_bin/avdmanager" create avd --force --name bestway-pr --package "$image"
-          gradle -p android :app:assembleDebug --no-daemon
+
+          echo "=== Verifying AVD configuration ==="
+          "$sdk_bin/avdmanager" list avd
+          if [ ! -f "$ANDROID_AVD_HOME/bestway-pr.ini" ]; then
+            echo "bestway-pr.ini not in $ANDROID_AVD_HOME, checking for other locations..."
+            found_ini=$(find "$HOME/.android" -name "bestway-pr.ini" 2>/dev/null | head -1)
+            if [ -n "$found_ini" ]; then
+              echo "Found at $found_ini, syncing to $ANDROID_AVD_HOME"
+              cp "$found_ini" "$ANDROID_AVD_HOME/"
+              found_dir=$(dirname "$found_ini")
+              if [ -d "$found_dir/bestway-pr.avd" ] && [ ! -d "$ANDROID_AVD_HOME/bestway-pr.avd" ]; then
+                cp -r "$found_dir/bestway-pr.avd" "$ANDROID_AVD_HOME/"
+              fi
+            fi
+          fi
+
+          if [ ! -f "$ANDROID_AVD_HOME/bestway-pr.ini" ]; then
+            echo "ERROR: bestway-pr.ini could not be found in $ANDROID_AVD_HOME"
+            find "$HOME" -maxdepth 4 -name "*bestway-pr*" || true
+            exit 1
+          fi
+
+          echo "AVD configuration verified ($ANDROID_AVD_HOME/bestway-pr.ini):"
+          cat "$ANDROID_AVD_HOME/bestway-pr.ini"
+
           emulator="$ANDROID_HOME/emulator/emulator"
+          echo "=== Verifying discoverable AVDs via emulator ==="
+          "$emulator" -list-avds
+          "$emulator" -list-avds | grep -qx 'bestway-pr' || {
+            echo "ERROR: emulator -list-avds did not discover bestway-pr"
+            exit 1
+          }
+
+          gradle -p android :app:assembleDebug --no-daemon
           log="$RUNNER_TEMP/bestway-emulator.log"
           "$adb" start-server
           "$emulator" -accel-check
           "$emulator" -avd bestway-pr -port 5554 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader -memory 2048 -cores 2 >"$log" 2>&1 &
           emulator_pid=$!
           trap 'result=$?; if [ "$result" -ne 0 ]; then tail -80 "$log"; { echo "### Emulator diagnostics"; echo "~~~text"; tail -40 "$log"; echo "~~~"; } >> "$GITHUB_STEP_SUMMARY"; fi; kill "$emulator_pid" 2>/dev/null || true' EXIT
-          for attempt in $(seq 1 90); do
-            kill -0 "$emulator_pid" 2>/dev/null || { echo 'Emulator exited before boot'; exit 1; }
+          for attempt in $(seq 1 120); do
+            kill -0 "$emulator_pid" 2>/dev/null || { echo 'Emulator exited before boot'; tail -40 "$log"; exit 1; }
             [ "$(timeout 5 "$adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && break
             sleep 2
           done
