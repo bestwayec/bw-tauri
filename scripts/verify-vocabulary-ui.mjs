@@ -51,6 +51,7 @@ async function answer(page, questions, resolve, button = 'Submit answers') {
   const browser = await chromium.launch({executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,headless:true});
   try {
     const site = await browser.newPage();
+    site.on('pageerror', error => console.error('Website JavaScript error', error.message));
     await webLogin(site,teacherPhone);
     const newGroup = await site.request.post(web+'/api/backend/groups',{data:{name:'Local Vocabulary '+Date.now()}});
     expect(newGroup.status()).toBe(201);
@@ -93,7 +94,10 @@ async function answer(page, questions, resolve, button = 'Submit answers') {
     await flash.click();
     await expect(learner.getByRole('button',{name:/^Uzbek item/}).first()).toBeVisible();
     const savedCard = await learner.getByRole("button",{name:/^Uzbek item/}).first().textContent();
+    await learner.context().setOffline(true);
     await learner.getByRole("button",{name:"Known",exact:true}).click();
+    await expect(learner.getByText(/Offline\. Keep this view open/)).toBeVisible();
+    await learner.context().setOffline(false);
     await expect(learner.getByText("Study progress saved",{exact:true})).toBeVisible();
     const studentWeb = await browser.newPage();
     await webLogin(studentWeb, studentPhone);

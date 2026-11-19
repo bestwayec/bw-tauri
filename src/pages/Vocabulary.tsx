@@ -197,7 +197,9 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
                 </div>
                 {word.audioUrl && <audio key={word.id} ref={audio} muted={muted} preload="none" src={word.audioUrl} />}
                 {audioErrorFor === word.id && <p role="status">Pronunciation audio is unavailable.</p>}
-                {saveProgress.isPending && <p role="status">Saving study progress…</p>}
+                {saveProgress.isPending && <p role="status">
+                  {saveProgress.isPaused ? "Offline. Keep this view open to sync when connected." : "Saving study progress…"}
+                </p>}
                 {saveProgress.isSuccess && <p role="status">Study progress saved</p>}
                 {saveProgress.isError && <p role="alert">{errorMessage(saveProgress.error)}</p>}
               </>
