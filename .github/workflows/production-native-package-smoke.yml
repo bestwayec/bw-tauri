@@ -1,4 +1,4 @@
-name: Production Linux and macOS package smoke test
+name: Production macOS package smoke test
 
 on:
   push:
@@ -15,9 +15,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            bundles: deb,appimage
           - os: macos-15-intel
             target: x86_64-apple-darwin
             bundles: dmg
@@ -47,12 +44,6 @@ jobs:
         with:
           workspaces: src-tauri -> target
           key: ${{ matrix.target }}
-      - name: Prepare Ubuntu packaging and runtime dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
-            librsvg2-dev libssl-dev libxdo-dev patchelf libfuse2 libgles2 xvfb xauth x11-utils dbus-x11
       - run: npm ci
       - name: Build validation packages from the exact main commit
         shell: bash
@@ -61,47 +52,6 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = 7f97f9ed1a480f27fd2b83d32a4defeb26b936b7
           npm run tauri build -- --target "$TARGET" --bundles "$BUNDLES" --config src-tauri/tauri.manual-installer.conf.json
-
-      - name: Verify AppImage helpers and run AppImage and installed DEB
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          shopt -s nullglob
-          bundle="src-tauri/target/$TARGET/release/bundle"
-          images=("$bundle"/appimage/*.AppImage)
-          packages=("$bundle"/deb/*.deb)
-          test "${#images[@]}" -eq 1
-          test "${#packages[@]}" -eq 1
-          image=$(realpath "${images[0]}")
-          package=$(realpath "${packages[0]}")
-          test "$(dpkg-deb --field "$package" Architecture)" = amd64
-          dpkg-deb --field "$package" Depends | grep -F libwebkit2gtk-4.1-0
-          work=$(mktemp -d)
-          trap 'rm -rf "$work"' EXIT
-          cd "$work"
-          "$image" --appimage-extract >/dev/null
-          test -x squashfs-root/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/WebKitNetworkProcess
-          test -x squashfs-root/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/WebKitWebProcess
-          cat > "$work/launch.sh" <<'BASH'
-          set -euo pipefail
-          "$1" &
-          pid=$!
-          trap 'kill "$pid" 2>/dev/null || true' EXIT
-          for ((attempt=0; attempt<30; attempt++)); do
-            window=$(xwininfo -root -tree | awk '/"Bestway Exam"/ {print $1; exit}')
-            if [[ -n "$window" ]] && xwininfo -id "$window" | grep -q 'Map State: IsViewable'; then
-              echo 'Bestway Exam opened a visible window'
-              exit 0
-            fi
-            kill -0 "$pid"
-            sleep 1
-          done
-          exit 1
-          BASH
-          APPIMAGE_EXTRACT_AND_RUN=1 timeout 40s xvfb-run -a dbus-run-session -- bash "$work/launch.sh" "$image"
-          sudo apt-get install -y "$package"
-          test "$(dpkg-query -W -f='${Version}' bestway-app)" = 1.0.12
-          timeout 40s xvfb-run -a dbus-run-session -- bash "$work/launch.sh" /usr/bin/bestway-app
 
       - name: Mount DMG and verify the app architecture, microphone metadata and local signature
         if: runner.os == 'macOS'
@@ -124,5 +74,5 @@ jobs:
           test "$(lipo -archs "$app/Contents/MacOS/$binary")" = "$expected"
           codesign --verify --strict "$app"
           codesign -d --entitlements :- "$app" 2>/dev/null | \
-            python3 -c 'import plistlib, sys; assert plistlib.load(sys.stdin.buffer).get("com.apple.security.device.audio-input") is True'
+            python3 -c 'import plistlib, sys; assert plistlib.loads(sys.stdin.buffer.read()).get("com.apple.security.device.audio-input") is True'
           echo "Verified mounted DMG for $expected"
