@@ -1,0 +1,221 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  acknowledgeMutations,
+  downloadVocabularyForOffline,
+  enqueueFlashcardMutation,
+  getOfflineProgress,
+  getOfflineSnapshot,
+  getPendingMutations,
+  purgeAccountOfflineVocabulary,
+  saveOfflineProgress,
+  saveOfflineSnapshot,
+  syncOfflineFlashcards,
+} from "./offline-vocabulary";
+import * as api from "./api";
+import type { VocabularyCard } from "./group-contract.generated";
+
+vi.mock("./api", () => ({
+  get: vi.fn(),
+  patch: vi.fn(),
+  post: vi.fn(),
+}));
+
+describe("offline-vocabulary", () => {
+  const user1 = "user-alice";
+  const user2 = "user-bob";
+  const assignmentId = "assign-101";
+
+  const sampleWords: VocabularyCard[] = [
+    { id: "w1", english: "apple", uzbek: "olma", contextSentence: null, partOfSpeech: null },
+    { id: "w2", english: "banana", uzbek: "banan", contextSentence: null, partOfSpeech: null },
+    { id: "w3", english: "cherry", uzbek: "olcha", contextSentence: null, partOfSpeech: null },
+  ];
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    await purgeAccountOfflineVocabulary(user1, [assignmentId]);
+    await purgeAccountOfflineVocabulary(user2, [assignmentId]);
+  });
+
+  it("isolates local data strictly by authenticated user account", async () => {
+    await saveOfflineProgress(user1, assignmentId, {
+      lastWordId: "w1",
+      familiarity: { w1: "known" },
+      order: ["w1", "w2", "w3"],
+      lastStudiedAt: "2026-11-19T10:00:00Z",
+    });
+
+    const aliceProgress = await getOfflineProgress(user1, assignmentId);
+    expect(aliceProgress).not.toBeNull();
+    expect(aliceProgress?.lastWordId).toBe("w1");
+    expect(aliceProgress?.familiarity.w1).toBe("known");
+
+    // Bob cannot see Alice's study progress
+    const bobProgress = await getOfflineProgress(user2, assignmentId);
+    expect(bobProgress).toBeNull();
+  });
+
+  it("saves and retrieves offline collection snapshot durably", async () => {
+    await saveOfflineSnapshot(user1, assignmentId, {
+      assignmentId,
+      revision: 2,
+      title: "Essential Verbs",
+      level: "B1",
+      words: sampleWords,
+      downloadedAt: "2026-11-19T12:00:00Z",
+    });
+
+    const snapshot = await getOfflineSnapshot(user1, assignmentId);
+    expect(snapshot).not.toBeNull();
+    expect(snapshot?.revision).toBe(2);
+    expect(snapshot?.title).toBe("Essential Verbs");
+    expect(snapshot?.words.length).toBe(3);
+    expect(snapshot?.words[0].english).toBe("apple");
+  });
+
+  it("enqueues flashcard mutations and preserves progress locally", async () => {
+    // Initial progress
+    await saveOfflineProgress(user1, assignmentId, {
+      lastWordId: "w1",
+      familiarity: {},
+      order: ["w1", "w2", "w3"],
+      lastStudiedAt: null,
+    });
+
+    // Mark w1 as known offline
+    const mut1 = await enqueueFlashcardMutation(user1, assignmentId, {
+      wordId: "w1",
+      status: "known",
+      lastWordId: "w2",
+    });
+
+    expect(mut1.opId).toBeDefined();
+    expect(mut1.wordId).toBe("w1");
+    expect(mut1.status).toBe("known");
+
+    // Local progress is updated immediately
+    const progress = await getOfflineProgress(user1, assignmentId);
+    expect(progress?.lastWordId).toBe("w2");
+    expect(progress?.familiarity.w1).toBe("known");
+
+    // Mutation is queued
+    const pending = await getPendingMutations(user1, assignmentId);
+    expect(pending.length).toBe(1);
+    expect(pending[0].opId).toBe(mut1.opId);
+
+    // Enqueue second mutation (shuffle order)
+    const mut2 = await enqueueFlashcardMutation(user1, assignmentId, {
+      order: ["w3", "w2", "w1"],
+      lastWordId: "w3",
+    });
+
+    const pending2 = await getPendingMutations(user1, assignmentId);
+    expect(pending2.length).toBe(2);
+    expect(pending2[1].opId).toBe(mut2.opId);
+
+    const progress2 = await getOfflineProgress(user1, assignmentId);
+    expect(progress2?.order).toEqual(["w3", "w2", "w1"]);
+    expect(progress2?.lastWordId).toBe("w3");
+  });
+
+  it("acknowledges mutations and removes them from the pending queue", async () => {
+    const mut1 = await enqueueFlashcardMutation(user1, assignmentId, {
+      wordId: "w1",
+      status: "known",
+    });
+    const mut2 = await enqueueFlashcardMutation(user1, assignmentId, {
+      wordId: "w2",
+      status: "practice",
+    });
+
+    const pendingBefore = await getPendingMutations(user1, assignmentId);
+    expect(pendingBefore.length).toBe(2);
+
+    const removed = await acknowledgeMutations(user1, assignmentId, [mut1.opId]);
+    expect(removed).toBe(1);
+
+    const pendingAfter = await getPendingMutations(user1, assignmentId);
+    expect(pendingAfter.length).toBe(1);
+    expect(pendingAfter[0].opId).toBe(mut2.opId);
+  });
+
+  it("syncs offline flashcards when online and reconciles server response", async () => {
+    const mut = await enqueueFlashcardMutation(user1, assignmentId, {
+      wordId: "w1",
+      status: "known",
+      lastWordId: "w2",
+    });
+
+    vi.mocked(api.post).mockResolvedValueOnce({
+      lastWordId: "w2",
+      familiarity: { w1: "known" },
+      order: ["w1", "w2", "w3"],
+      lastStudiedAt: "2026-11-19T14:00:00Z",
+      acknowledgedOpIds: [mut.opId],
+      serverRevision: 1,
+    });
+
+    const result = await syncOfflineFlashcards(user1, assignmentId);
+    expect(result.success).toBe(true);
+    expect(result.acknowledgedCount).toBe(1);
+    expect(result.remainingCount).toBe(0);
+
+    const pending = await getPendingMutations(user1, assignmentId);
+    expect(pending.length).toBe(0);
+
+    const updated = await getOfflineProgress(user1, assignmentId);
+    expect(updated?.familiarity.w1).toBe("known");
+    expect(updated?.serverRevision).toBe(1);
+  });
+
+  it("handles offline sync failure gracefully without losing queued mutations", async () => {
+    await enqueueFlashcardMutation(user1, assignmentId, {
+      wordId: "w1",
+      status: "known",
+    });
+
+    vi.mocked(api.post).mockRejectedValueOnce(new Error("Network offline"));
+    vi.mocked(api.patch).mockRejectedValueOnce(new Error("Network offline"));
+
+    const result = await syncOfflineFlashcards(user1, assignmentId);
+    expect(result.success).toBe(false);
+    expect(result.remainingCount).toBe(1);
+
+    // Queue remains intact
+    const pending = await getPendingMutations(user1, assignmentId);
+    expect(pending.length).toBe(1);
+  });
+
+  it("downloads vocabulary for offline study and seeds local store", async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes("/snapshot")) {
+        return {
+          revision: 3,
+          title: "IELTS Core",
+          level: "C1",
+          words: sampleWords,
+        };
+      }
+      if (path.includes("/flashcards")) {
+        return {
+          lastWordId: "w1",
+          familiarity: { w1: "known" },
+          order: ["w1", "w2", "w3"],
+          lastStudiedAt: "2026-11-19T10:00:00Z",
+        };
+      }
+      return sampleWords;
+    });
+
+    const snapshot = await downloadVocabularyForOffline(user1, assignmentId);
+    expect(snapshot.title).toBe("IELTS Core");
+    expect(snapshot.words.length).toBe(3);
+
+    const localSnap = await getOfflineSnapshot(user1, assignmentId);
+    expect(localSnap).not.toBeNull();
+    expect(localSnap?.revision).toBe(3);
+
+    const localProgress = await getOfflineProgress(user1, assignmentId);
+    expect(localProgress?.familiarity.w1).toBe("known");
+  });
+});

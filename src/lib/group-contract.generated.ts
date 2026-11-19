@@ -339,6 +339,17 @@ export type VocabularyFlashcards = {
   familiarity: Record<string, "known" | "practice">;
   order: Array<string>;
   lastStudiedAt: string | null;
+  acknowledgedOpIds?: Array<string>;
+  serverRevision?: number;
+};
+
+export type VocabularyFlashcardMutation = {
+  opId: string;
+  wordId?: string;
+  status?: "known" | "practice";
+  lastWordId?: string;
+  order?: Array<string>;
+  timestamp?: string;
 };
 
 export type VocabularyFlashcardChange = {
@@ -346,6 +357,15 @@ export type VocabularyFlashcardChange = {
   wordId?: string;
   status?: "known" | "practice";
   order?: Array<string>;
+  mutations?: Array<VocabularyFlashcardMutation>;
+  clientRevision?: number;
+};
+
+export type VocabularyCollectionSnapshot = {
+  revision: number;
+  title: string;
+  level: string;
+  words: Array<VocabularyCard>;
 };
 
 export type VocabularyReviewHistory = {
