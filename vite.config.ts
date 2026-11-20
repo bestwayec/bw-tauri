@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
+import { DEFAULT_API_BASE_URL, validateApiBaseUrl } from "./src/lib/api-origin";
 
 // https://vite.dev/config/
 // NOTE (CSP TA-12): Tailwind v4 prod output is fully static — @tailwindcss/vite
@@ -12,8 +13,16 @@ import path from "node:path";
 // motion/react frame writes, body scroll-lock, and OGL canvas sizing — NOT for
 // Tailwind. The sole static <style> block (index.html boot splash) is additionally
 // pinned via a sha256 hash in tauri.conf.json CSP.
-export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), 'BESTWAY_');
+export default defineConfig(({ command, mode }) => {
+  const env = loadEnv(mode, process.cwd(), ["BESTWAY_", "VITE_"]);
+  if (command === "build") {
+    const apiUrl = env.BESTWAY_API_URL ?? env.VITE_API_URL;
+    try {
+      validateApiBaseUrl(apiUrl?.trim() || DEFAULT_API_BASE_URL, false);
+    } catch {
+      throw new Error("Set BESTWAY_API_URL or VITE_API_URL to a valid HTTPS API base URL before building.");
+    }
+  }
   return {
   plugins: [react(), tailwindcss()],
   clearScreen: false,
