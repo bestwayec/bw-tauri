@@ -55,17 +55,17 @@ All widgets, modals, and actions operate on authentic backend endpoints (`/v1/st
 
 | Target | Command | Result | Notes |
 | :--- | :--- | :--- | :--- |
-| `bw-tauri` Tests | `npm test` | **PASS (56 files, 462 tests)** | Unit & integration tests |
+| `bw-tauri` Tests | `npm test` | **PASS (59 files, 471 tests)** | Unit & integration tests (100%) |
 | `bw-tauri` Navigation | `npm test -- navigation.test.tsx` | **PASS (5/5 tests)** | Strict navigation contract preserved |
 | `bw-tauri` Type Check | `npx tsc --noEmit` | **PASS (0 errors)** | Full TypeScript validation |
 | `bw-tauri` Web Build | `npm run build` | **PASS** | Vite production bundle compiled |
 | `bw-tauri` Rust Core | `cargo check` | **PASS** | 0 warnings, 0 errors |
 | `bestway/frontend` Lint | `npm run lint` | **PASS (0 errors)** | ESLint validation passed |
-| `bestway/frontend` Tests | `npx vitest run ...` | **PASS (100% of tested suites)** | All unit and component specs green |
-| `bestway/frontend` Build | `npm run build` | **PASS (55/55 static pages)** | Next.js production build succeeded |
-| `backend-django` Tests | `python manage.py test tests.test_vocabulary_offline_sync` | **PASS (6/6 tests)** | Database sync and transaction tests |
-| Hosted CI (`bw-tauri`) | `gh run list` | **PASS (Run 44564261850)** | CI, Android, Windows, Browser runs green |
-| Hosted CI (`bestway`) | `gh run list` | **PASS (Run 44559180803)** | Frontend and Django pipelines green |
+| `bestway/frontend` Tests | `npm test` | **PASS (126 files, 837 tests)** | All unit and design-system specs green (100%) |
+| `bestway/frontend` Build | `npm run build` | **PASS (88/88 static routes)** | Next.js production build succeeded |
+| `backend-django` Tests | `python manage.py test tests.test_teacher_submissions tests.test_vocabulary_offline_sync` | **PASS (10/10 tests)** | Database submissions, auth & sync tests |
+| Hosted CI (`bw-tauri`) | `gh run list` | **PASS (Runs 44664995722 / 44569012772)** | CI, Android, Windows, Browser runs green |
+| Hosted CI (`bestway`) | `gh run list` | **PASS (Runs 44664978907 / 44569102693)** | Frontend, Django & CodeQL pipelines green |
 
 ---
 

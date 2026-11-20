@@ -80,20 +80,27 @@ BestWay Windows desktop ilovasini (Tauri v2 / Rust, Win32, React 19, TypeScript,
     - **Exams & Assignments Deep Linking (Phase 04.5)**:
       - Topshiriqlardan "Imtihonni boshlash" bosilganda mos mock exam yoki test bevosita ishga tushiriladi (`onStartExamById`), qo'lda qidirish talab etilmaydi.
       - Boshlangan imtihonlarni xavfsiz davom ettirish (resume) saqlandi.
+    - **Stage 04 Yakuniy Integratsiya & Handoff (Phase 04.A - 04.K)**:
+      - `TeacherDashboard.tsx` da soxta "0" ko'rsatkichlari olib tashlandi: Yuklanish (`…`), Xatolik (`Xatolik · Qayta urinish ⟳`) va Haqiqiy Nol (`0`/`—`) qat'iy ajratildi.
+      - `StudentAttendanceWidget.tsx` va `assignments.ts` da yutib yuborilgan (swallowed) xatolar tozalandi, qayta urinish tugmalari qo'shildi.
+      - `StudentOfflineVocabWidget.tsx` da IndexedDB dagi oflayn to'plamlar, so'zlar soni, navbatdagi mutatsiyalar soni va qo'lda sinxronlash tugmasi integratsiya qilindi.
+      - `UnifiedStudentProfileModal.tsx` ga Escape va backdrop orqali yopish, WAI-ARIA atributlari va faol/tarixiy guruh a'zoligi nishonlari qo'shildi.
+      - Authoritative backend `GET /v1/teacher/submissions` va `POST /v1/teacher/submissions/<id>/grade` endpointlari o'qituvchilar uchun ajratilgan guruh chegarasi (`student__group__teacher_id=actor.id`) bilan ulandi.
+      - `docs/BESTWAY_NEXT_STAGE04_SOL_AUDIT_HANDOFF.md` Sol 6.2 mustaqil auditi uchun 7 bo'limli rubrika bilan to'liq tayyorlandi.
     - **Sifat va Testlar**:
-      - `npm test`: **56 ta test fayli, 462 ta vitest testi (100% PASS)**.
+      - `npm test`: **59 ta test fayli, 471 ta vitest testi (100% PASS, 0 ta xato)**.
       - `npx tsc --noEmit`: **0 ta xato**.
-      - `npm run build`: **Vite bundle 100% muvaffaqiyatli build bo'ldi**.
-      - `cargo check`: **0 ta xato, 0 ta ogohlantirish**.
-      - Hujjatlar: `docs/BESTWAY_NEXT_STAGE04_PROGRESS.md` yaratildi.
+      - `npm run build`: **Vite bundle 100% muvaffaqiyatli build bo'ldi (773 modul, 15.5s)**.
+      - `cargo check`: **0 ta xato, 0 ta ogohlantirish (20.1s)**.
+      - Push tasdiqlandi: `e119b68fd5d2df2268fd327ce1b0f0cccb7e51c6` (PR #38).
 
 ## 3. Jarayonda
-- Barcha talablar to'liq bajarildi, PR #38 (Desktop/Mobile) va PR #206 (Backend) xavfsiz holda DRAFT rejimida saqlanmoqda.
+- Stage 04 to'liq yakunlandi va tasdiqlandi. PR #38 (Desktop/Mobile) va PR #206 (Backend) xavfsiz holda DRAFT rejimida saqlanmoqda.
 
 ## 4. Keyingi Qadamlar
-- Foydalanuvchidan PR #38 va PR #206 ni ko'rib chiqish bo'yicha ko'rsatma olish.
-- Jismoniy Android / Windows qurilmalarda hardware audio va sensorlarni sinovdan o'tkazish.
-- Ishlab chiqarish nashri chiqarishga ruxsat berilganda Release Keystore orqali rasmiy paketlarni tayyorlash.
+- GPT-6.2 Sol mustaqil auditini o'tkazish (`docs/BESTWAY_NEXT_STAGE04_SOL_AUDIT_HANDOFF.md` bo'yicha).
+- Jismoniy Android / Windows qurilmalarda hardware sensorlarni tekshirish.
+- Foydalanuvchi ko'rsatmasiga binoan keyingi bosqichga o'tish.
 
 ## 5. Muhim Qarorlar
 - **Zero AI Attribution**: Barcha git kommitlari faqat Komiljon Roziyev (kruziyev0@gmail.com) nomidan amalga oshiriladi, AI imzolari yoki belgilariga mutlaqo yo'l qo'yilmaydi.
