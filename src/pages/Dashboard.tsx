@@ -451,7 +451,7 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
       {/* Unified Student Workspace: Classroom, Assignments, Attendance & Offline Vocab */}
       <div className="grid gap-4 lg:grid-cols-12">
         <div className="space-y-4 lg:col-span-8">
-          <StudentClassroomWidget />
+          <StudentClassroomWidget userId={userId} />
           {openingAssignment && <p role="status">Imtihon ochilmoqda… / Opening assigned exam…</p>}
           {assignmentError && <p role="alert">{assignmentError}</p>}
           <StudentAssignmentsWidget
@@ -461,7 +461,7 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
           />
         </div>
         <div className="space-y-4 lg:col-span-4">
-          <StudentAttendanceWidget />
+          <StudentAttendanceWidget userId={userId} />
           <StudentOfflineVocabWidget onNavigate={onNavigate} userId={userId} />
         </div>
       </div>

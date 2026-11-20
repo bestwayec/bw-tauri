@@ -8,11 +8,11 @@ function currentYearMonth(): string {
   return `${year}-${month}`;
 }
 
-export function StudentAttendanceWidget() {
+export function StudentAttendanceWidget({ userId }: { userId: string }) {
   const month = currentYearMonth();
   const { data: records, isLoading, isError, refetch } = useQuery<StudentAttendanceItem[]>({
-    queryKey: ["my-attendance", month],
-    queryFn: () => fetchMyAttendance(month),
+    queryKey: ["my-attendance", userId, month],
+    queryFn: ({ signal }) => fetchMyAttendance(month, signal),
     staleTime: 60_000,
   });
 
@@ -32,12 +32,12 @@ export function StudentAttendanceWidget() {
           <div>
             <h3 className="text-sm font-bold text-white">Davomat (Joriy oy)</h3>
             <p className="text-[11px] text-slate-400">
-              {totalDays > 0 ? `${totalDays} dars belgilangan` : "Davomat ma'lumotlari"}
+              {!isError && totalDays > 0 ? `${totalDays} dars belgilangan` : "Davomat ma'lumotlari"}
             </p>
           </div>
         </div>
 
-        {attendancePct !== null && (
+        {!isError && attendancePct !== null && (
           <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-black text-emerald-300">
             {attendancePct}% Ishtirok
           </span>

@@ -45,7 +45,8 @@ export async function joinCohortByCode(code: string): Promise<{ cohort_name: str
   });
 }
 
-export async function fetchMyAttendance(month?: string): Promise<StudentAttendanceItem[]> {
-  const data = await get<StudentAttendanceItem[]>("/v1/attendance", month ? { month } : undefined);
-  return Array.isArray(data) ? data : [];
+export async function fetchMyAttendance(month?: string, signal?: AbortSignal): Promise<StudentAttendanceItem[]> {
+  const data = await get<StudentAttendanceItem[]>("/v1/attendance", month ? { month } : undefined, { signal });
+  if (!Array.isArray(data)) throw new Error("Invalid attendance data");
+  return data;
 }

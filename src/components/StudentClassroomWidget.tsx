@@ -1,14 +1,21 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { joinCohortByCode } from "@/lib/assignments";
-import { useSessionStore } from "@/lib/session-store";
+import { get } from "@/lib/api";
+import type { GroupListItem } from "@/lib/group-contract.generated";
 
-export function StudentClassroomWidget() {
+export function StudentClassroomWidget({ userId }: { userId: string }) {
   const queryClient = useQueryClient();
-  const profile = useSessionStore((state) => state.profile);
-  const groupName = profile && "groupName" in profile ? (profile.groupName as string | null) : null;
-  const groupId = profile && "groupId" in profile ? (profile.groupId as string | null) : null;
-  const currentPoints = profile && "currentPoints" in profile ? (profile.currentPoints as number | undefined) : 0;
+  const groupKey = ["student-classroom", userId] as const;
+  const classroom = useQuery({
+    queryKey: groupKey,
+    queryFn: async ({ signal }) => {
+      const groups = await get<GroupListItem[]>("/v1/groups", undefined, { signal });
+      if (!Array.isArray(groups)) throw new Error("Invalid classroom data");
+      return groups[0] ?? null;
+    },
+  });
+  const group = classroom.isSuccess ? classroom.data : null;
 
   const [code, setCode] = useState("");
   const [showJoinModal, setShowJoinModal] = useState(false);
@@ -21,7 +28,7 @@ export function StudentClassroomWidget() {
       setCode("");
       setShowJoinModal(false);
       void queryClient.invalidateQueries({ queryKey: ["my-assignments"] });
-      void queryClient.invalidateQueries({ queryKey: ["me"] });
+      void queryClient.invalidateQueries({ queryKey: groupKey });
     },
     onError: (err: unknown) => {
       const msg = typeof err === "object" && err && "message" in err ? String(err.message) : "Taklif kodi noto'g'ri yoki guruh topilmadi.";
@@ -44,24 +51,25 @@ export function StudentClassroomWidget() {
           <div>
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Guruh / Sinf</span>
-              {groupId && (
+              {group && (
                 <span className="rounded-md bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
                   Faol a'zo
                 </span>
               )}
             </div>
             <p className="font-bold text-white text-base">
-              {groupName ? groupName : "Guruhga biriktirilmagan"}
+              {classroom.isPending ? "Sinf yuklanmoqda… / Loading classroom…"
+                : classroom.isError ? "Sinf yuklanmadi / Could not load classroom"
+                : group?.name ?? "Guruhga biriktirilmagan"}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
-          {groupId && (
-            <div className="text-right">
-              <p className="text-[10px] font-bold uppercase text-slate-400">Reyting ballari</p>
-              <p className="text-sm font-black tabular-nums text-emerald-400">⭐️ {currentPoints ?? 0} pts</p>
-            </div>
+          {classroom.isError && (
+            <button type="button" onClick={() => void classroom.refetch()} className="text-xs underline">
+              Qayta urinish / Retry
+            </button>
           )}
 
           <button
@@ -69,7 +77,7 @@ export function StudentClassroomWidget() {
             onClick={() => setShowJoinModal(true)}
             className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-all"
           >
-            {groupId ? "Boshqa guruh kodi" : "Guruh kodini kiritish →"}
+            {group ? "Boshqa guruh kodi" : "Guruh kodini kiritish →"}
           </button>
         </div>
       </div>

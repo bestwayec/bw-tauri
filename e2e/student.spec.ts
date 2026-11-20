@@ -25,6 +25,15 @@ test('student password login stores no plaintext credentials and survives reload
   await context.setOffline(false);
 });
 
+test('classroom widget uses the student’s enrolled classroom endpoint', async ({ page }) => {
+  await page.route('**/v1/groups', (route) => route.fulfill({
+    json: { success: true, data: [{ id: 'classroom-one', name: 'Enrolled classroom fixture' }] },
+  }));
+  await signIn(page);
+  await expect(page.getByText('Enrolled classroom fixture', { exact: true })).toBeVisible();
+  await expect(page.getByText('Guruhga biriktirilmagan', { exact: true })).toHaveCount(0);
+});
+
 test('same-origin logout invalidates another open tab and its authenticated UI', async ({ page, context }) => {
   await signIn(page);
   const second = await context.newPage();
