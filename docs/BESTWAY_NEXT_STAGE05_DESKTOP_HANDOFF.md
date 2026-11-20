@@ -6,6 +6,8 @@ The starting desktop commit was `b0443fd1b98f9f7fee28e8c4b508fea07ed13034`. The 
 
 Stage 05 adds classroom search, direct classroom entry, roster search, workspace landmarks, actionable dashboard links, and controls that show vocabulary pending and selected states. Classroom previews render eight cards at a time and the enrolled roster renders 25 rows at a time. The teacher preview requests five compact rows and an authoritative total. The reduced-motion preference disables the route entrance transition. The exam runner and its recovery rules retain their existing behavior.
 
+Against disposable Django, Chromium restarted with the server unreachable and retained the downloaded assignment and pending edit. After a manual sync, the server acknowledged one operation and the app recovered the assignment list from its connection error. A repeat of the same operation left its server revision unchanged.
+
 ## Reproduce
 
 1. Use this PR’s commit and the companion backend marked in the website report. Run `npm ci`, `npm run build` and `npm test`. See Checks for the Rust and browser recovery jobs and installed platform validation.

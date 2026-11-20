@@ -172,7 +172,12 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
       void queryClient.invalidateQueries({ queryKey: ["offline-vocab-pending", userId, id] });
       void queryClient.invalidateQueries({ queryKey: ["offline-vocab-progress", userId, id] });
       void queryClient.invalidateQueries({ queryKey: progressKey });
-      setSyncStatus(res.success && res.remainingCount === 0 ? "success" : "error");
+      const complete = res.success && res.remainingCount === 0;
+      const assignmentListKey = ["vocabulary-assignments", userId];
+      if (complete && queryClient.getQueryState(assignmentListKey)?.status === "error") {
+        void queryClient.invalidateQueries({ queryKey: assignmentListKey });
+      }
+      setSyncStatus(complete ? "success" : "error");
     } catch {
       setSyncStatus("error");
     }

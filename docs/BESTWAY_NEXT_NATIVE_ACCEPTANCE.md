@@ -22,7 +22,7 @@ Use the commit shown on [desktop PR #38](https://github.com/bestwayec/bw-tauri/p
 
 ## Evidence boundary
 
-The installed Linux Debian test package completed HTTPS login, classroom and Studio navigation, process restart with the existing file fallback, and recorded-audio playback into a virtual PulseAudio sink. The Windows job installs and launches the NSIS test artifact on the hosted Windows runner and records startup and app working-set measurements. The Android runner attempts offline emulator install and launch using the debug APK. See the PR Checks page for the selected commit's outcome. Physical hardware, signed release artifacts, Windows and Android authenticated integration, and native exam recovery remain open.
+The installed Linux Debian test package completed HTTPS login, an offline vocabulary edit, process restart with Secret Service restoration, and sync to Django. This flow also passed with the optimized unsigned installer used for acceptance. A previous Linux test exercised recorded-audio playback into a virtual PulseAudio sink. The Windows job installs and launches the NSIS test artifact on the hosted Windows runner and records startup and app working-set measurements. The Android job installs and launches the debug APK offline on an emulator. See the PR Checks page for the selected commit's outcome. Physical hardware, signed release artifacts, Windows and Android authenticated integration, and native exam recovery remain open.
 
 [Desktop checks](https://github.com/bestwayec/bw-tauri/pull/38/checks)
 
