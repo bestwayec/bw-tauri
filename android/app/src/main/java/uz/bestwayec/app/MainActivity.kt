@@ -392,9 +392,8 @@ class MainActivity : AppCompatActivity() {
         progressBar.visibility = View.VISIBLE
 
         Thread {
-            var success = false
             var errorMessage: String? = null
-            var accessToken: String? = null
+            var session: DesktopSession? = null
 
             try {
                 val url = URL("$API_BASE_URL/auth/desktop/exchange")
@@ -422,13 +421,8 @@ class MainActivity : AppCompatActivity() {
                 val responseCode = connection.responseCode
                 if (responseCode in 200..299) {
                     val responseText = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                    val json = JSONObject(responseText)
-                    accessToken = json.optString("accessToken").ifEmpty { json.optString("token") }
-                    if (!accessToken.isNullOrBlank()) {
-                        success = true
-                    } else {
-                        errorMessage = "Server javobida token topilmadi"
-                    }
+                    session = DesktopSession.fromExchange(JSONObject(responseText))
+                    if (session == null) errorMessage = "Server javobida sessiya topilmadi"
                 } else {
                     val errorText = try {
                         connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
@@ -445,17 +439,16 @@ class MainActivity : AppCompatActivity() {
                 errorMessage = "Tarmoq xatosi: ${e.localizedMessage ?: "Server bilan aloqa o'rnatib bo'lmadi"}"
             }
 
+            val websiteSession = session
             runOnUiThread {
                 progressBar.visibility = View.GONE
-                if (success && !accessToken.isNullOrBlank()) {
+                if (websiteSession != null) {
                     val cookieManager = CookieManager.getInstance()
                     cookieManager.setAcceptCookie(true)
-                    cookieManager.setAcceptThirdPartyCookies(webView, true)
-                    val domain = "https://bestwayec.uz"
-                    cookieManager.setCookie(domain, "token=$accessToken; path=/; max-age=2592000; Secure; SameSite=Lax")
-                    cookieManager.setCookie(domain, "access_token=$accessToken; path=/; max-age=2592000; Secure; SameSite=Lax")
-                    cookieManager.setCookie(domain, "bw_mobile_app=1; path=/; max-age=31536000; Secure; SameSite=Lax")
-                    cookieManager.setCookie("https://api.bestwayec.uz", "token=$accessToken; path=/; max-age=2592000; Secure; SameSite=Lax")
+                    cookieManager.setCookie(BASE_URL, "token=; Path=/; Max-Age=0; Secure")
+                    cookieManager.setCookie(BASE_URL, "access_token=; Path=/; Max-Age=0; Secure")
+                    cookieManager.setCookie(API_BASE_URL, "token=; Path=/; Max-Age=0; Secure")
+                    websiteSession.websiteCookies().forEach { cookieManager.setCookie(BASE_URL, it) }
                     cookieManager.flush()
 
                     Toast.makeText(this@MainActivity, "Muvaffaqiyatli tizimga kirildi", Toast.LENGTH_SHORT).show()
