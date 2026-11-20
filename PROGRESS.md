@@ -8,13 +8,17 @@ BestWay Windows desktop ilovasini (Tauri v2 / Rust, Win32, React 19, TypeScript,
    - `src/styles.css`: tokenlar va sinf nomlari veb globals bilan 100% muvofiqlashtirildi (`.workspace-panel-interactive`, `.workspace-badge`, `.workspace-skeleton`, `.workspace-table`).
    - `src/components/common/`: qayta ishlatiluvchi komponentlar (`EmptyState`, `StatCard`, `StatusBadge`, `WorkspaceTable`) yaratildi.
    - `src/components/common/ui-primitives.test.tsx`: barcha yangi dizayn primitivlari uchun vitest testlari qo'shildi.
-   - `src/pages/Dashboard.tsx` va `TeacherDashboard.tsx`: KPI ko'rsatkichlari, retry boshqaruvi va bo'sh holatlar yaxshilandi.
-   - `src/components/StudentAssignmentsWidget.tsx`: vazifalar uchun filter tablari (Faol, Barchasi, Tugallangan) va status nishonlari qo'shildi.
+   - `src/pages/Dashboard.tsx` va `TeacherDashboard.tsx`: KPI ko'rsatkichlari, retry boshqaruvi, bo'sh holatlar va sinf tezkor amallari ("Davomat / Attendance", "Vazifalar / Tasks") qo'shildi.
+   - `src/components/StudentAssignmentsWidget.tsx`: vazifalar uchun filter tablari (Faol, Barchasi, Tugallangan), status nishonlari va to'g'ridan-to'g'ri lug'at topshirig'ini ochish (`initialAssignmentId`) ulandi.
+   - `src/components/StudentAssignmentsWidget.test.tsx`: tab filtrlash, bo'sh va xatolik holatlari hamda amallar uchun yangi unit testlar to'plami yaratildi (4 ta test).
    - `src/components/StudentClassroomWidget.tsx`: o'qituvchi ma'lumoti, o'quvchilar soni va dars jadvali ko'rsatildi.
    - `src/pages/ClassroomWorkspace.tsx`: guruhni arxivlash/tiklash va o'quvchini boshqa guruhga ko'chirish (student transfer) modali yaratildi.
+   - `src/pages/GroupsResults.tsx`: `initialSection` parametri orqali to'g'ridan-to'g'ri bo'limga silliq o'tish (`scrollIntoView`) ta'minlandi.
+   - `src/pages/Vocabulary.tsx`: talabaga biriktirilgan lug'at to'plami ID'si bilan to'g'ridan-to'g'ri ochilish imkoniyati qo'shildi.
    - `src/pages/VocabularyStudio.tsx`: guruh topshiriqlari hisoboti uchun CSV va Excel (.xlsx) eksport imkoniyati qo'shildi.
-   - Testlar: 60 ta test fayli, 481 ta vitest testi (100% PASS); `tsc && vite build` (13.89s, 100% PASS).
-   - Git branch `feat/bestway-next-stage05-completion` push qilindi va Draft PR #39 ochildi (https://github.com/bestwayec/bw-tauri/pull/39).
+   - CI Windows Validation Fix: `.github/workflows/windows-validation.yml` va `tools/windows-validation.mjs` da WebView2 jarayon daraxti rekursiv qidiruvi va 30 soniyalik polling joriy qilindi. GitHub Actions run `44788090274` 6m51s da 100% yashil o'tdi.
+   - Testlar: 61 ta test fayli, 485 ta vitest testi (100% PASS); release/windows unit testlari 6 ta pass (100% PASS).
+   - Git branch `feat/bestway-next-stage05-completion` push qilindi (PR #39: https://github.com/bestwayec/bw-tauri/pull/39).
 1. **BestWay Apps 2.0 (PR #36)**:
    - To'liq desktop va Android ilova auditi yakunlandi va PR #36 orqali `main` ga birlashtirildi (`19e9ec9`).
    - Android OAuth PKCE xavfsizligi, SharedPreferences sessiya tiklanishi, WebView xavfsizligi va CI 5/5 to'liq muvaffaqiyatli yakunlandi.
