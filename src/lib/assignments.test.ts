@@ -61,8 +61,14 @@ describe("assignments client", () => {
   it("fetchMyAttendance passes month param if present", async () => {
     vi.mocked(api.get).mockResolvedValueOnce([{ date: "2026-11-18", state: "present" }]);
 
-    const res = await fetchMyAttendance("2026-11");
-    expect(api.get).toHaveBeenCalledWith("/v1/attendance", { month: "2026-11" });
+    const { signal } = new AbortController();
+    const res = await fetchMyAttendance("2026-11", signal);
+    expect(api.get).toHaveBeenCalledWith("/v1/attendance", { month: "2026-11" }, { signal });
     expect(res).toHaveLength(1);
   });
+  it("reports malformed attendance data as an error", async () => {
+    vi.mocked(api.get).mockResolvedValueOnce({ message: "Unexpected response" });
+    await expect(fetchMyAttendance()).rejects.toThrow("Invalid attendance data");
+  });
+
 });

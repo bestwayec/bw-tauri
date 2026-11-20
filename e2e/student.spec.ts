@@ -18,6 +18,7 @@ test('student password login stores no plaintext credentials and survives reload
   expect(storage).toEqual({ accessEncrypted: true, refreshEncrypted: true });
   await page.reload();
   await expect(page.getByRole('button', { name: /^Exams/ }).first()).toBeVisible();
+  await expect(page.getByText('Guruh / Sinf', { exact: true })).toBeVisible();
   await context.setOffline(true);
   // The running app must keep the restored identity through a network outage.
   await expect(page.getByRole('button', { name: /^Exams/ }).first()).toBeVisible();
@@ -32,6 +33,28 @@ test('classroom widget uses the student’s enrolled classroom endpoint', async 
   await signIn(page);
   await expect(page.getByText('Enrolled classroom fixture', { exact: true })).toBeVisible();
   await expect(page.getByText('Guruhga biriktirilmagan', { exact: true })).toHaveCount(0);
+});
+
+test('a classroom exam opens by assigned ID outside the active catalog track', async ({ page }) => {
+  await page.route('**/v1/student/my-assignments', (route) => route.fulfill({
+    json: { success: true, data: [{
+      id: 'classroom-assignment', title: 'Assigned IELTS', status: 'pending',
+      exam_id: 'exact-ielts', can_launch_exam: true, deadline: '2060-01-01T00:00:00Z',
+    }] },
+  }));
+  await page.route('**/v1/student/assignments/classroom-assignment/exam', (route) => route.fulfill({
+    json: { success: true, data: { id: 'exact-ielts', type: 'ielts_academic' } },
+  }));
+  await page.route('**/v1/mock/exams/exact-ielts', (route) => route.fulfill({
+    json: { success: true, data: {
+      id: 'exact-ielts', type: 'ielts_academic', profile: 'full_mock', title: 'Exact assigned exam',
+      isPublished: true, access: 'granted', ready: true, questionCount: 1, sections: [{ skill: 'writing' }],
+    } },
+  }));
+  await signIn(page);
+  await page.getByRole('listitem').filter({ hasText: 'Assigned IELTS' })
+    .getByRole('button', { name: /Imtihonni boshlash/ }).click();
+  await expect(page.getByRole('dialog').getByRole('heading', { name: 'Exact assigned exam' })).toBeVisible();
 });
 
 test('same-origin logout invalidates another open tab and its authenticated UI', async ({ page, context }) => {

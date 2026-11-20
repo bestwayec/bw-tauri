@@ -293,12 +293,20 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
       const assigned = await get<{ id: string; type: string }>(
         "/v1/student/assignments/" + encodeURIComponent(assignmentId) + "/exam",
       );
-      const program = assigned.type === "multilevel" ? "MULTILEVEL" : "IELTS";
-      const exams = await listMockExams(program);
-      const exam = exams.find((candidate) => candidate.id === assigned.id && candidate.type === assigned.type);
-      if (!exam?.isPublished || exam.ready === false) {
+      // The catalog is limited to the active track. Assignment access and
+      // exam access are checked independently by the exact-ID endpoints.
+      const detail = await get<Omit<MockExamListItem, "skills"> & {
+        sections: Array<{ skill: MockSkill }>;
+      }>("/mock/exams/" + encodeURIComponent(assigned.id));
+      if (detail.id !== assigned.id || detail.type !== assigned.type || !detail.isPublished
+        || detail.access !== "granted" || detail.ready === false || !detail.sections?.length) {
         throw new Error("Biriktirilgan imtihon hozir mavjud emas / Assigned exam is unavailable");
       }
+      const exam: MockExamListItem = {
+        ...detail,
+        skills: detail.sections.map(({ skill }) => skill),
+        durationMinutes: detail.durationMinutes ?? null,
+      };
       setStartMockError(null);
       setPicker({ mock: exam, mode: "timed", assignmentId });
     } catch (error) {
@@ -451,7 +459,7 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
       {/* Unified Student Workspace: Classroom, Assignments, Attendance & Offline Vocab */}
       <div className="grid gap-4 lg:grid-cols-12">
         <div className="space-y-4 lg:col-span-8">
-          <StudentClassroomWidget userId={userId} />
+          {userId && <StudentClassroomWidget userId={userId} />}
           {openingAssignment && <p role="status">Imtihon ochilmoqda… / Opening assigned exam…</p>}
           {assignmentError && <p role="alert">{assignmentError}</p>}
           <StudentAssignmentsWidget
@@ -461,7 +469,7 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
           />
         </div>
         <div className="space-y-4 lg:col-span-4">
-          <StudentAttendanceWidget userId={userId} />
+          {userId && <StudentAttendanceWidget userId={userId} />}
           <StudentOfflineVocabWidget onNavigate={onNavigate} userId={userId} />
         </div>
       </div>
