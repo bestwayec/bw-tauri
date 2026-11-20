@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
 import type { Route } from "@/App";
-import type { ApiError } from "@/lib/api";
+import { get, type ApiError } from "@/lib/api";
 import { isStaffRole } from "@/lib/auth";
 import {
   listTests,
@@ -31,6 +31,10 @@ import MockSectionPicker, { type MockStartChoice } from "@/components/exam-ui/Mo
 import { belongsToProgram, programQueryKey, type ExamProgram } from "@/lib/programs";
 import { useSessionStore } from "@/lib/session-store";
 import DeviceReadinessModal from "@/components/DeviceReadinessModal";
+import { StudentClassroomWidget } from "@/components/StudentClassroomWidget";
+import { StudentAssignmentsWidget } from "@/components/StudentAssignmentsWidget";
+import { StudentAttendanceWidget } from "@/components/StudentAttendanceWidget";
+import { StudentOfflineVocabWidget } from "@/components/StudentOfflineVocabWidget";
 
 type Props = {
   studentName: string | null;
@@ -100,7 +104,7 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
   const [resumingId, setResumingId] = useState<string | null>(null);
   const [startingMockId, setStartingMockId] = useState<string | null>(null);
   const [startMockError, setStartMockError] = useState<string | null>(null);
-  const [picker, setPicker] = useState<{ mock: MockExamListItem; mode: MockAttemptMode; defaultSection?: MockSkill } | null>(null);
+  const [picker, setPicker] = useState<{ mock: MockExamListItem; mode: MockAttemptMode; defaultSection?: MockSkill; assignmentId?: string } | null>(null);
   const [watchdogExpired, setWatchdogExpired] = useState(false);
   const [showReadiness, setShowReadiness] = useState(false);
 
@@ -206,7 +210,14 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
   const attempts: AttemptSummary[] | null =
     attemptsQuery.data?.filter((attempt) => belongsToProgram(attempt.testType, program)) ?? null;
 
-  const assigned = tests.length;
+  const catalogueReady = useAltTrack
+    ? altTestsQuery.isSuccess && altMocksQuery.isSuccess
+    : testsQuery.isSuccess && mocksQuery.isSuccess;
+  const catalogueFailed = useAltTrack
+    ? altTestsQuery.isError || altMocksQuery.isError
+    : testsQuery.isError || mocksQuery.isError;
+  const catalogueSize = tests.length;
+  const attemptCountsReady = attemptsQuery.isSuccess;
   const ready = tests.filter((t) => t.questionCount > 0).length;
   const inProgress = attempts?.filter((a) => a.status === "in_progress") ?? [];
   const completed = attempts?.filter((a) => a.status === "completed").length ?? 0;
@@ -250,6 +261,14 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
     setStartingMockId(mock.id);
     setStartMockError(null);
     try {
+      if (picker?.assignmentId) {
+        const current = await get<{ id: string; type: string }>(
+          "/v1/student/assignments/" + encodeURIComponent(picker.assignmentId) + "/exam",
+        );
+        if (current.id !== mock.id || current.type !== mock.type) {
+          throw new Error("Biriktirilgan imtihon o‘zgardi / Assigned exam has changed");
+        }
+      }
       const start = await startMockExam(mock.id, {
         mode: choice.mode,
         flow: choice.flow,
@@ -261,6 +280,39 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
       setStartMockError(`${mock.title}: ${friendlyError(e)}`);
     } finally {
       setStartingMockId(null);
+    }
+  }
+
+  const [assignmentError, setAssignmentError] = useState<string | null>(null);
+  const [openingAssignment, setOpeningAssignment] = useState(false);
+  async function openAssignedExam(assignmentId: string) {
+    if (openingAssignment) return;
+    setOpeningAssignment(true);
+    setAssignmentError(null);
+    try {
+      const assigned = await get<{ id: string; type: string }>(
+        "/v1/student/assignments/" + encodeURIComponent(assignmentId) + "/exam",
+      );
+      // The catalog is limited to the active track. Assignment access and
+      // exam access are checked independently by the exact-ID endpoints.
+      const detail = await get<Omit<MockExamListItem, "skills"> & {
+        sections: Array<{ skill: MockSkill }>;
+      }>("/mock/exams/" + encodeURIComponent(assigned.id));
+      if (detail.id !== assigned.id || detail.type !== assigned.type || !detail.isPublished
+        || detail.access !== "granted" || detail.ready === false || !detail.sections?.length) {
+        throw new Error("Biriktirilgan imtihon hozir mavjud emas / Assigned exam is unavailable");
+      }
+      const exam: MockExamListItem = {
+        ...detail,
+        skills: detail.sections.map(({ skill }) => skill),
+        durationMinutes: detail.durationMinutes ?? null,
+      };
+      setStartMockError(null);
+      setPicker({ mock: exam, mode: "timed", assignmentId });
+    } catch (error) {
+      setAssignmentError(friendlyError(error));
+    } finally {
+      setOpeningAssignment(false);
     }
   }
 
@@ -323,8 +375,6 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
 
   return (
     <section className="space-y-6">
-      <ExamTracks />
-
       {/* Header Bar */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
@@ -374,18 +424,12 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
             })}
           </div>
 
-          <span className="hidden items-center gap-1.5 text-[11px] text-slate-400 sm:inline-flex" aria-live="polite">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" aria-hidden />
-            Auto-sync
-          </span>
-
           <button
             type="button"
             onClick={() => setShowReadiness(true)}
             className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-all shadow-sm"
             title="Audio, mikrofon va tarmoqni tekshirish"
           >
-            <span>🛡️</span>
             <span>Device Readiness</span>
           </button>
 
@@ -398,11 +442,34 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
         </div>
       </div>
 
-      {/* Live PIN Join */}
-      <LiveExamPinJoin
-        onJoinedMock={onStartMock}
-        onNavigateExams={() => onNavigate("exams")}
-      />
+      <nav aria-label="O‘qish / Learning" className="flex flex-wrap gap-2">
+        <button type="button" className="workspace-control" onClick={() => onNavigate("vocabulary")}>Lug‘at / Vocabulary</button>
+        <button type="button" className="workspace-control" onClick={() => onNavigate("history")}>Natijalar / Results</button>
+        {inProgress.length > 0 && <a className="workspace-control inline-flex items-center" href="#dashboard-resume">
+          Davom ettirish / Resume
+        </a>}
+      </nav>
+
+      {/* Unified Student Workspace: Classroom, Assignments, Attendance & Offline Vocab */}
+      <div className="grid gap-4 lg:grid-cols-12">
+        <div className="space-y-4 lg:col-span-8">
+          {userId && <StudentClassroomWidget userId={userId} />}
+          {openingAssignment && <p role="status">Imtihon ochilmoqda… / Opening assigned exam…</p>}
+          {assignmentError && <p role="alert">{assignmentError}</p>}
+          <StudentAssignmentsWidget
+            userId={userId}
+            onNavigate={onNavigate}
+            onStartExam={(assignmentId) => void openAssignedExam(assignmentId)}
+          />
+        </div>
+        <div className="space-y-4 lg:col-span-4">
+          {userId && <StudentAttendanceWidget userId={userId} />}
+          <StudentOfflineVocabWidget onNavigate={onNavigate} userId={userId} />
+        </div>
+      </div>
+
+      <ExamTracks />
+      <LiveExamPinJoin onJoinedMock={onStartMock} onNavigateExams={() => onNavigate("exams")} />
 
       {/* Hero CEFR / IELTS Level & Goal Progress Banner */}
       <div className="relative overflow-hidden rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-[#111827] via-[#0F172A] to-[#0B0F17] p-6 shadow-xl">
@@ -486,29 +553,29 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
         {[
           {
             label: "Available Exams",
-            value: String(assigned),
-            sub: ready > 0 ? `${ready} ready to start` : "Syncing exams…",
+            value: catalogueReady ? String(catalogueSize) : "—",
+            sub: catalogueFailed ? "Unable to load catalog" : catalogueReady ? `${ready} ready to start` : "Loading exams…",
             accent: true,
             icon: "📚",
           },
           {
-            label: "Learning Streak",
-            value: completed > 0 ? `${Math.min(7, completed + 2)} Days` : "Active",
-            sub: "🔥 Daily Practice Streak",
+            label: "Scored Exams",
+            value: attemptCountsReady ? String(scored.length) : "—",
+            sub: attemptsQuery.isError ? "Unable to load results" : "Attempts with a saved score",
             accent: false,
-            icon: "🔥",
+            icon: "✓",
           },
           {
             label: "Active In Progress",
-            value: String(inProgress.length),
-            sub: inProgress.length > 0 ? "Resume current session" : "All caught up",
+            value: attemptCountsReady ? String(inProgress.length) : "—",
+            sub: attemptsQuery.isError ? "Unable to load attempts" : "Open exam attempts",
             accent: inProgress.length > 0,
             icon: "⏳",
           },
           {
             label: "Completed Tests",
-            value: completed > 0 || avg != null ? `${completed}` : "0",
-            sub: avg != null ? `Avg score: ${avg} pts` : "First score after submit",
+            value: attemptCountsReady ? String(completed) : "—",
+            sub: attemptsQuery.isError ? "Unable to load results" : avg != null ? `Avg score: ${avg} pts` : "Finished attempts",
             accent: false,
             icon: "✓",
           },
@@ -537,7 +604,7 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
         <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1.5">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-400">
-              Official CBT Sequence · {assigned} Available
+              Official CBT Sequence · {catalogueReady ? catalogueSize + " available" : "availability unavailable"}
             </span>
             <h3 className="text-xl font-bold tracking-tight text-white sm:text-2xl">
               {program === "MULTILEVEL"
@@ -642,7 +709,7 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
       {/* Active In-Progress and Recent Activity Panels */}
       <div className="grid gap-4 xl:grid-cols-2">
         {/* Continue in-progress */}
-        <div className="rounded-2xl border border-emerald-500/15 bg-[#111827] p-5">
+        <div id="dashboard-resume" className="workspace-panel scroll-mt-4 p-5">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-white">Continue where you left off</h3>
             <span className="rounded-full bg-[#0B0F17] px-2 py-0.5 text-[11px] text-emerald-300 ring-1 ring-emerald-500/20">

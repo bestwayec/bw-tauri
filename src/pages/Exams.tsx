@@ -256,7 +256,6 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
             className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-all shadow-sm"
             title="Audio, mikrofon va tarmoqni tekshirish"
           >
-            <span>🛡️</span>
             <span>Device Readiness</span>
           </button>
           <div
@@ -270,6 +269,7 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
                 <button
                   key={trk}
                   type="button"
+                  aria-pressed={active}
                   onClick={() => {
                     setManualTrack(trk);
                     setPracticeLevel("All");
@@ -286,10 +286,6 @@ export default function Exams({ studentName, onStart, onStartMock }: Props) {
               );
             })}
           </div>
-          <span className="hidden items-center gap-1.5 text-[11px] text-slate-400 sm:inline-flex" aria-live="polite">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" aria-hidden />
-            Auto-sync
-          </span>
         </div>
       </div>
 

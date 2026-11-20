@@ -17,6 +17,9 @@ const Locked = lazy(() => import("@/pages/Locked"));
 const Result = lazy(() => import("@/pages/Result"));
 const LiveProctoring = lazy(() => import("@/pages/LiveProctoring"));
 const GradingQueue = lazy(() => import("@/pages/GradingQueue"));
+const VocabularyStudio = lazy(() => import("@/pages/VocabularyStudio"));
+const TeacherDashboard = lazy(() => import("@/pages/TeacherDashboard"));
+const Vocabulary = lazy(() => import("@/pages/Vocabulary"));
 const GroupsResults = lazy(() => import("@/pages/GroupsResults"));
 const CenterOverview = lazy(() => import("@/pages/CenterOverview"));
 const StudentResults = lazy(() => import("@/pages/StudentResults"));
@@ -35,7 +38,8 @@ import ClickSpark from "@/components/ClickSpark";
 import CrashRecovery from "@/components/CrashRecovery";
 import ResumeExamModal, { persistActiveMockSession, persistActiveTestSession, clearActiveMockSession } from "@/components/ResumeExamModal";
 import { logout } from "@/lib/api";
-import { isAdminRole, isStaffRole, isTeacherRole } from "@/lib/auth";
+import { purgeAccountOfflineVocabulary } from "@/lib/offline-vocabulary";
+import { isAdminRole, isAllowedClientRole, isStaffRole, isTeacherRole, normalizeRole } from "@/lib/auth";
 import { useSessionStore } from "@/lib/session-store";
 import { tryTauriInvoke } from "@/hooks/useLockdown";
 import { usePrograms } from '@/lib/programs';
@@ -56,6 +60,7 @@ export type Route =
   | "dashboard"
   | "exams"
   | "history"
+  | "vocabulary"
   | "examTrack"
   | "profile"
   | "settings"
@@ -81,6 +86,7 @@ const TITLES: Record<Exclude<Route, "login">, string> = {
   dashboard: "Dashboard",
   exams: "Exams",
   history: "History",
+  vocabulary: "Vocabulary",
   examTrack: "Exam Track",
   profile: "Profile",
   settings: "Settings",
@@ -101,6 +107,7 @@ export default function App() {
   const queryClient = useQueryClient();
   const programs = usePrograms();
   const [route, setRoute] = useState<Route>("login");
+  const [classroomTarget, setClassroomTarget] = useState<{ userId: string; groupId: string } | null>(null);
   const [student, setStudent] = useState<Student | null>(null);
   const [, setRestoring] = useState(true);
   const [activeTest, setActiveTest] = useState<TestListItem | null>(null);
@@ -118,20 +125,8 @@ export default function App() {
     completed: number;
     avgScore: number | null;
   } | null>(null);
-  const cachedStudent = useRef<string | null>(null);
+  const sessionIdentity = useRef<string | null>(null);
   useEffect(() => { setStats(null); }, [programs.data?.activeProgram]);
-  useEffect(() => {
-    const id = student?.id ?? null;
-    if (cachedStudent.current === id) return;
-    if (id === null) queryClient.clear();
-    else queryClient.removeQueries({ predicate: (query) => query.queryKey[1] !== id });
-    if (cachedStudent.current !== null) {
-      setActiveTest(null); setActiveStart(null); setActiveMock(null); setActiveMockStart(null);
-      setActiveMockSection(null); setLastMockResult(null); setLastScore(null); setStats(null);
-    }
-    cachedStudent.current = id;
-  }, [student?.id, queryClient]);
-
   const [introLeaving, setIntroLeaving] = useState(false);
   const [introDone, setIntroDone] = useState(false);
   useEffect(() => {
@@ -181,15 +176,33 @@ export default function App() {
     let dead = false;
     const applySession = (status: string, profile: { id: string; name?: string | null; phone?: string | null; role?: string } | null) => {
       if (dead) return;
-      if (status !== "ready" || !profile?.id) {
-        if (status === "logged-out") {
+      if (status === "ready" || status === "logged-out") {
+        const allowed = status === "ready" && profile?.id && isAllowedClientRole(profile.role);
+        const identity = allowed ? JSON.stringify([profile.id, normalizeRole(profile.role)]) : null;
+        if (sessionIdentity.current !== identity) {
+          queryClient.clear();
+          setActiveTest(null);
+          setActiveStart(null);
+          setActiveMock(null);
+          setActiveMockStart(null);
+          setActiveMockSection(null);
+          setLastMockResult(null);
+          setLastScore(null);
+          setStats(null);
+          setShowExitConfirm(false);
+          setRoute("login");
+          sessionIdentity.current = identity;
+        }
+        if (!allowed) {
           setStudent(null);
           setRoute("login");
         }
+      }
+      if (status !== "ready" || !profile?.id || !isAllowedClientRole(profile.role)) {
         setRestoring(false);
         return;
       }
-      const role = profile.role || "student";
+      const role = normalizeRole(profile.role);
       setStudent({
         id: profile.id,
         name: typeof profile.name === "string" ? profile.name : null,
@@ -198,7 +211,7 @@ export default function App() {
       });
       setRoute((r) => {
         if (r === "login") {
-          if (isTeacherRole(role)) return "proctoring";
+          if (isTeacherRole(role)) return "dashboard";
           if (isAdminRole(role)) return "centerOverview";
           return "dashboard";
         }
@@ -214,7 +227,7 @@ export default function App() {
       dead = true;
       unsub();
     };
-  }, []);
+  }, [queryClient]);
 
   const navigate = (next: Route) => {
     const isExamRunning =
@@ -242,7 +255,17 @@ export default function App() {
       }
     };
     window.addEventListener("exam:reauth-required", onReauth);
-    return () => window.removeEventListener("exam:reauth-required", onReauth);
+    function checkSessionOnFocus() {
+      const r = routeRef.current;
+      if (r === "runner" || r === "mockSections" || r === "mockRunner" || r === "locked") return;
+      const session = useSessionStore.getState();
+      if (navigator.onLine && session.status === "ready") void session.revalidate();
+    }
+    window.addEventListener("focus", checkSessionOnFocus);
+    return () => {
+      window.removeEventListener("exam:reauth-required", onReauth);
+      window.removeEventListener("focus", checkSessionOnFocus);
+    };
   }, []);
 
   useEffect(() => {
@@ -355,9 +378,10 @@ export default function App() {
   };
 
   const handleLogin = (s: Student) => {
-    setStudent(s);
-    const role = s.role || "student";
-    if (isTeacherRole(role)) setRoute("proctoring");
+    if (!isAllowedClientRole(s.role)) return;
+    const role = normalizeRole(s.role);
+    setStudent({ ...s, role });
+    if (isTeacherRole(role)) setRoute("dashboard");
     else if (isAdminRole(role)) setRoute("centerOverview");
     else setRoute("dashboard");
   };
@@ -375,9 +399,18 @@ export default function App() {
   }, [isPrivilegedRole]);
 
   const handleLogout = async () => {
-    if (!confirm("Log out of Bestway Exam on this device?")) return;
+    if (!confirm("Log out of Bestway Exam on this device? Downloaded vocabulary and unsynced flashcard changes will be removed.")) return;
+    const accountId = student?.id;
     await logout().catch(() => undefined);
+    if (accountId) {
+      try {
+        await purgeAccountOfflineVocabulary(accountId);
+      } catch {
+        window.alert("Offline vocabulary could not be cleared. Remove this app’s local data before sharing the device.");
+      }
+    }
     setStudent(null);
+    setClassroomTarget(null);
     setActiveTest(null);
     setActiveStart(null);
     setActiveMock(null);
@@ -409,7 +442,7 @@ export default function App() {
             <LoginBackdrop webgl={webgl} reduceMotion={reduceMotion} />
           <main className="relative flex min-h-full items-center justify-center p-6">
             <div className="w-full max-w-md">
-              <Suspense fallback={null}>
+              <Suspense fallback={<div role="status" className="workspace-panel p-5 text-sm text-fg-muted">Yuklanmoqda / Loading…</div>}>
                 <Login onLogin={handleLogin} />
               </Suspense>
             </div>
@@ -516,19 +549,32 @@ export default function App() {
           <ClickSpark sparkColor="#10B981" sparkSize={10} sparkRadius={22} sparkCount={8} duration={420} className="flex min-h-0 flex-1 flex-col">
           <main className="min-h-0 flex-1 overflow-y-auto px-6 pb-8 pt-6 2xl:px-10">
             <motion.div
-              key={activeRoute + (activeRoute === "result" ? historyKey : "")}
-              initial={{ opacity: 0, y: 10 }}
+              key={`${student?.id}:${activeRoute}:${activeRoute === "result" ? historyKey : ""}`}
+              initial={reduceMotion ? false : { opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.18, ease: "easeOut" }}
+              transition={{ duration: reduceMotion ? 0 : 0.14, ease: "easeOut" }}
             >
               <Suspense fallback={null}>
               {activeRoute === "dashboard" && (
-                <Dashboard
-                  studentName={student?.name ?? null}
-                  onNavigate={navigate}
-                  onStart={handleStartExam}
-                  onStartMock={handleStartMock}
-                />
+                isTeacherRole(student?.role) ? (
+                  <TeacherDashboard
+                    teacherName={student?.name ?? null}
+                    userId={student?.id ?? ""}
+                    onNavigate={navigate}
+                    onOpenClassroom={(groupId) => {
+                      if (!student) return;
+                      setClassroomTarget({ userId: student.id, groupId });
+                      navigate("groups");
+                    }}
+                  />
+                ) : (
+                  <Dashboard
+                    studentName={student?.name ?? null}
+                    onNavigate={navigate}
+                    onStart={handleStartExam}
+                    onStartMock={handleStartMock}
+                  />
+                )
               )}
               {activeRoute === "exams" && (
                 <Exams
@@ -537,13 +583,16 @@ export default function App() {
                   onStartMock={handleStartMock}
                 />
               )}
+              {activeRoute === "vocabulary" && student?.role === "student" && <Vocabulary key={student.id} userId={student.id} />}
+              {activeRoute === "vocabulary" && student && isStaffRole(student.role) && <VocabularyStudio key={student.id} userId={student.id} />}
               {activeRoute === "history" && (
                 <History refreshKey={historyKey} onStats={setStats} />
               )}
               {activeRoute === "examTrack" && <ExamTrack onBrowse={() => navigate('exams')} />}
               {activeRoute === "proctoring" && <LiveProctoring />}
-              {activeRoute === "grading" && <GradingQueue />}
-              {activeRoute === "groups" && <GroupsResults />}
+              {activeRoute === "grading" && student && <GradingQueue key={student.id} userId={student.id} />}
+              {activeRoute === "groups" && student && <GroupsResults key={student.id} userId={student.id} role={student.role}
+                initialGroupId={classroomTarget?.userId === student.id ? classroomTarget.groupId : undefined} />}
               {activeRoute === "centerOverview" && <CenterOverview onNavigate={navigate} />}
               {activeRoute === "studentResults" && <StudentResults />}
               {activeRoute === "profile" && (

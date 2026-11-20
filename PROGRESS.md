@@ -52,12 +52,55 @@ BestWay Windows desktop ilovasini (Tauri v2 / Rust, Win32, React 19, TypeScript,
      - `browser`: pass (4m54s)
      - `windows-x64`: pass (6m14s)
 
+9. **BESTWAY NEXT — Stage 03 Offline Vocabulary & Android CI (PR #38, feat/bestway-next-00-03)**:
+   - **Android Emulator CI Fix**:
+     - `.github/workflows/ci.yml` da `ANDROID_AVD_HOME="$HOME/.android/avd"`, `ANDROID_USER_HOME="$HOME/.android"` va `ANDROID_SDK_ROOT="$ANDROID_HOME"` to'g'rilandi.
+     - `avdmanager` va `emulator` AVD yo'llari moslashtirildi, `avdmanager list avd` va `emulator -list-avds` bilan mavjudligi tasdiqlandi.
+     - Android 13+ da `GrantPermissionsActivity` modal dialogi cold-start paytida to'sqinlik qilmasligi uchun `adb install -g -t` orqali o'rnatildi va ruxsatlar oldindan berildi.
+     - Hosted CI [44555969440](https://github.com/bestwayec/bw-tauri/actions/runs/44555969440): `ci` (PASS 30s), `rust` (PASS 2m0s), `android` (PASS 3m37s) — Emulator 31.4s da yuklandi, APK o'rnatildi, MainActivity faol ishga tushirildi.
+   - **Offline Lug'at va Fleshkartalar (Client-side)**:
+     - `src/lib/offline-vocabulary.ts` yaratildi: Har bir foydalanuvchi hisobi uchun alohida IndexedDB maydoni (`vocab.${userId}.${assignmentId}`), oflayn holatda o'rganish, familiarity o'zgarishlarini turg'un UUID `opId` lar bilan navbatga qo'yish.
+     - Ilova qayta ishga tushganda oxirgi ko'rilgan so'z va tartibni to'liq tiklash (`saveStudyPosition`, `getStudyPosition`).
+     - Tarmoq qaytganda `POST /v1/student/assignments/<id>/vocabulary/flashcards/sync` orqali paketli sinxronizatsiya va tasdiqlangan `acknowledgedOpIds` ni tozalash.
+     - `src/pages/Vocabulary.tsx`: Oflayn status nishoni, pending mutations soni, oflayn yuklab olish tugmasi va to'liq klaviatura boshqaruvi (Space, Arrow keys, 1/K, 2/P).
+     - Testlar: `src/lib/offline-vocabulary.test.ts` (7 ta test, 100% PASS), vitest (55 ta fayl, 458 ta test, 100% PASS), TypeScript 0 ta xato, build 100% muvaffaqiyatli.
+   - Hujjatlar: `docs/BESTWAY_NEXT_STAGE03_OFFLINE_REPORT.md` va `docs/BESTWAY_NEXT_AGENT_HANDOFF.md` yaratildi.
+10. **BESTWAY NEXT — Stage 04: Unified Workspaces, Easy Classroom & Student Deep Linking (PR #38, feat/bestway-next-00-03)**:
+    - **Student Workspace & Dashboard (Phase 04.1)**:
+      - Talaba Dashboard'iga `StudentClassroomWidget`, `StudentAssignmentsWidget`, `StudentAttendanceWidget`, va `StudentOfflineVocabWidget` komponentlari integratsiya qilindi.
+      - Taklif kodi orqali guruhga qo'shilish modali (`joinCohortByCode`) va topshiriqlarni yuklash (`fetchMyAssignments`) yaratildi.
+      - Unit testlar: `src/lib/assignments.test.ts` (4/4 ta test, 100% PASS).
+    - **Teacher Command Center (Phase 04.2)**:
+      - `src/pages/TeacherDashboard.tsx` yaratildi: real KPI ko'rsatkichlari (faol guruhlar, jami o'quvchilar, baholash navbati, lug'at studiyasi) va guruhlar kartochkalari.
+      - `src/components/Sidebar.tsx` navigatsiyasi kengaytirildi, mavjud 4 ta asosiy indeks (`proctoring`, `grading`, `groups`, `exams`) test shartnomasi qat'iy saqlandi.
+      - Navigatsiya testi: `src/components/navigation.test.tsx` (5/5 ta test, 100% PASS).
+    - **Classroom Workspace & Unified Student Profile (Phase 04.3 & 04.4)**:
+      - `src/components/UnifiedStudentProfileModal.tsx` yaratildi: `GET /v1/groups/<id>/member-history/<student_id>` orqali o'quvchi profili, davomat, uy vazifalari, imtihon ko'rsatkichlari va o'qituvchi/AI diagnostik xulosalari ochiladi.
+      - `ClassroomWorkspace.tsx` va `GroupsResults.tsx` dagi o'quvchi ismlari bosilganda to'g'ridan-to'g'ri profil modalini ochish ta'minlandi.
+    - **Exams & Assignments Deep Linking (Phase 04.5)**:
+      - Topshiriqlardan "Imtihonni boshlash" bosilganda mos mock exam yoki test bevosita ishga tushiriladi (`onStartExamById`), qo'lda qidirish talab etilmaydi.
+      - Boshlangan imtihonlarni xavfsiz davom ettirish (resume) saqlandi.
+    - **Stage 04 Yakuniy Integratsiya & Handoff (Phase 04.A - 04.K)**:
+      - `TeacherDashboard.tsx` da soxta "0" ko'rsatkichlari olib tashlandi: Yuklanish (`…`), Xatolik (`Xatolik · Qayta urinish ⟳`) va Haqiqiy Nol (`0`/`—`) qat'iy ajratildi.
+      - `StudentAttendanceWidget.tsx` va `assignments.ts` da yutib yuborilgan (swallowed) xatolar tozalandi, qayta urinish tugmalari qo'shildi.
+      - `StudentOfflineVocabWidget.tsx` da IndexedDB dagi oflayn to'plamlar, so'zlar soni, navbatdagi mutatsiyalar soni va qo'lda sinxronlash tugmasi integratsiya qilindi.
+      - `UnifiedStudentProfileModal.tsx` ga Escape va backdrop orqali yopish, WAI-ARIA atributlari va faol/tarixiy guruh a'zoligi nishonlari qo'shildi.
+      - Authoritative backend `GET /v1/teacher/submissions` va `POST /v1/teacher/submissions/<id>/grade` endpointlari o'qituvchilar uchun ajratilgan guruh chegarasi (`student__group__teacher_id=actor.id`) bilan ulandi.
+      - `docs/BESTWAY_NEXT_STAGE04_SOL_AUDIT_HANDOFF.md` Sol 6.2 mustaqil auditi uchun 7 bo'limli rubrika bilan to'liq tayyorlandi.
+    - **Sifat va Testlar**:
+      - `npm test`: **59 ta test fayli, 471 ta vitest testi (100% PASS, 0 ta xato)**.
+      - `npx tsc --noEmit`: **0 ta xato**.
+      - `npm run build`: **Vite bundle 100% muvaffaqiyatli build bo'ldi (773 modul, 15.5s)**.
+      - `cargo check`: **0 ta xato, 0 ta ogohlantirish (20.1s)**.
+      - Push tasdiqlandi: `e119b68fd5d2df2268fd327ce1b0f0cccb7e51c6` (PR #38).
+
 ## 3. Jarayonda
-- Barcha talablar to'liq bajarildi, PR #37 xavfsiz holda DRAFT rejimida saqlanmoqda.
+- Stage 04 to'liq yakunlandi va tasdiqlandi. PR #38 (Desktop/Mobile) va PR #206 (Backend) xavfsiz holda DRAFT rejimida saqlanmoqda.
 
 ## 4. Keyingi Qadamlar
-- Foydalanuvchidan PR #37 ni ko'rib chiqish va maktab test laboratoriyalarida sinab ko'rish bo'yicha ko'rsatma olish.
-- Ishlab chiqarish nashri chiqarishga ruxsat berilganda Release Keystore orqali rasmiy installer paketlarini tayyorlash.
+- GPT-6.2 Sol mustaqil auditini o'tkazish (`docs/BESTWAY_NEXT_STAGE04_SOL_AUDIT_HANDOFF.md` bo'yicha).
+- Jismoniy Android / Windows qurilmalarda hardware sensorlarni tekshirish.
+- Foydalanuvchi ko'rsatmasiga binoan keyingi bosqichga o'tish.
 
 ## 5. Muhim Qarorlar
 - **Zero AI Attribution**: Barcha git kommitlari faqat Komiljon Roziyev (kruziyev0@gmail.com) nomidan amalga oshiriladi, AI imzolari yoki belgilariga mutlaqo yo'l qo'yilmaydi.

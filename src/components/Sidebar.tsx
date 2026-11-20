@@ -14,6 +14,7 @@ export type NavId =
   | "dashboard"
   | "exams"
   | "history"
+  | "vocabulary"
   | "examTrack"
   | "profile"
   | "settings"
@@ -99,6 +100,12 @@ const STUDENT_NAV: NavItem[] = [
     ),
   },
   {
+    id: "vocabulary",
+    label: "Vocabulary",
+    hint: "Assignments and review",
+    icon: icon(<><path d="M4 19V5a2 2 0 0 1 2-2h14v18H6a2 2 0 0 1 0-4h14" /><path d="M8 7h8M8 11h6" /></>),
+  },
+  {
     id: "profile",
     label: "Profile",
     hint: "Account",
@@ -171,6 +178,25 @@ const TEACHER_NAV: NavItem[] = [
         <path d="m9 15 2 2 4-4" />
       </>
     ),
+  },
+  {
+    id: "dashboard",
+    label: "Teacher Dashboard",
+    hint: "Ustoz boshqaruv paneli",
+    icon: icon(
+      <>
+        <rect width="7" height="9" x="3" y="3" rx="1" />
+        <rect width="7" height="5" x="14" y="3" rx="1" />
+        <rect width="7" height="9" x="14" y="12" rx="1" />
+        <rect width="7" height="5" x="3" y="16" rx="1" />
+      </>
+    ),
+  },
+  {
+    id: "vocabulary",
+    label: "Vocabulary studio",
+    hint: "Collections and assignments",
+    icon: icon(<><path d="M4 19V5a2 2 0 0 1 2-2h14v18H6a2 2 0 0 1 0-4h14" /><path d="M8 7h8M8 11h6" /></>),
   },
   {
     id: "profile",
@@ -265,6 +291,12 @@ const ADMIN_NAV: NavItem[] = [
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
       </>
     ),
+  },
+  {
+    id: "vocabulary",
+    label: "Vocabulary studio",
+    hint: "Collections and assignments",
+    icon: icon(<><path d="M4 19V5a2 2 0 0 1 2-2h14v18H6a2 2 0 0 1 0-4h14" /><path d="M8 7h8M8 11h6" /></>),
   },
 ];
 

@@ -1,459 +1,190 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, post } from "@/lib/api";
 
 export interface SubmissionItem {
   id: string;
+  questionId: string;
   studentName: string;
-  studentPhone: string;
   examTitle: string;
-  examType?: "IELTS" | "MULTILEVEL";
+  examType: "IELTS" | "MULTILEVEL";
   skill: "writing" | "speaking";
-  subType: string; // e.g. "Task 2 Essay" or "Part 2 Cue Card"
+  subType: string;
   submittedAt: string;
   status: "pending" | "graded";
   prompt: string;
-  // Writing payload
-  responseText?: string;
-  // Speaking payload
-  audioDurationSeconds?: number;
-  audioUrl?: string;
-  // Existing/draft scores
-  criteriaScores: {
-    c1: number; // TR or FC
-    c2: number; // CC or LR
-    c3: number; // LR or GRA
-    c4: number; // GRA or PR
-  };
+  responseText: string;
+  hasRecording: boolean;
+  hasHandwriting: boolean;
+  rawScore: boolean;
+  maxScore: number;
   overallBand: number | null;
-  teacherFeedback: string;
 }
 
-export default function GradingQueue() {
-  const [submissions, setSubmissions] = useState<SubmissionItem[]>([]);
-  useEffect(() => {
-    let active = true;
-    void (async () => {
-      try {
-        const res = await get<SubmissionItem[]>("/v1/teacher/submissions");
-        if (active && Array.isArray(res)) {
-          setSubmissions(res);
-          if (res.length > 0) setSelectedId(res[0].id);
-        }
-      } catch {
-        // empty queue when unavailable
-      }
-    })();
-    return () => { active = false; };
-  }, []);
-  const [selectedId, setSelectedId] = useState<string>("");
-  const [skillFilter, setSkillFilter] = useState<"all" | "writing" | "speaking">("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "graded">("pending");
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [playProgress, setPlayProgress] = useState(25);
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
-  const [toast, setToast] = useState<string | null>(null);
+export interface SubmissionPage {
+  items: SubmissionItem[];
+  total: number;
+}
 
-  const selected = submissions.find((s) => s.id === selectedId) ?? submissions[0];
+const pageSize = 25;
 
-  function triggerToast(msg: string) {
-    setToast(msg);
-    setTimeout(() => setToast(null), 3000);
-  }
-
-  function handleScoreChange(criterion: "c1" | "c2" | "c3" | "c4", val: number) {
-    if (!selected) return;
-    const updatedScores = { ...selected.criteriaScores, [criterion]: val };
-    const avg =
-      Math.round(
-        ((updatedScores.c1 + updatedScores.c2 + updatedScores.c3 + updatedScores.c4) / 4) * 2
-      ) / 2;
-    setSubmissions((prev) =>
-      prev.map((s) =>
-        s.id === selected.id ? { ...s, criteriaScores: updatedScores, overallBand: avg } : s
-      )
-    );
-  }
-
-  function handleFeedbackChange(text: string) {
-    if (!selected) return;
-    setSubmissions((prev) =>
-      prev.map((s) => (s.id === selected.id ? { ...s, teacherFeedback: text } : s))
-    );
-  }
-
-  async function handleSubmitGrade() {
-    if (!selected) return;
-    const avg =
-      selected.overallBand ??
-      Math.round(
-        ((selected.criteriaScores.c1 +
-          selected.criteriaScores.c2 +
-          selected.criteriaScores.c3 +
-          selected.criteriaScores.c4) /
-          4) *
-          2
-      ) / 2;
-    try {
-      await post(`/v1/teacher/submissions/${encodeURIComponent(selected.id)}/grade`, {
-        criteriaScores: selected.criteriaScores,
-        overallBand: avg,
-        feedback: selected.teacherFeedback,
-      });
-      setSubmissions((prev) =>
-        prev.map((s) =>
-          s.id === selected.id ? { ...s, status: "graded", overallBand: avg } : s
-        )
-      );
-      triggerToast(`Official grade submitted for ${selected.studentName}: Band ${avg}`);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      triggerToast(`Xatolik: Bahoni saqlab bo'lmadi (${msg})`);
-    }
-  }
-
-  const filtered = submissions.filter((s) => {
-    const matchSkill = skillFilter === "all" || s.skill === skillFilter;
-    const matchStatus = statusFilter === "all" || s.status === statusFilter;
-    return matchSkill && matchStatus;
+function Review({ item, userId }: { item: SubmissionItem; userId: string }) {
+  const client = useQueryClient();
+  const [score, setScore] = useState("");
+  const [feedback, setFeedback] = useState("");
+  const [criteria, setCriteria] = useState({ c1: "", c2: "", c3: "", c4: "" });
+  const labels = item.skill === "writing"
+    ? ["Task response", "Coherence", "Vocabulary", "Grammar"]
+    : ["Fluency", "Vocabulary", "Grammar", "Pronunciation"];
+  const values = Object.values(criteria);
+  const derivedBand = values.every((value) => value !== "")
+    ? Math.round(values.reduce((sum, value) => sum + Number(value), 0) / 2) / 2 : null;
+  const value = item.rawScore ? (score === "" ? null : Number(score)) : derivedBand;
+  const grade = useMutation({
+    mutationFn: () => post("/v1/teacher/submissions/" + encodeURIComponent(item.id) + "/grade", {
+      questionId: item.questionId,
+      score: value,
+      criteriaScores: item.rawScore ? undefined : {
+        c1: Number(criteria.c1), c2: Number(criteria.c2), c3: Number(criteria.c3), c4: Number(criteria.c4),
+      },
+      feedback,
+    }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["teacher-submissions", userId] }),
   });
-
-  const wordCount = selected?.responseText ? selected.responseText.trim().split(/\s+/).length : 0;
-  const currentBand =
-    selected?.overallBand ??
-    (selected
-      ? Math.round(
-          ((selected.criteriaScores.c1 +
-            selected.criteriaScores.c2 +
-            selected.criteriaScores.c3 +
-            selected.criteriaScores.c4) /
-            4) *
-            2
-        ) / 2
-      : 0);
-
+  const protectedEvidence = item.hasRecording || item.hasHandwriting;
   return (
-    <div className="space-y-6">
-      {/* Toast */}
-      {toast && (
-        <div className="fixed right-6 top-6 z-50 flex items-center gap-3 rounded-2xl border border-emerald-500/40 bg-surface/95 px-5 py-3.5 text-sm font-medium text-emerald-300 shadow-2xl backdrop-blur-xl animate-rise">
-          <span className="flex h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#10B981]" />
-          {toast}
+    <section className="card space-y-4 rounded-2xl border border-white/10 p-5 lg:col-span-8">
+      <div>
+        <h2 className="text-xl font-bold text-white">{item.studentName}</h2>
+        <p className="text-sm text-slate-300">{item.examTitle} · {item.subType}</p>
+      </div>
+      {item.prompt && <p className="text-sm text-slate-200">{item.prompt}</p>}
+      {item.responseText && (
+        <div className="max-h-80 overflow-y-auto whitespace-pre-wrap rounded-xl bg-black/20 p-4 text-sm text-white">
+          {item.responseText}
         </div>
       )}
-
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">Grading Queue</h1>
-          <p className="mt-1 text-xs text-white/50">
-            Review student writing essays and listen to speaking audio recordings to assign official band scores.
-          </p>
-        </div>
-
-        {/* Filter Bar */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Skill selector */}
-          <div className="flex items-center rounded-xl border border-white/10 bg-surface/80 p-1">
-            {(["all", "writing", "speaking"] as const).map((sk) => (
-              <button
-                key={sk}
-                type="button"
-                onClick={() => setSkillFilter(sk)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize transition ${
-                  skillFilter === sk
-                    ? "bg-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.3)]"
-                    : "text-white/60 hover:text-white"
-                }`}
-              >
-                {sk}
-              </button>
-            ))}
-          </div>
-
-          {/* Status selector */}
-          <div className="flex items-center rounded-xl border border-white/10 bg-surface/80 p-1">
-            {(["pending", "graded", "all"] as const).map((st) => (
-              <button
-                key={st}
-                type="button"
-                onClick={() => setStatusFilter(st)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize transition ${
-                  statusFilter === st
-                    ? "bg-white/15 text-white"
-                    : "text-white/50 hover:text-white"
-                }`}
-              >
-                {st}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Workspace: 2 Columns */}
-      {filtered.length === 0 ? (
-        <div className="card rounded-2xl p-12 text-center text-white/50 border border-white/10 bg-surface/40">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/10 text-2xl text-emerald-400">
-            📝
-          </div>
-          <p className="mt-4 text-base font-bold text-white">Baholash navbati bo'sh</p>
-          <p className="mt-1 text-xs text-white/60">
-            Hozircha tekshirilishi kerak bo'lgan yangi yozma insho yoki og'zaki audio yozuvlar mavjud emas.
-          </p>
-        </div>
-      ) : (
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-        {/* Left column: Submissions List */}
-        <div className="space-y-3 lg:col-span-4">
-          <p className="text-xs font-semibold uppercase tracking-wider text-white/40">
-            Submissions ({filtered.length})
-          </p>
-          <div className="space-y-2.5">
-            {filtered.map((item) => {
-              const active = item.id === selected?.id;
-              const isWriting = item.skill === "writing";
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setSelectedId(item.id)}
-                  className={`w-full text-left rounded-2xl border p-4 transition duration-150 ${
-                    active
-                      ? "border-emerald-500/50 bg-emerald-500/10 shadow-[0_0_24px_rgba(16,185,129,0.15)]"
-                      : "border-white/10 bg-surface hover:border-white/20 hover:bg-surface-hover"
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="font-semibold text-white">{item.studentName}</span>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                        item.status === "graded"
-                          ? "bg-emerald-500/20 text-emerald-300"
-                          : "bg-amber-500/20 text-amber-300"
-                      }`}
-                    >
-                      {item.status === "graded" ? `Band ${item.overallBand}` : "Pending"}
-                    </span>
-                  </div>
-                  <div className="mt-2 flex items-center gap-2 text-xs text-white/60">
-                    <span className={`inline-flex items-center gap-1 font-medium ${isWriting ? "text-cyan-400" : "text-purple-400"}`}>
-                      {isWriting ? "✍️ Writing" : "🎙️ Speaking"}
-                    </span>
-                    <span>·</span>
-                    <span className="truncate">{item.subType}</span>
-                  </div>
-                  <div className="mt-2 flex items-center justify-between text-[11px] text-white/40">
-                    <span>{item.examTitle}</span>
-                    <span>{item.submittedAt}</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Right column: Active Grading Detail */}
-        {selected ? (
-          <div className="space-y-6 lg:col-span-8">
-            {/* Top overview card */}
-            <div className="card rounded-2xl border border-white/10 p-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <div className="flex items-center gap-2.5">
-                    <h2 className="text-xl font-bold text-white">{selected.studentName}</h2>
-                    <span className="rounded-lg bg-emerald-500/15 px-2.5 py-0.5 text-xs font-bold text-emerald-400">
-                      {selected.skill.toUpperCase()}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-white/50">{selected.examTitle} · {selected.subType} · {selected.studentPhone}</p>
-                </div>
-
-                <div className="flex items-center gap-4">
-                  <div className="text-right">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-white/40">Target Band</p>
-                    <p className="text-2xl font-black text-emerald-400">
-                      {currentBand > 0 ? currentBand.toFixed(1) : "—"}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleSubmitGrade}
-                    className="btn-brand px-5 py-2.5 text-xs font-bold shadow-lg"
-                  >
-                    Submit Official Score
-                  </button>
-                </div>
-              </div>
-
-              {/* Prompt box */}
-              <div className="mt-4 rounded-xl border border-white/10 bg-black/30 p-4">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-white/40">Exam Prompt & Instructions</p>
-                <p className="mt-1.5 text-xs leading-relaxed text-white/90">{selected.prompt}</p>
-              </div>
-            </div>
-
-            {/* Content area: Writing essay OR Speaking player */}
-            {selected.skill === "writing" ? (
-              <div className="card rounded-2xl border border-white/10 p-5">
-                <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                  <h3 className="font-semibold text-white">Student Essay Submission</h3>
-                  <div className="flex items-center gap-3 text-xs text-white/50">
-                    <span>Word Count: <strong className="text-emerald-400">{wordCount} words</strong></span>
-                    <span>·</span>
-                    <span>Min Recommended: 250 words</span>
-                  </div>
-                </div>
-                <div className="mt-4 max-h-80 overflow-y-auto whitespace-pre-wrap rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-xs leading-relaxed text-white/80">
-                  {selected.responseText}
-                </div>
-              </div>
-            ) : (
-              <div className="card rounded-2xl border border-white/10 p-5">
-                <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                  <h3 className="font-semibold text-white">Student Speaking Audio Recording</h3>
-                  <span className="text-xs text-white/50">
-                    Duration: <strong className="text-emerald-400">{selected.audioDurationSeconds} seconds</strong>
-                  </span>
-                </div>
-
-                {/* Audio player UI */}
-                <div className="mt-5 space-y-4 rounded-xl border border-white/10 bg-black/30 p-5">
-                  {/* Waveform graphic */}
-                  <div className="flex h-12 items-end justify-between gap-1 px-2">
-                    {[40, 65, 80, 45, 90, 70, 30, 85, 95, 60, 40, 80, 100, 75, 50, 90, 65, 45, 85, 60, 30, 70, 85, 40, 90, 60, 45].map(
-                      (h, i) => (
-                        <div
-                          key={i}
-                          className={`w-full rounded-full transition-all duration-300 ${
-                            i < (playProgress / 100) * 27 ? "bg-emerald-400" : "bg-white/20"
-                          }`}
-                          style={{ height: `${h}%` }}
-                        />
-                      )
-                    )}
-                  </div>
-
-                  {/* Scrubber progress */}
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={playProgress}
-                    onChange={(e) => setPlayProgress(Number(e.target.value))}
-                    className="exam-range w-full"
-                  />
-
-                  {/* Controls */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setIsPlaying((p) => !p)}
-                        className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-500 font-bold text-black shadow-[0_0_16px_rgba(16,185,129,0.4)] hover:bg-emerald-400"
-                      >
-                        {isPlaying ? "❚❚" : "▶"}
-                      </button>
-                      <span className="font-mono text-xs text-white/70">
-                        0:{Math.floor((playProgress / 100) * (selected.audioDurationSeconds ?? 120)).toString().padStart(2, "0")} / 0:{selected.audioDurationSeconds ?? 120}
-                      </span>
-                    </div>
-
-                    {/* Speed options */}
-                    <div className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 p-1">
-                      {[0.75, 1, 1.25, 1.5].map((spd) => (
-                        <button
-                          key={spd}
-                          type="button"
-                          onClick={() => setPlaybackSpeed(spd)}
-                          className={`rounded px-2 py-1 text-[11px] font-semibold ${
-                            playbackSpeed === spd ? "bg-emerald-500/20 text-emerald-300" : "text-white/50 hover:text-white"
-                          }`}
-                        >
-                          {spd}x
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Rubric Criteria Sliders */}
-            <div className="card rounded-2xl border border-white/10 p-5">
-              <h3 className="font-semibold text-white">IELTS / CEFR Official Band Scoring Rubric</h3>
-              <p className="mt-1 text-xs text-white/50">Adjust criteria scores from 0.0 to 9.0 (0.5 increments).</p>
-
-              <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                {[
-                  {
-                    key: "c1" as const,
-                    label: selected.skill === "writing" ? "Task Achievement / Response" : "Fluency & Coherence",
-                    val: selected.criteriaScores.c1,
-                  },
-                  {
-                    key: "c2" as const,
-                    label: selected.skill === "writing" ? "Coherence & Cohesion" : "Lexical Resource",
-                    val: selected.criteriaScores.c2,
-                  },
-                  {
-                    key: "c3" as const,
-                    label: selected.skill === "writing" ? "Lexical Resource" : "Grammatical Range",
-                    val: selected.criteriaScores.c3,
-                  },
-                  {
-                    key: "c4" as const,
-                    label: selected.skill === "writing" ? "Grammatical Range & Accuracy" : "Pronunciation",
-                    val: selected.criteriaScores.c4,
-                  },
-                ].map((crit) => (
-                  <div key={crit.key} className="rounded-xl border border-white/5 bg-black/20 p-3.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-white/80">{crit.label}</span>
-                      <span className="rounded bg-emerald-500/10 px-2 py-0.5 font-mono text-xs font-bold text-emerald-400">
-                        {crit.val.toFixed(1)}
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min={1}
-                      max={9}
-                      step={0.5}
-                      value={crit.val}
-                      onChange={(e) => handleScoreChange(crit.key, parseFloat(e.target.value))}
-                      className="exam-range mt-3 w-full"
-                    />
-                    <div className="mt-1 flex justify-between text-[10px] text-white/30 font-mono">
-                      <span>4.0</span>
-                      <span>5.5</span>
-                      <span>7.0</span>
-                      <span>9.0</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Feedback text */}
-              <div className="mt-5 space-y-2">
-                <label className="text-xs font-medium uppercase tracking-wider text-white/40">
-                  Examiner Feedback & Explanatory Remarks
+      {protectedEvidence && (
+        <p className="text-sm text-amber-200">
+          Audio yoki qo‘lyozma uchun veb-saytdagi baholash oynasini oching.
+          {" "}Open the assessment review on the website to grade the recording or handwriting.
+        </p>
+      )}
+      {item.status === "graded" && (
+        <p className="text-sm">{item.rawScore ? "Task score" : "Task band"} {item.overallBand ?? "—"}</p>
+      )}
+      {item.status === "pending" && !protectedEvidence && (
+        <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); grade.mutate(); }}>
+          {item.rawScore ? (
+          <label className="flex flex-wrap items-center gap-3 text-sm">
+            Task score (0–{item.maxScore})
+            <input required type="number" min={0} max={item.maxScore} step={0.5} value={score}
+              onChange={(event) => setScore(event.target.value)} className="rounded border border-slate-500 bg-surface px-3 py-2" />
+          </label>
+          ) : (
+            <fieldset className="grid gap-3 sm:grid-cols-2">
+              <legend className="text-sm">Band criteria · 0–9</legend>
+              {(Object.keys(criteria) as (keyof typeof criteria)[]).map((key, index) => (
+                <label key={key} className="flex items-center justify-between gap-2 text-sm">
+                  {labels[index]}
+                  <input required type="number" min={0} max={9} step={0.5} value={criteria[key]}
+                    onChange={(event) => setCriteria({ ...criteria, [key]: event.target.value })}
+                    className="w-20 rounded border border-slate-500 bg-surface px-2 py-1" />
                 </label>
-                <textarea
-                  rows={3}
-                  value={selected.teacherFeedback}
-                  onChange={(e) => handleFeedbackChange(e.target.value)}
-                  placeholder="Provide targeted feedback highlighting strengths and key improvement areas for the student..."
-                  className="w-full rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-white placeholder-white/30 focus:border-emerald-500 focus:outline-none"
-                />
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="card rounded-2xl p-12 text-center text-white/50 lg:col-span-8">
-            <p className="text-base font-semibold text-white">No submissions found</p>
-          </div>
-        )}
+              ))}
+              <output className="text-sm">Task band {derivedBand ?? "—"}</output>
+            </fieldset>
+          )}
+          <label className="block text-sm">
+            Izoh / Feedback
+            <textarea rows={3} maxLength={10000} value={feedback} onChange={(event) => setFeedback(event.target.value)}
+              className="mt-2 w-full rounded border border-slate-500 bg-surface px-3 py-2" />
+          </label>
+          {grade.isError && (
+            <p role="alert" className="text-rose-300">
+              Bahoni saqlab bo‘lmadi / Could not save score.
+              {" "}<button type="button" className="underline"
+                onClick={() => void client.invalidateQueries({ queryKey: ["teacher-submissions", userId] })}>Yangilash / Refresh</button>
+            </p>
+          )}
+          <button type="submit" disabled={grade.isPending || value === null || value > item.maxScore} className="btn-brand px-5 py-2.5 text-sm font-bold">
+            {grade.isPending ? "Saqlanmoqda… / Saving…" : "Bahoni saqlash / Save score"}
+          </button>
+        </form>
+      )}
+    </section>
+  );
+}
+
+export default function GradingQueue({ userId }: { userId: string }) {
+  const [selection, setSelection] = useState("");
+  const [skill, setSkill] = useState("");
+  const [status, setStatus] = useState("pending");
+  const [offset, setOffset] = useState(0);
+  const queue = useQuery({
+    queryKey: ["teacher-submissions", userId, skill, status, offset],
+    queryFn: ({ signal }) => get<SubmissionPage>("/v1/teacher/submissions", {
+      skill: skill || undefined, status, offset, limit: pageSize, withTotal: 1,
+    }, { signal }),
+  });
+  const items = queue.data?.items ?? [];
+  const total = queue.data?.total ?? 0;
+  const selected = items.find((item) => item.id === selection) ?? items[0];
+
+  return (
+    <section className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <h1 className="text-2xl font-bold text-white">Baholash navbati / Grading queue</h1>
+        <div className="flex gap-3 text-sm">
+          <label>
+            <span className="sr-only">Skill</span>
+            <select value={skill} onChange={(event) => { setSkill(event.target.value); setOffset(0); }}
+              className="rounded border border-slate-500 bg-surface p-2">
+              <option value="">All skills</option>
+              <option value="writing">Writing</option>
+              <option value="speaking">Speaking</option>
+            </select>
+          </label>
+          <label>
+            <span className="sr-only">Status</span>
+            <select value={status} onChange={(event) => { setStatus(event.target.value); setOffset(0); }}
+              className="rounded border border-slate-500 bg-surface p-2">
+              <option value="pending">Pending</option>
+              <option value="graded">Graded</option>
+            </select>
+          </label>
+        </div>
       </div>
-    )}
-    </div>
+      {queue.isPending && <p role="status">Yuklanmoqda… / Loading…</p>}
+      {queue.isError && (
+        <p role="alert">Navbatni yuklab bo‘lmadi / Could not load grading queue.
+          {" "}<button type="button" className="underline" onClick={() => void queue.refetch()}>Qayta urinish / Retry</button>
+        </p>
+      )}
+      {queue.isSuccess && total === 0 && <p>Topshiriqlar yo‘q / No submissions</p>}
+      {queue.isSuccess && selected && (
+        <div className="grid gap-4 lg:grid-cols-12">
+          <ul className="max-h-[65vh] space-y-2 overflow-y-auto lg:col-span-4">
+            {items.map((item) => (
+              <li key={item.id}>
+                <button type="button" aria-pressed={item.id === selected.id} onClick={() => setSelection(item.id)}
+                  className="w-full rounded-xl border border-slate-600 p-3 text-left aria-pressed:border-emerald-400">
+                  <span className="block font-semibold">{item.studentName}</span>
+                  <span className="text-sm text-slate-300">{item.examTitle} · {item.skill}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <Review key={JSON.stringify([selected.id, selected.questionId, selected.status])} item={selected} userId={userId} />
+        </div>
+      )}
+      {(offset > 0 || total > pageSize) && (
+        <nav aria-label="Submission pages" className="flex items-center gap-4 text-sm">
+          <button type="button" disabled={offset === 0} onClick={() => setOffset(offset - pageSize)}>Oldingi / Previous</button>
+          <span>{total} submissions</span>
+          <button type="button" disabled={offset + pageSize >= total} onClick={() => setOffset(offset + pageSize)}>Keyingi / Next</button>
+        </nav>
+      )}
+    </section>
   );
 }
