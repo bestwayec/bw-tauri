@@ -4,7 +4,7 @@ import { ClassroomSchedule } from "../components/ClassroomSchedule";
 import { UnifiedStudentProfileModal } from "../components/UnifiedStudentProfileModal";
 import { del, downloadBlob, get, patch, post, put } from "../lib/api";
 import { getAppLanguage } from "../lib/ui-prefs";
-import type { ClassroomAssignment, ClassroomAssignmentInput, ClassroomBulkMembership, ClassroomVocabularyCollection, GroupDetail, ScheduleItem, VocabularyAssignmentReports } from "../lib/group-contract.generated";
+import type { ClassroomArchiveState, ClassroomAssignment, ClassroomAssignmentInput, ClassroomBulkMembership, ClassroomVocabularyCollection, GroupDetail, GroupListItem, ScheduleItem, VocabularyAssignmentReports } from "../lib/group-contract.generated";
 
 const inputStyle = "rounded-lg border border-white/15 bg-surface px-3 py-2 text-sm";
 type AttendanceState = "present" | "absent" | "late";
@@ -95,6 +95,34 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
     enabled: Boolean(date),
   });
 
+  const archived = useQuery({
+    queryKey: ["group-archive", userId, group.id],
+    queryFn: () => get<ClassroomArchiveState>(`${groupUrl}/archive`),
+  });
+  const toggleArchive = useMutation({
+    mutationFn: (nextState: boolean) => put<ClassroomArchiveState>(`${groupUrl}/archive`, { archived: nextState }),
+    onSuccess: async () => {
+      await refreshRoster();
+      await queryClient.invalidateQueries({ queryKey: ["group-archive", userId, group.id] });
+    },
+  });
+
+  const allGroups = useQuery({
+    queryKey: ["groups", userId],
+    queryFn: () => get<GroupListItem[]>("/v1/groups", { archived: false }),
+  });
+  const [transferStudent, setTransferStudent] = useState<{ id: string; name: string } | null>(null);
+  const [targetGroupId, setTargetGroupId] = useState("");
+  const transfer = useMutation({
+    mutationFn: ({ studentId, targetId }: { studentId: string; targetId: string }) =>
+      post(`/v1/groups/${encodeURIComponent(targetId)}/students`, { studentId }),
+    onSuccess: async () => {
+      setTransferStudent(null);
+      setTargetGroupId("");
+      await refreshRoster();
+    },
+  });
+
   async function refreshRoster() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["group-detail", userId] }),
@@ -153,11 +181,52 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
   }
   return (
     <section className="grid gap-4 lg:grid-cols-2" aria-label={`${group.name} guruh ish maydoni`}>
-      <nav className="flex flex-wrap gap-2 lg:col-span-2" aria-label={english ? "Classroom sections" : "Guruh bo‘limlari"}>
-        <a className="workspace-control inline-flex items-center" href="#classroom-roster">{english ? "Students" : "O‘quvchilar"}</a>
-        <a className="workspace-control inline-flex items-center" href="#classroom-attendance">{english ? "Attendance" : "Davomat"}</a>
-        <a className="workspace-control inline-flex items-center" href="#classroom-tasks">{english ? "Assignments" : "Vazifalar"}</a>
+      <nav className="flex flex-wrap items-center justify-between gap-2 lg:col-span-2" aria-label={english ? "Classroom sections" : "Guruh bo‘limlari"}>
+        <div className="flex flex-wrap gap-2">
+          <a className="workspace-control inline-flex items-center" href="#classroom-roster">{english ? "Students" : "O‘quvchilar"}</a>
+          <a className="workspace-control inline-flex items-center" href="#classroom-attendance">{english ? "Attendance" : "Davomat"}</a>
+          <a className="workspace-control inline-flex items-center" href="#classroom-tasks">{english ? "Assignments" : "Vazifalar"}</a>
+        </div>
+        {archived.data && (
+          <button
+            type="button"
+            disabled={toggleArchive.isPending}
+            onClick={() => {
+              if (archived.data?.archived) {
+                toggleArchive.mutate(false);
+              } else if (window.confirm(english ? "Are you sure you want to archive this classroom?" : "Guruhni arxivlashni tasdiqlaysizmi?")) {
+                toggleArchive.mutate(true);
+              }
+            }}
+            className={`workspace-control text-xs font-semibold ${
+              archived.data?.archived ? "text-amber-300 border-amber-500/40" : "text-slate-400 hover:text-red-400"
+            }`}
+          >
+            {toggleArchive.isPending ? "…" : archived.data?.archived ? (english ? "Restore group" : "Arxivdan chiqarish") : (english ? "Archive group" : "Guruhni arxivlash")}
+          </button>
+        )}
       </nav>
+
+      {archived.data?.archived && (
+        <div role="alert" className="workspace-panel border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300 flex items-center justify-between lg:col-span-2">
+          <div className="flex items-center gap-2">
+            <span>⚠️</span>
+            <span className="font-semibold">
+              {english
+                ? "This classroom is archived. Membership changes and assignments are frozen."
+                : "Bu guruh arxivlangan. Guruh a'zolari va vazifalar muzlatilgan."}
+            </span>
+          </div>
+          <button
+            type="button"
+            disabled={toggleArchive.isPending}
+            onClick={() => toggleArchive.mutate(false)}
+            className="rounded-lg bg-amber-500/20 px-3 py-1 font-bold text-amber-200 hover:bg-amber-500/30"
+          >
+            {english ? "Restore" : "Qayta faollashtirish"}
+          </button>
+        </div>
+      )}
       <section id="classroom-roster" className="workspace-panel min-w-0 scroll-mt-4 space-y-3 p-4">
         <h2 className="text-lg font-semibold">Guruh tarkibi</h2>
         <form className="flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); if (name.trim().length >= 2) rename.mutate(); }}>
@@ -207,10 +276,28 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
                 {student.name}
               </button>
             </div>
-            {removeId === student.studentId ? <span className="flex gap-2">
-              <button className={inputStyle} type="button" disabled={membership.isPending} onClick={() => membership.mutate({ id: student.studentId, remove: true })}>Olib tashlashni tasdiqlash</button>
-              <button type="button" onClick={() => setRemoveId("")}>Bekor qilish</button>
-            </span> : <button className={inputStyle} type="button" onClick={() => setRemoveId(student.studentId)}>Olib tashlash</button>}
+            <div className="flex items-center gap-2">
+              <button
+                className={inputStyle}
+                type="button"
+                onClick={() => setTransferStudent({ id: student.studentId, name: student.name })}
+                title="Boshqa guruhga ko‘chirish"
+              >
+                {english ? "Transfer" : "Ko‘chirish"}
+              </button>
+              {removeId === student.studentId ? (
+                <span className="flex gap-2">
+                  <button className={inputStyle} type="button" disabled={membership.isPending} onClick={() => membership.mutate({ id: student.studentId, remove: true })}>
+                    Tasdiqlash
+                  </button>
+                  <button type="button" onClick={() => setRemoveId("")}>Bekor qilish</button>
+                </span>
+              ) : (
+                <button className={inputStyle} type="button" onClick={() => setRemoveId(student.studentId)}>
+                  Olib tashlash
+                </button>
+              )}
+            </div>
           </li>)}
         </ul>
         {filteredRoster.length > rosterLimit && <button type="button" className="workspace-control" onClick={() => setRosterLimit(rosterLimit + 25)}>
@@ -329,6 +416,57 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
           userId={userId}
           onClose={() => setViewStudentId(null)}
         />
+      )}
+
+      {transferStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+          <div className="w-full max-w-sm rounded-2xl border border-emerald-500/30 bg-[#111827] p-5 shadow-2xl space-y-4">
+            <h3 className="text-base font-bold text-white">
+              {english ? `Transfer ${transferStudent.name}` : `${transferStudent.name}ni boshqa guruhga ko‘chirish`}
+            </h3>
+            <p className="text-xs text-slate-300">
+              {english
+                ? "Select destination classroom. Enrolled history, progress, and approved grades will be safely preserved."
+                : "Yangi guruhni tanlang. O‘quvchining oldingi natijalari va o‘quv tarixi to‘liq saqlanadi."}
+            </p>
+            <label className="grid gap-1 text-sm font-medium">
+              <span>{english ? "Target group" : "Yangi guruh"}</span>
+              <select
+                className={inputStyle + " w-full"}
+                value={targetGroupId}
+                onChange={(e) => setTargetGroupId(e.target.value)}
+              >
+                <option value="">{english ? "Choose classroom…" : "Guruhni tanlang…"}</option>
+                {allGroups.data?.filter(g => g.id !== group.id).map(g => (
+                  <option key={g.id} value={g.id}>{g.name} ({g.studentsCount ?? 0} o‘quvchi)</option>
+                ))}
+              </select>
+            </label>
+            {transfer.isError && (
+              <p role="alert" className="text-xs text-red-300">
+                {errorMessage(transfer.error)}
+              </p>
+            )}
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className={inputStyle}
+                disabled={transfer.isPending}
+                onClick={() => { setTransferStudent(null); setTargetGroupId(""); }}
+              >
+                {english ? "Cancel" : "Bekor qilish"}
+              </button>
+              <button
+                type="button"
+                disabled={!targetGroupId || transfer.isPending}
+                className="btn-brand rounded-lg px-4 py-2 text-xs font-bold text-slate-950 disabled:opacity-50"
+                onClick={() => transfer.mutate({ studentId: transferStudent.id, targetId: targetGroupId })}
+              >
+                {transfer.isPending ? (english ? "Transferring…" : "Ko‘chirilmoqda…") : (english ? "Confirm transfer" : "Ko‘chirishni tasdiqlash")}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );

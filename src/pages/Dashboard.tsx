@@ -35,6 +35,7 @@ import { StudentClassroomWidget } from "@/components/StudentClassroomWidget";
 import { StudentAssignmentsWidget } from "@/components/StudentAssignmentsWidget";
 import { StudentAttendanceWidget } from "@/components/StudentAttendanceWidget";
 import { StudentOfflineVocabWidget } from "@/components/StudentOfflineVocabWidget";
+import { StatCard } from "@/components/common/StatCard";
 
 type Props = {
   studentName: string | null;
@@ -550,52 +551,61 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
 
       {/* 4-Card Gamification & KPI Bar */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {[
-          {
-            label: "Available Exams",
-            value: catalogueReady ? String(catalogueSize) : "—",
-            sub: catalogueFailed ? "Unable to load catalog" : catalogueReady ? `${ready} ready to start` : "Loading exams…",
-            accent: true,
-            icon: "📚",
-          },
-          {
-            label: "Scored Exams",
-            value: attemptCountsReady ? String(scored.length) : "—",
-            sub: attemptsQuery.isError ? "Unable to load results" : "Attempts with a saved score",
-            accent: false,
-            icon: "✓",
-          },
-          {
-            label: "Active In Progress",
-            value: attemptCountsReady ? String(inProgress.length) : "—",
-            sub: attemptsQuery.isError ? "Unable to load attempts" : "Open exam attempts",
-            accent: inProgress.length > 0,
-            icon: "⏳",
-          },
-          {
-            label: "Completed Tests",
-            value: attemptCountsReady ? String(completed) : "—",
-            sub: attemptsQuery.isError ? "Unable to load results" : avg != null ? `Avg score: ${avg} pts` : "Finished attempts",
-            accent: false,
-            icon: "✓",
-          },
-        ].map((card) => (
-          <div
-            key={card.label}
-            className="flex items-center justify-between rounded-2xl border border-emerald-500/15 bg-[#111827] p-5 shadow-sm transition-all hover:border-emerald-500/30"
-          >
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">{card.label}</p>
-              <p className={`mt-1 text-2xl font-black tabular-nums ${card.accent ? "text-emerald-400" : "text-white"}`}>
-                {card.value}
-              </p>
-              <p className="mt-0.5 text-[11px] text-slate-400">{card.sub}</p>
-            </div>
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-lg">
-              {card.icon}
-            </span>
-          </div>
-        ))}
+        <StatCard
+          label="Available Exams"
+          value={catalogueReady ? String(catalogueSize) : "—"}
+          sub={catalogueFailed ? "Unable to load catalog" : catalogueReady ? `${ready} ready to start` : "Loading exams…"}
+          accent={true}
+          icon="📚"
+          isLoading={!catalogueReady && !catalogueFailed}
+          isError={catalogueFailed}
+          onRetry={() => {
+            if (useAltTrack) {
+              void altTestsQuery.refetch();
+              void altMocksQuery.refetch();
+            } else {
+              void testsQuery.refetch();
+              void mocksQuery.refetch();
+            }
+          }}
+          retryLabel="Retry loading catalog ⟳"
+        />
+
+        <StatCard
+          label="Scored Exams"
+          value={attemptCountsReady ? String(scored.length) : "—"}
+          sub={attemptsQuery.isError ? "Unable to load results" : "Attempts with a saved score"}
+          accent={false}
+          icon="✓"
+          isLoading={attemptsQuery.isLoading}
+          isError={attemptsQuery.isError}
+          onRetry={() => void attemptsQuery.refetch()}
+          retryLabel="Retry results ⟳"
+        />
+
+        <StatCard
+          label="Active In Progress"
+          value={attemptCountsReady ? String(inProgress.length) : "—"}
+          sub={attemptsQuery.isError ? "Unable to load attempts" : "Open exam attempts"}
+          accent={inProgress.length > 0}
+          icon="⏳"
+          isLoading={attemptsQuery.isLoading}
+          isError={attemptsQuery.isError}
+          onRetry={() => void attemptsQuery.refetch()}
+          retryLabel="Retry attempts ⟳"
+        />
+
+        <StatCard
+          label="Completed Tests"
+          value={attemptCountsReady ? String(completed) : "—"}
+          sub={attemptsQuery.isError ? "Unable to load results" : avg != null ? `Avg score: ${avg} pts` : "Finished attempts"}
+          accent={false}
+          icon="✓"
+          isLoading={attemptsQuery.isLoading}
+          isError={attemptsQuery.isError}
+          onRetry={() => void attemptsQuery.refetch()}
+          retryLabel="Retry results ⟳"
+        />
       </div>
 
       {/* Hero Full Mock CBT Callout Banner */}

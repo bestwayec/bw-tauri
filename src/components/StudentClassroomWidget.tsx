@@ -62,6 +62,25 @@ export function StudentClassroomWidget({ userId }: { userId: string }) {
                 : classroom.isError ? "Sinf yuklanmadi / Could not load classroom"
                 : group?.name ?? "Guruhga biriktirilmagan"}
             </p>
+            {group && (
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-300">
+                {group.teacherName && (
+                  <span className="inline-flex items-center gap-1 text-emerald-400 font-medium">
+                    👨‍🏫 {group.teacherName}
+                  </span>
+                )}
+                {typeof group.studentsCount === "number" && (
+                  <span className="text-slate-400">
+                    · 👥 {group.studentsCount} ta o‘quvchi
+                  </span>
+                )}
+                {group.schedule && group.schedule.length > 0 && (
+                  <span className="text-slate-400">
+                    · ⏰ {group.schedule.map(s => `${s.day.toUpperCase()} ${s.startTime}-${s.endTime}`).join(", ")}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

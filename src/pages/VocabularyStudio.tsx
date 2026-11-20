@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { get, patch, post } from "../lib/api";
+import { downloadBlob, get, patch, post } from "../lib/api";
 import { getAppLanguage } from "../lib/ui-prefs";
 import type {
   ClassroomAssignment, ClassroomAssignmentInput, GroupListItem,
@@ -153,10 +153,22 @@ function CollectionAssignments({ collection, userId }: { collection: Summary; us
     queryFn: () => get<ClassroomAssignment[]>(groupPath + "/assignments"),
     enabled: Boolean(groupId),
   });
+  const reportPath = groupPath + "/assignments/" + encodeURIComponent(reportId) + "/vocabulary-results";
   const report = useQuery({
     queryKey: ["studio-results", userId, groupId, reportId, reportPage, reportSearch],
-    queryFn: () => get<VocabularyAssignmentReports>(groupPath + "/assignments/" + encodeURIComponent(reportId) + "/vocabulary-results", { page: reportPage, search: reportSearch }),
+    queryFn: () => get<VocabularyAssignmentReports>(reportPath, { page: reportPage, search: reportSearch }),
     enabled: Boolean(groupId && reportId),
+  });
+  const exportReport = useMutation({
+    mutationFn: (format: "csv" | "xlsx") => downloadBlob(reportPath + "?download=" + format),
+    onSuccess: ({ blob, filename }, format) => {
+      const source = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = source;
+      anchor.download = filename || `vocabulary-results.${format}`;
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(source), 0);
+    },
   });
   const assign = useMutation({
     mutationFn: (body: ClassroomAssignmentInput) => post<ClassroomAssignment>(groupPath + "/assignments", body),
@@ -192,7 +204,18 @@ function CollectionAssignments({ collection, userId }: { collection: Summary; us
         </li>
       ))}</ul>
       {report.data && !report.isError && <div className="space-y-2">
-        <p>{report.data.completedCount} / {report.data.assignedCount} completed · {report.data.overdueCount} overdue</p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p>{report.data.completedCount} / {report.data.assignedCount} completed · {report.data.overdueCount} overdue</p>
+          <div className="flex gap-2">
+            <button className={control} type="button" disabled={exportReport.isPending} onClick={() => exportReport.mutate("csv")}>
+              {exportReport.isPending ? "…" : "CSV"}
+            </button>
+            <button className={control} type="button" disabled={exportReport.isPending} onClick={() => exportReport.mutate("xlsx")}>
+              {exportReport.isPending ? "…" : "XLSX"}
+            </button>
+          </div>
+        </div>
+        {exportReport.isError && <p role="alert">{message(exportReport.error)}</p>}
         <label className="grid gap-1">Search results
             <input className={control} value={reportSearch} onChange={event => { setReportSearch(event.target.value); setReportPage(1); }} />
           </label>
