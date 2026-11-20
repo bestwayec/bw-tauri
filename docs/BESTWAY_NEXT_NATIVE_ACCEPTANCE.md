@@ -27,3 +27,28 @@ The installed Linux Debian test package completed HTTPS login, classroom and Stu
 [Desktop checks](https://github.com/bestwayec/bw-tauri/pull/38/checks)
 
 [Cross-repository release gates](https://github.com/bestwayec/bestway/blob/feat/bestway-next-00-03/docs/BESTWAY_NEXT_RELEASE_GATES.md)
+
+## Installed Linux HTTPS and offline progress
+
+Build an installer with the same bundled frontend used by release packaging.
+
+```sh
+VITE_API_URL=https://fixture.example.test/v1 VITE_WEB_URL=https://fixture.example.test \
+  npm run tauri build -- --bundles deb --config src-tauri/tauri.manual-installer.conf.json
+sudo apt install ./src-tauri/target/release/bundle/deb/*.deb
+bestway-app
+```
+
+Resolve the fixture hostname on the test machine and trust its CA in the operating system. Allow the installed WebView origin on the disposable Django server. Use a dedicated fixture account and verify login, the assigned classroom, a downloaded vocabulary collection, and a test audio recording. Record the installed package checksum and WebKitGTK version.
+
+1. Download an issued vocabulary collection and verify that the app reports it ready for offline study.
+2. Disable access to the test backend. Open the downloaded collection and mark a card as known. Verify that the mutation remains pending.
+3. Exit the installed process completely. Start it again with the backend unreachable. Verify session restoration, the downloaded collection, and the pending change.
+4. Reconnect and sync. Confirm one server revision increment, a zero pending count, and the expected card status on a second signed-in client.
+5. Sign out, then sign in as another fixture account in the same OS profile. Verify that the first account's collection and pending changes are absent. A sign-out intentionally discards unsynced vocabulary progress.
+
+The production frontend build rejects a cleartext API address. Use the loopback HTTP configuration for `npm run dev`. Keep credentials, recordings, real student data, and local CA keys out of packages and CI artifacts.
+
+## Physical Windows and Android evidence
+
+Use a disposable HTTPS backend and record the exact build commit. On each device repeat steps 1–5, play the test audio, resume an interrupted exam, and repeat process restart. On Windows, run the installed NSIS app under a standard OS account and record idle, study, and exam working-set measurements on a machine with roughly 4 GB RAM. Exercise the signed updater on a private acceptance channel. On Android, use the approved test backend configuration for authenticated cases, test secure storage after process kill, and repeat with device audio output. Record any unsupported case as UNVERIFIED.
