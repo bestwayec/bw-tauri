@@ -4,6 +4,17 @@
 BestWay Windows desktop ilovasini (Tauri v2 / Rust, Win32, React 19, TypeScript, WebView2, IndexedDB, NSIS installer, signed updater) tubdan modernizatsiya qilish, xavfsizlik va barqarorlikni oshirish, imtihon ma'lumotlarining xavfsizligini (Zero Silent Data Loss) kafolatlash, kiosk rejimini mustahkamlash, offline tiklanishni kuchaytirish va 4GB RAM lab kompyuterlarida ishlash samaradorligini keskin oshirish.
 
 ## 2. Bajarildi
+0. **BESTWAY NEXT — Stage 05 Continuation & Delivery (2026-11-20) — #39 & #207, branch `feat/bestway-next-stage05-completion`**:
+   - `src/styles.css`: tokenlar va sinf nomlari veb globals bilan 100% muvofiqlashtirildi (`.workspace-panel-interactive`, `.workspace-badge`, `.workspace-skeleton`, `.workspace-table`).
+   - `src/components/common/`: qayta ishlatiluvchi komponentlar (`EmptyState`, `StatCard`, `StatusBadge`, `WorkspaceTable`) yaratildi.
+   - `src/components/common/ui-primitives.test.tsx`: barcha yangi dizayn primitivlari uchun vitest testlari qo'shildi.
+   - `src/pages/Dashboard.tsx` va `TeacherDashboard.tsx`: KPI ko'rsatkichlari, retry boshqaruvi va bo'sh holatlar yaxshilandi.
+   - `src/components/StudentAssignmentsWidget.tsx`: vazifalar uchun filter tablari (Faol, Barchasi, Tugallangan) va status nishonlari qo'shildi.
+   - `src/components/StudentClassroomWidget.tsx`: o'qituvchi ma'lumoti, o'quvchilar soni va dars jadvali ko'rsatildi.
+   - `src/pages/ClassroomWorkspace.tsx`: guruhni arxivlash/tiklash va o'quvchini boshqa guruhga ko'chirish (student transfer) modali yaratildi.
+   - `src/pages/VocabularyStudio.tsx`: guruh topshiriqlari hisoboti uchun CSV va Excel (.xlsx) eksport imkoniyati qo'shildi.
+   - Testlar: 60 ta test fayli, 481 ta vitest testi (100% PASS); `tsc && vite build` (13.89s, 100% PASS).
+   - Git branch `feat/bestway-next-stage05-completion` push qilindi va Draft PR #39 ochildi (https://github.com/bestwayec/bw-tauri/pull/39).
 1. **BestWay Apps 2.0 (PR #36)**:
    - To'liq desktop va Android ilova auditi yakunlandi va PR #36 orqali `main` ga birlashtirildi (`19e9ec9`).
    - Android OAuth PKCE xavfsizligi, SharedPreferences sessiya tiklanishi, WebView xavfsizligi va CI 5/5 to'liq muvaffaqiyatli yakunlandi.
