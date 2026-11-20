@@ -36,11 +36,16 @@ describe("assignments client", () => {
     expect(result[0].title).toBe("Week 1 Vocabulary");
   });
 
-  it("fetchMyAssignments gracefully falls back to empty array on network failure", async () => {
+  it("fetchMyAssignments propagates errors to allow UI error states", async () => {
     vi.mocked(api.get).mockRejectedValueOnce(new Error("Network offline"));
 
-    const result = await fetchMyAssignments();
-    expect(result).toEqual([]);
+    await expect(fetchMyAssignments()).rejects.toThrow("Network offline");
+  });
+
+  it("fetchMyAttendance propagates errors to allow UI error states", async () => {
+    vi.mocked(api.get).mockRejectedValueOnce(new Error("Unauthorized"));
+
+    await expect(fetchMyAttendance()).rejects.toThrow("Unauthorized");
   });
 
   it("joinCohortByCode trims and uppercases code", async () => {

@@ -10,7 +10,7 @@ function currentYearMonth(): string {
 
 export function StudentAttendanceWidget() {
   const month = currentYearMonth();
-  const { data: records, isLoading, isError } = useQuery<StudentAttendanceItem[]>({
+  const { data: records, isLoading, isError, refetch } = useQuery<StudentAttendanceItem[]>({
     queryKey: ["my-attendance", month],
     queryFn: () => fetchMyAttendance(month),
     staleTime: 60_000,
@@ -49,7 +49,12 @@ export function StudentAttendanceWidget() {
       )}
 
       {isError && (
-        <p className="text-xs text-red-300">Davomatni yuklab bo‘lmadi.</p>
+        <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-2.5 text-xs text-red-300 flex items-center justify-between">
+          <span>Davomatni yuklab bo‘lmadi.</span>
+          <button type="button" onClick={() => void refetch()} className="underline font-semibold ml-2 hover:text-white">
+            Qayta urinish
+          </button>
+        </div>
       )}
 
       {!isLoading && !isError && totalDays === 0 && (

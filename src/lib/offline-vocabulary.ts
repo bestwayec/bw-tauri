@@ -10,7 +10,7 @@
  * - Syncs pending mutations when online and reconciles with server acknowledgements.
  * - Strictly avoids storing auth/refresh tokens in offline study storage.
  */
-import { offlineGet, offlinePut, offlinePurge } from "./offline-store";
+import { offlineGet, offlinePut, offlinePurge, offlineList } from "./offline-store";
 import { get, patch, post } from "./api";
 import type {
   VocabularyCard,
@@ -317,4 +317,124 @@ export async function downloadVocabularyForOffline(
   }
 
   return snapshot;
+}
+
+export interface OfflineVocabularyOverview {
+  collectionCount: number;
+  totalWords: number;
+  pendingMutationsCount: number;
+  lastDownloadedAt: string | null;
+  lastStudiedAt: string | null;
+  assignmentIds: string[];
+}
+
+export interface BatchSyncResult {
+  success: boolean;
+  totalAcknowledged: number;
+  totalRemaining: number;
+  errors: string[];
+}
+
+/**
+ * Aggregates offline vocabulary status for a user across all stored assignments.
+ * Inspects snapshots, progress, and pending mutation queues.
+ */
+export async function getUserOfflineVocabularyOverview(
+  userId: string,
+): Promise<OfflineVocabularyOverview> {
+  const safeUser = encodeURIComponent(userId.trim() || "anonymous");
+  const records = await offlineList(`vocab.${safeUser}`);
+
+  const assignmentSet = new Set<string>();
+  let totalWords = 0;
+  let pendingMutationsCount = 0;
+  let lastDownloadedAt: string | null = null;
+  let lastStudiedAt: string | null = null;
+
+  for (const record of records) {
+    const lastDot = record.key.lastIndexOf(".");
+    if (lastDot === -1) continue;
+    const assignmentId = decodeURIComponent(record.key.slice(0, lastDot));
+    const subKey = record.key.slice(lastDot + 1);
+
+    if (subKey === "snapshot") {
+      try {
+        const snap = JSON.parse(record.value) as OfflineVocabularySnapshot;
+        if (snap && Array.isArray(snap.words)) {
+          assignmentSet.add(assignmentId);
+          totalWords += snap.words.length;
+          if (snap.downloadedAt) {
+            if (!lastDownloadedAt || new Date(snap.downloadedAt) > new Date(lastDownloadedAt)) {
+              lastDownloadedAt = snap.downloadedAt;
+            }
+          }
+        }
+      } catch {
+        // ignore malformed
+      }
+    } else if (subKey === "pending_mutations") {
+      try {
+        const list = JSON.parse(record.value);
+        if (Array.isArray(list)) {
+          pendingMutationsCount += list.length;
+          if (list.length > 0) {
+            assignmentSet.add(assignmentId);
+          }
+        }
+      } catch {
+        // ignore malformed
+      }
+    } else if (subKey === "progress") {
+      try {
+        const prog = JSON.parse(record.value) as OfflineFlashcardState;
+        if (prog && prog.lastStudiedAt) {
+          if (!lastStudiedAt || new Date(prog.lastStudiedAt) > new Date(lastStudiedAt)) {
+            lastStudiedAt = prog.lastStudiedAt;
+          }
+        }
+      } catch {
+        // ignore malformed
+      }
+    }
+  }
+
+  return {
+    collectionCount: assignmentSet.size,
+    totalWords,
+    pendingMutationsCount,
+    lastDownloadedAt,
+    lastStudiedAt,
+    assignmentIds: Array.from(assignmentSet),
+  };
+}
+
+/**
+ * Synchronizes all pending mutations for all assignments belonging to the user.
+ */
+export async function syncAllUserOfflineVocabulary(
+  userId: string,
+): Promise<BatchSyncResult> {
+  const overview = await getUserOfflineVocabularyOverview(userId);
+  let totalAcknowledged = 0;
+  let totalRemaining = 0;
+  const errors: string[] = [];
+
+  for (const assignmentId of overview.assignmentIds) {
+    const pending = await getPendingMutations(userId, assignmentId);
+    if (pending.length === 0) continue;
+
+    const res = await syncOfflineFlashcards(userId, assignmentId);
+    totalAcknowledged += res.acknowledgedCount;
+    totalRemaining += res.remainingCount;
+    if (!res.success && res.error) {
+      errors.push(`${assignmentId}: ${res.error}`);
+    }
+  }
+
+  return {
+    success: errors.length === 0,
+    totalAcknowledged,
+    totalRemaining,
+    errors,
+  };
 }

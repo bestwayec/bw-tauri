@@ -26,14 +26,7 @@ export default function TeacherDashboard({ teacherName, userId, onNavigate }: Pr
 
   const gradingQuery = useQuery({
     queryKey: ["teacher-submissions", userId],
-    queryFn: async () => {
-      try {
-        const res = await get<SubmissionItem[]>("/v1/teacher/submissions");
-        return Array.isArray(res) ? res : [];
-      } catch {
-        return [];
-      }
-    },
+    queryFn: () => get<SubmissionItem[]>("/v1/teacher/submissions"),
     staleTime: 30_000,
   });
 
@@ -82,9 +75,19 @@ export default function TeacherDashboard({ teacherName, userId, onNavigate }: Pr
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Faol Sinflar</p>
             <p className="mt-1 text-2xl font-black text-white tabular-nums">
-              {groupsQuery.isLoading ? "…" : groups.length}
+              {groupsQuery.isLoading ? "…" : groupsQuery.isError ? "—" : groups.length}
             </p>
-            <p className="mt-0.5 text-[11px] text-slate-400">O‘quv guruhlari</p>
+            {groupsQuery.isError ? (
+              <button
+                type="button"
+                onClick={() => void groupsQuery.refetch()}
+                className="mt-0.5 text-[10px] text-red-300 underline font-semibold"
+              >
+                Yuklab bo‘lmadi · Qayta urinish ⟳
+              </button>
+            ) : (
+              <p className="mt-0.5 text-[11px] text-slate-400">O‘quv guruhlari</p>
+            )}
           </div>
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-lg">
             🏫
@@ -95,9 +98,13 @@ export default function TeacherDashboard({ teacherName, userId, onNavigate }: Pr
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Jami O‘quvchilar</p>
             <p className="mt-1 text-2xl font-black text-emerald-400 tabular-nums">
-              {groupsQuery.isLoading ? "…" : totalStudents}
+              {groupsQuery.isLoading ? "…" : groupsQuery.isError ? "—" : totalStudents}
             </p>
-            <p className="mt-0.5 text-[11px] text-slate-400">Biriktirilgan talabalar</p>
+            {groupsQuery.isError ? (
+              <p className="mt-0.5 text-[10px] text-slate-400">Guruhlar yuklanmadi</p>
+            ) : (
+              <p className="mt-0.5 text-[11px] text-slate-400">Biriktirilgan talabalar</p>
+            )}
           </div>
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-lg">
             👥
@@ -107,10 +114,20 @@ export default function TeacherDashboard({ teacherName, userId, onNavigate }: Pr
         <div className="flex items-center justify-between rounded-2xl border border-emerald-500/15 bg-[#111827] p-5 shadow-sm">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Tekshirish Navbati</p>
-            <p className={`mt-1 text-2xl font-black tabular-nums ${pendingCount > 0 ? "text-amber-400" : "text-white"}`}>
-              {gradingQuery.isLoading ? "…" : pendingCount}
+            <p className={`mt-1 text-2xl font-black tabular-nums ${gradingQuery.isError ? "text-red-400" : pendingCount > 0 ? "text-amber-400" : "text-white"}`}>
+              {gradingQuery.isLoading ? "…" : gradingQuery.isError ? "—" : pendingCount}
             </p>
-            <p className="mt-0.5 text-[11px] text-slate-400">Writing & Speaking ishlari</p>
+            {gradingQuery.isError ? (
+              <button
+                type="button"
+                onClick={() => void gradingQuery.refetch()}
+                className="mt-0.5 text-[10px] text-red-300 underline font-semibold"
+              >
+                Xatolik · Qayta urinish ⟳
+              </button>
+            ) : (
+              <p className="mt-0.5 text-[11px] text-slate-400">Writing & Speaking ishlari</p>
+            )}
           </div>
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-500/10 border border-amber-500/20 text-lg">
             📝
@@ -161,8 +178,15 @@ export default function TeacherDashboard({ teacherName, userId, onNavigate }: Pr
           )}
 
           {groupsQuery.isError && (
-            <div role="alert" className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-xs text-red-300">
-              Guruhlarni yuklashda xatolik yuz berdi.
+            <div role="alert" className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-xs text-red-300 flex items-center justify-between">
+              <span>Guruhlarni yuklashda xatolik yuz berdi.</span>
+              <button
+                type="button"
+                onClick={() => void groupsQuery.refetch()}
+                className="rounded-lg bg-red-500/20 px-3 py-1 font-semibold text-red-200 hover:bg-red-500/30 transition-all"
+              >
+                Qayta urinish ⟳
+              </button>
             </div>
           )}
 
@@ -246,13 +270,26 @@ export default function TeacherDashboard({ teacherName, userId, onNavigate }: Pr
               </div>
             )}
 
-            {!gradingQuery.isLoading && submissions.length === 0 && (
+            {gradingQuery.isError && (
+              <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300 space-y-2">
+                <p>Tekshirish navbatini yuklashda xatolik yuz berdi.</p>
+                <button
+                  type="button"
+                  onClick={() => void gradingQuery.refetch()}
+                  className="rounded-lg bg-red-500/20 px-2.5 py-1 font-semibold text-red-200 hover:bg-red-500/30 transition-all"
+                >
+                  Qayta urinish ⟳
+                </button>
+              </div>
+            )}
+
+            {!gradingQuery.isLoading && !gradingQuery.isError && submissions.length === 0 && (
               <p className="text-xs text-slate-400 py-4 text-center">
                 Barcha topshirilgan ishlar tekshirilgan.
               </p>
             )}
 
-            {!gradingQuery.isLoading && submissions.length > 0 && (
+            {!gradingQuery.isLoading && !gradingQuery.isError && submissions.length > 0 && (
               <ul className="space-y-2">
                 {submissions.slice(0, 5).map((sub) => (
                   <li

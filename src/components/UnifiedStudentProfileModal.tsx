@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { get } from "@/lib/api";
 import type { ClassroomStudentHistory } from "@/lib/group-contract.generated";
@@ -10,6 +11,16 @@ interface Props {
 }
 
 export function UnifiedStudentProfileModal({ groupId, studentId, userId, onClose }: Props) {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   const path = `/v1/groups/${encodeURIComponent(groupId)}/member-history/${encodeURIComponent(studentId)}`;
   const { data: history, isLoading, isError, refetch } = useQuery<ClassroomStudentHistory>({
     queryKey: ["classroom-student-history", userId, groupId, studentId],
@@ -36,6 +47,11 @@ export function UnifiedStudentProfileModal({ groupId, studentId, userId, onClose
       role="dialog"
       aria-modal="true"
       aria-labelledby="student-profile-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
     >
       <div className="relative flex max-h-[90vh] w-full max-w-2xl flex-col rounded-3xl border border-emerald-500/30 bg-[#0B0F17] p-6 shadow-2xl overflow-hidden">
         {/* Modal Header */}
@@ -54,10 +70,10 @@ export function UnifiedStudentProfileModal({ groupId, studentId, userId, onClose
                     className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
                       history.currentlyEnrolled
                         ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-                        : "bg-slate-700 text-slate-300"
+                        : "bg-slate-700/80 text-slate-300 border border-slate-600"
                     }`}
                   >
-                    {history.currentlyEnrolled ? "Faol a‘zo" : "Sobiq a‘zo"}
+                    {history.currentlyEnrolled ? "Faol a‘zo (Hozirgi sinf)" : "Sobiq a‘zo (Tarixiy sinf)"}
                   </span>
                 )}
               </div>
@@ -228,20 +244,26 @@ export function UnifiedStudentProfileModal({ groupId, studentId, userId, onClose
                     <span>💬</span> Ustoz va Diagnostika Izohlari ({feedbackList.length})
                   </h3>
                   <div className="space-y-2">
-                    {feedbackList.map((f, idx) => (
-                      <div
-                        key={idx}
-                        className="rounded-xl border border-white/10 bg-slate-900/60 p-3 space-y-1 text-xs"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold uppercase text-emerald-400">{f.skill}</span>
-                          <span className="font-mono text-white">Ball: {f.final_score ?? "—"}</span>
+                    {feedbackList.map((f, idx) => {
+                      const text =
+                        f.feedback_text?.trim() ||
+                        (typeof f.approved_feedback === "string" ? f.approved_feedback.trim() : "");
+                      if (!text) return null;
+                      return (
+                        <div
+                          key={idx}
+                          className="rounded-xl border border-white/10 bg-slate-900/60 p-3 space-y-1 text-xs"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold uppercase text-emerald-400">{f.skill}</span>
+                            <span className="font-mono text-white">Ball: {f.final_score ?? "—"}</span>
+                          </div>
+                          <p className="text-slate-300 whitespace-pre-wrap leading-relaxed">
+                            {text}
+                          </p>
                         </div>
-                        <p className="text-slate-300 whitespace-pre-wrap leading-relaxed">
-                          {f.feedback_text ?? (typeof f.approved_feedback === "string" ? f.approved_feedback : "")}
-                        </p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </section>
               )}

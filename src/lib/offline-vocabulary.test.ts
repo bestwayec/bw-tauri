@@ -6,9 +6,11 @@ import {
   getOfflineProgress,
   getOfflineSnapshot,
   getPendingMutations,
+  getUserOfflineVocabularyOverview,
   purgeAccountOfflineVocabulary,
   saveOfflineProgress,
   saveOfflineSnapshot,
+  syncAllUserOfflineVocabulary,
   syncOfflineFlashcards,
 } from "./offline-vocabulary";
 import * as api from "./api";
@@ -217,5 +219,61 @@ describe("offline-vocabulary", () => {
 
     const localProgress = await getOfflineProgress(user1, assignmentId);
     expect(localProgress?.familiarity.w1).toBe("known");
+  });
+
+  it("aggregates user offline vocabulary overview across assignments and syncs batch", async () => {
+    const assign2 = "assign-202";
+    await purgeAccountOfflineVocabulary(user1, [assign2]);
+
+    // Save snapshots for two assignments
+    await saveOfflineSnapshot(user1, assignmentId, {
+      assignmentId,
+      revision: 1,
+      title: "Set 1",
+      words: sampleWords,
+      downloadedAt: "2026-11-19T10:00:00Z",
+    });
+
+    await saveOfflineSnapshot(user1, assign2, {
+      assignmentId: assign2,
+      revision: 1,
+      title: "Set 2",
+      words: [{ id: "w4", english: "date", uzbek: "xurmo", contextSentence: null, partOfSpeech: null }],
+      downloadedAt: "2026-11-19T12:00:00Z",
+    });
+
+    // Enqueue pending mutation on assign2
+    const mut = await enqueueFlashcardMutation(user1, assign2, {
+      wordId: "w4",
+      status: "known",
+    });
+
+    const overview = await getUserOfflineVocabularyOverview(user1);
+    expect(overview.collectionCount).toBe(2);
+    expect(overview.totalWords).toBe(4);
+    expect(overview.pendingMutationsCount).toBe(1);
+    expect(overview.lastDownloadedAt).toBe("2026-11-19T12:00:00Z");
+    expect(overview.assignmentIds).toContain(assignmentId);
+    expect(overview.assignmentIds).toContain(assign2);
+
+    // Sync all
+    vi.mocked(api.post).mockResolvedValueOnce({
+      lastWordId: "w4",
+      familiarity: { w4: "known" },
+      order: ["w4"],
+      lastStudiedAt: "2026-11-19T14:00:00Z",
+      acknowledgedOpIds: [mut.opId],
+      serverRevision: 1,
+    });
+
+    const syncRes = await syncAllUserOfflineVocabulary(user1);
+    expect(syncRes.success).toBe(true);
+    expect(syncRes.totalAcknowledged).toBe(1);
+    expect(syncRes.totalRemaining).toBe(0);
+
+    const overviewAfter = await getUserOfflineVocabularyOverview(user1);
+    expect(overviewAfter.pendingMutationsCount).toBe(0);
+
+    await purgeAccountOfflineVocabulary(user1, [assign2]);
   });
 });

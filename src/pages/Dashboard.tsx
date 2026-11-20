@@ -437,7 +437,7 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
         </div>
         <div className="space-y-4 lg:col-span-4">
           <StudentAttendanceWidget />
-          <StudentOfflineVocabWidget onNavigate={onNavigate} />
+          <StudentOfflineVocabWidget onNavigate={onNavigate} userId={userId} />
         </div>
       </div>
 

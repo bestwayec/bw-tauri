@@ -33,12 +33,8 @@ export interface StudentAttendanceItem {
 }
 
 export async function fetchMyAssignments(): Promise<StudentAssignmentItem[]> {
-  try {
-    const data = await get<StudentAssignmentItem[]>("/v1/student/my-assignments");
-    return Array.isArray(data) ? data : [];
-  } catch {
-    return [];
-  }
+  const data = await get<StudentAssignmentItem[]>("/v1/student/my-assignments");
+  return Array.isArray(data) ? data : [];
 }
 
 export async function joinCohortByCode(code: string): Promise<{ cohort_name: string }> {
@@ -48,10 +44,6 @@ export async function joinCohortByCode(code: string): Promise<{ cohort_name: str
 }
 
 export async function fetchMyAttendance(month?: string): Promise<StudentAttendanceItem[]> {
-  try {
-    const data = await get<StudentAttendanceItem[]>("/v1/attendance", month ? { month } : undefined);
-    return Array.isArray(data) ? data : [];
-  } catch {
-    return [];
-  }
+  const data = await get<StudentAttendanceItem[]>("/v1/attendance", month ? { month } : undefined);
+  return Array.isArray(data) ? data : [];
 }
