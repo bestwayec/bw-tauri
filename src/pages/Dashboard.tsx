@@ -210,7 +210,14 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
   const attempts: AttemptSummary[] | null =
     attemptsQuery.data?.filter((attempt) => belongsToProgram(attempt.testType, program)) ?? null;
 
-  const assigned = tests.length;
+  const catalogueReady = useAltTrack
+    ? altTestsQuery.isSuccess && altMocksQuery.isSuccess
+    : testsQuery.isSuccess && mocksQuery.isSuccess;
+  const catalogueFailed = useAltTrack
+    ? altTestsQuery.isError || altMocksQuery.isError
+    : testsQuery.isError || mocksQuery.isError;
+  const catalogueSize = tests.length;
+  const attemptCountsReady = attemptsQuery.isSuccess;
   const ready = tests.filter((t) => t.questionCount > 0).length;
   const inProgress = attempts?.filter((a) => a.status === "in_progress") ?? [];
   const completed = attempts?.filter((a) => a.status === "completed").length ?? 0;
@@ -541,29 +548,29 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
         {[
           {
             label: "Available Exams",
-            value: String(assigned),
-            sub: ready > 0 ? `${ready} ready to start` : "Syncing exams…",
+            value: catalogueReady ? String(catalogueSize) : "—",
+            sub: catalogueFailed ? "Unable to load catalog" : catalogueReady ? `${ready} ready to start` : "Loading exams…",
             accent: true,
             icon: "📚",
           },
           {
-            label: "Learning Streak",
-            value: completed > 0 ? `${Math.min(7, completed + 2)} Days` : "Active",
-            sub: "🔥 Daily Practice Streak",
+            label: "Scored Exams",
+            value: attemptCountsReady ? String(scored.length) : "—",
+            sub: attemptsQuery.isError ? "Unable to load results" : "Attempts with a saved score",
             accent: false,
-            icon: "🔥",
+            icon: "✓",
           },
           {
             label: "Active In Progress",
-            value: String(inProgress.length),
-            sub: inProgress.length > 0 ? "Resume current session" : "All caught up",
+            value: attemptCountsReady ? String(inProgress.length) : "—",
+            sub: attemptsQuery.isError ? "Unable to load attempts" : "Open exam attempts",
             accent: inProgress.length > 0,
             icon: "⏳",
           },
           {
             label: "Completed Tests",
-            value: completed > 0 || avg != null ? `${completed}` : "0",
-            sub: avg != null ? `Avg score: ${avg} pts` : "First score after submit",
+            value: attemptCountsReady ? String(completed) : "—",
+            sub: attemptsQuery.isError ? "Unable to load results" : avg != null ? `Avg score: ${avg} pts` : "Finished attempts",
             accent: false,
             icon: "✓",
           },
@@ -592,7 +599,7 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
         <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1.5">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-400">
-              Official CBT Sequence · {assigned} Available
+              Official CBT Sequence · {catalogueReady ? catalogueSize + " available" : "availability unavailable"}
             </span>
             <h3 className="text-xl font-bold tracking-tight text-white sm:text-2xl">
               {program === "MULTILEVEL"
