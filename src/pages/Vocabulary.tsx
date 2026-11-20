@@ -474,14 +474,20 @@ function LearningHistory({ userId, review = false }: { userId: string; review?: 
 
 type AssignedTask = { id: string; title: string; vocabulary_set_id: string | null; score_percent: number | null; deadline: string };
 
-export default function Vocabulary({ userId }: { userId: string }) {
+export default function Vocabulary({ userId, initialAssignmentId = "" }: { userId: string; initialAssignmentId?: string }) {
   const queryClient = useQueryClient();
   const taskKey = ["vocabulary-assignments", userId] as const;
   const tasks = useQuery({
     queryKey: taskKey,
     queryFn: ({ signal }) => get<AssignedTask[]>("/v1/student/my-assignments", undefined, { signal }),
   });
-  const [assignmentId, setAssignmentId] = useState("");
+  const [assignmentId, setAssignmentId] = useState(initialAssignmentId);
+
+  useEffect(() => {
+    if (initialAssignmentId) {
+      setAssignmentId(initialAssignmentId);
+    }
+  }, [initialAssignmentId]);
   const review = useMutation({ mutationFn: () => get<VocabularyReview>("/v1/vocabulary/srs/quiz") });
   const internetUnavailable = useSessionStore((state) => !state.online)
     || Boolean(tasks.error && typeof tasks.error === "object" && "status" in tasks.error && tasks.error.status === 0);

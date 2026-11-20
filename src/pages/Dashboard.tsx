@@ -42,6 +42,7 @@ type Props = {
   onNavigate: (route: Route) => void;
   onStart: (test: TestListItem, start: StartResult) => void;
   onStartMock?: (mock: MockExamListItem, start: MockStartResult, section?: MockSkill) => void;
+  onSelectVocabulary?: (assignmentId: string) => void;
 };
 
 function greeting(name: string | null): string {
@@ -93,7 +94,7 @@ const OVERVIEW_QUERY_OPTS = {
   retryDelay: (attempt: number) => Math.min(1_000 * 2 ** attempt, 5_000),
 } as const;
 
-export default function Dashboard({ studentName, onNavigate, onStart, onStartMock }: Props) {
+export default function Dashboard({ studentName, onNavigate, onStart, onStartMock, onSelectVocabulary }: Props) {
   const programs = usePrograms();
   const userId = useSessionStore((state) => state.profile?.id);
   const userRole = useSessionStore((state) => state.profile?.role);
@@ -461,6 +462,7 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
             userId={userId}
             onNavigate={onNavigate}
             onStartExam={(assignmentId) => void openAssignedExam(assignmentId)}
+            onSelectVocabulary={onSelectVocabulary}
           />
         </div>
         <div className="space-y-4 lg:col-span-4">

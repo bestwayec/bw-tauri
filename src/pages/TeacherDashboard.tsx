@@ -12,7 +12,7 @@ interface Props {
   teacherName: string | null;
   userId: string;
   onNavigate: (route: Route) => void;
-  onOpenClassroom: (groupId: string) => void;
+  onOpenClassroom: (groupId: string, section?: "roster" | "attendance" | "tasks") => void;
 }
 
 function greeting(name: string | null): string {
@@ -207,14 +207,32 @@ export default function TeacherDashboard({ teacherName, userId, onNavigate, onOp
                     </p>
                   </div>
 
-                  <div className="mt-4 flex items-center justify-between pt-3 border-t border-white/5">
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-white/5">
                     <button
                       type="button"
                       onClick={() => onOpenClassroom(group.id)}
-                      className="workspace-control font-semibold"
+                      className="workspace-control font-semibold text-xs"
                     >
                       {english ? "Open classroom" : "Guruhni ochish"}
                     </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => onOpenClassroom(group.id, "attendance")}
+                        className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-medium text-slate-300 hover:border-emerald-500/30 hover:text-emerald-300 transition-all"
+                        title={english ? "Open attendance" : "Davomatni ochish"}
+                      >
+                        📋 {english ? "Attendance" : "Davomat"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onOpenClassroom(group.id, "tasks")}
+                        className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-medium text-slate-300 hover:border-emerald-500/30 hover:text-emerald-300 transition-all"
+                        title={english ? "Open assignments" : "Vazifalarni ochish"}
+                      >
+                        📝 {english ? "Tasks" : "Vazifalar"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}

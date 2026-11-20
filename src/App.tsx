@@ -107,7 +107,8 @@ export default function App() {
   const queryClient = useQueryClient();
   const programs = usePrograms();
   const [route, setRoute] = useState<Route>("login");
-  const [classroomTarget, setClassroomTarget] = useState<{ userId: string; groupId: string } | null>(null);
+  const [classroomTarget, setClassroomTarget] = useState<{ userId: string; groupId: string; section?: "roster" | "attendance" | "tasks" } | null>(null);
+  const [vocabularyAssignmentId, setVocabularyAssignmentId] = useState<string | undefined>(undefined);
   const [student, setStudent] = useState<Student | null>(null);
   const [, setRestoring] = useState(true);
   const [activeTest, setActiveTest] = useState<TestListItem | null>(null);
@@ -561,18 +562,25 @@ export default function App() {
                     teacherName={student?.name ?? null}
                     userId={student?.id ?? ""}
                     onNavigate={navigate}
-                    onOpenClassroom={(groupId) => {
+                    onOpenClassroom={(groupId, section) => {
                       if (!student) return;
-                      setClassroomTarget({ userId: student.id, groupId });
+                      setClassroomTarget({ userId: student.id, groupId, section });
                       navigate("groups");
                     }}
                   />
                 ) : (
                   <Dashboard
                     studentName={student?.name ?? null}
-                    onNavigate={navigate}
+                    onNavigate={(r) => {
+                      if (r === "vocabulary") setVocabularyAssignmentId(undefined);
+                      navigate(r);
+                    }}
                     onStart={handleStartExam}
                     onStartMock={handleStartMock}
+                    onSelectVocabulary={(assignmentId) => {
+                      setVocabularyAssignmentId(assignmentId);
+                      navigate("vocabulary");
+                    }}
                   />
                 )
               )}
@@ -583,7 +591,13 @@ export default function App() {
                   onStartMock={handleStartMock}
                 />
               )}
-              {activeRoute === "vocabulary" && student?.role === "student" && <Vocabulary key={student.id} userId={student.id} />}
+              {activeRoute === "vocabulary" && student?.role === "student" && (
+                <Vocabulary
+                  key={`${student.id}-${vocabularyAssignmentId ?? "all"}`}
+                  userId={student.id}
+                  initialAssignmentId={vocabularyAssignmentId}
+                />
+              )}
               {activeRoute === "vocabulary" && student && isStaffRole(student.role) && <VocabularyStudio key={student.id} userId={student.id} />}
               {activeRoute === "history" && (
                 <History refreshKey={historyKey} onStats={setStats} />
@@ -591,8 +605,15 @@ export default function App() {
               {activeRoute === "examTrack" && <ExamTrack onBrowse={() => navigate('exams')} />}
               {activeRoute === "proctoring" && <LiveProctoring />}
               {activeRoute === "grading" && student && <GradingQueue key={student.id} userId={student.id} />}
-              {activeRoute === "groups" && student && <GroupsResults key={student.id} userId={student.id} role={student.role}
-                initialGroupId={classroomTarget?.userId === student.id ? classroomTarget.groupId : undefined} />}
+              {activeRoute === "groups" && student && (
+                <GroupsResults
+                  key={classroomTarget?.userId === student.id ? `${student.id}-${classroomTarget.groupId}` : student.id}
+                  userId={student.id}
+                  role={student.role}
+                  initialGroupId={classroomTarget?.userId === student.id ? classroomTarget.groupId : undefined}
+                  initialSection={classroomTarget?.userId === student.id ? classroomTarget.section : undefined}
+                />
+              )}
               {activeRoute === "centerOverview" && <CenterOverview onNavigate={navigate} />}
               {activeRoute === "studentResults" && <StudentResults />}
               {activeRoute === "profile" && (

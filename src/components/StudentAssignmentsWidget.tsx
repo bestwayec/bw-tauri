@@ -8,6 +8,7 @@ interface Props {
   userId?: string;
   onNavigate: (route: Route) => void;
   onStartExam?: (assignmentId: string) => void;
+  onSelectVocabulary?: (assignmentId: string) => void;
 }
 
 function formatDeadline(iso: string): string {
@@ -25,7 +26,7 @@ function formatDeadline(iso: string): string {
   }
 }
 
-export function StudentAssignmentsWidget({ userId, onNavigate, onStartExam }: Props) {
+export function StudentAssignmentsWidget({ userId, onNavigate, onStartExam, onSelectVocabulary }: Props) {
   const { data: assignments, isLoading, isError, refetch } = useQuery<StudentAssignmentItem[]>({
     queryKey: ["my-assignments", userId],
     queryFn: fetchMyAssignments,
@@ -182,7 +183,13 @@ export function StudentAssignmentsWidget({ userId, onNavigate, onStartExam }: Pr
                     {task.vocabulary_set_id && (
                       <button
                         type="button"
-                        onClick={() => onNavigate("vocabulary")}
+                        onClick={() => {
+                          if (onSelectVocabulary) {
+                            onSelectVocabulary(task.id);
+                          } else {
+                            onNavigate("vocabulary");
+                          }
+                        }}
                         className="btn-brand rounded-lg px-3 py-1.5 text-xs font-bold text-slate-950 shadow-sm hover:scale-105 transition-transform"
                       >
                         Lug‘atni o‘rganish →
