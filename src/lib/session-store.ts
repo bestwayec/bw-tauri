@@ -90,6 +90,16 @@ export function jwtExpMs(token: string): number | null {
 const ACCESS_KEY = "bestway.accessToken";
 const REFRESH_KEY = "bestway.refreshToken";
 const PROFILE_KEY = "bestway.profile";
+const BROWSER_SESSION_EVENT = "bestway.browser-session-change";
+
+function notifyBrowserSessionChange() {
+  if (typeof window === "undefined" || isTauriRuntime()) return;
+  try {
+    window.localStorage.setItem(BROWSER_SESSION_EVENT, crypto.randomUUID());
+  } catch {
+    // Browser storage may be disabled.
+  }
+}
 /** Refresh this far ahead of expiry so requests almost never see a 401. */
 const PROACTIVE_LEAD_MS = 75_000;
 
@@ -279,6 +289,7 @@ export const useSessionStore = create<SessionState>()((set, get) => {
 
     initialize: async () => {
       const deviceId = ensureDeviceId();
+      const generation = sessionGeneration;
       set({ deviceId, status: "booting" });
 
       if (!onlineHooked && typeof window !== "undefined") {
@@ -296,6 +307,15 @@ export const useSessionStore = create<SessionState>()((set, get) => {
         };
         window.addEventListener("online", poke);
         window.addEventListener("offline", poke);
+        if (!isTauriRuntime()) {
+          window.addEventListener("storage", (event) => {
+            if (event.key !== BROWSER_SESSION_EVENT) return;
+            sessionGeneration++;
+            clearProactive();
+            // Leave shared credentials to the tab that changed them.
+            set({ accessToken: null, profile: null, status: "logged-out" });
+          });
+        }
       }
 
       let access: string | null = null;
@@ -344,6 +364,7 @@ export const useSessionStore = create<SessionState>()((set, get) => {
         }
       }
 
+      if (generation !== sessionGeneration) return;
       if (!access) {
         set({ accessToken: null, profile: null, status: "logged-out" });
         return;
@@ -370,6 +391,7 @@ export const useSessionStore = create<SessionState>()((set, get) => {
         online: typeof navigator === "undefined" ? true : navigator.onLine,
       });
       scheduleProactive(input.accessToken);
+      if (input.profile !== undefined) notifyBrowserSessionChange();
     },
 
     wipeLocal: async () => {
@@ -385,6 +407,8 @@ export const useSessionStore = create<SessionState>()((set, get) => {
         await secureRemoveItemAsync(PROFILE_KEY);
       } catch {
         /* wipe is best-effort */
+      } finally {
+        notifyBrowserSessionChange();
       }
     },
 
@@ -424,10 +448,7 @@ export const useSessionStore = create<SessionState>()((set, get) => {
             data = await rawPost("/auth/refresh", { refreshToken: rt }, null, 10_000);
           } catch (e) {
             if (generation === sessionGeneration && isDefinitiveLogout(verdictOf(e))) {
-              await secureRemoveItemAsync(ACCESS_KEY).catch(() => undefined);
-              await secureRemoveItemAsync(REFRESH_KEY).catch(() => undefined);
-              await secureRemoveItemAsync(PROFILE_KEY).catch(() => undefined);
-              set({ accessToken: null, profile: null, status: "logged-out" });
+              await get().wipeLocal();
             }
             throw e;
           }

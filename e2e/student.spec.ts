@@ -25,6 +25,22 @@ test('student password login stores no plaintext credentials and survives reload
   await context.setOffline(false);
 });
 
+test('same-origin logout invalidates another open tab and its authenticated UI', async ({ page, context }) => {
+  await signIn(page);
+  const second = await context.newPage();
+  await second.goto('/');
+  await expect(second.getByRole('button', { name: /^Exams/ }).first()).toBeVisible();
+
+  await page.evaluate(async () => {
+    const entry = '/src/lib/session-store.ts';
+    const { useSessionStore } = await import(entry);
+    await useSessionStore.getState().logout();
+  });
+  await expect(page.getByRole('button', { name: 'Sign in manually' })).toBeVisible();
+  await expect(second.getByRole('button', { name: 'Sign in manually' })).toBeVisible();
+  await expect(second.getByRole('button', { name: /^Exams/ })).toHaveCount(0);
+});
+
 test('a writing draft survives an API outage and restart, and finalization waits for upload', async ({ page }) => {
   const acknowledgedAnswers: Array<{ response?: string }> = [];
   page.on('response', response => {
