@@ -7,9 +7,12 @@ import {
   getOfflineProgress,
   getOfflineSnapshot,
   getPendingMutations,
-  saveOfflineSnapshot,
+  listOfflineSnapshots,
+  removeOfflineSnapshot,
+  saveOnlineFlashcardChange,
   syncOfflineFlashcards,
 } from "../lib/offline-vocabulary";
+import { useSessionStore } from "../lib/session-store";
 import type {
   VocabularyCard, VocabularyFlashcards, VocabularyMode, VocabularyQuestion, VocabularyResult,
   VocabularyLearnerHistory, VocabularyReview, VocabularyReviewHistory, VocabularySession, VocabularySubmission,
@@ -111,50 +114,45 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
   // Local durable offline store
   const localSnapshot = useQuery({
     queryKey: ["offline-vocab-snapshot", userId, id],
+    networkMode: "always",
     queryFn: () => getOfflineSnapshot(userId, id),
   });
   const localProgress = useQuery({
     queryKey: ["offline-vocab-progress", userId, id],
+    networkMode: "always",
     queryFn: () => getOfflineProgress(userId, id),
   });
   const pendingOps = useQuery({
     queryKey: ["offline-vocab-pending", userId, id],
+    networkMode: "always",
     queryFn: () => getPendingMutations(userId, id),
   });
 
   // Sync state & mutations
   const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "success" | "error">("idle");
-  const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+  const isOnline = useSessionStore((state) => state.online);
 
-  // Cache downloaded words automatically when online
+  const [storageError, setStorageError] = useState(false);
+  const accessDenied = words.error && typeof words.error === "object" && "status" in words.error
+    && [401, 403, 404, 410].includes(Number(words.error.status));
   useEffect(() => {
-    if (words.data && words.data.length > 0) {
-      void saveOfflineSnapshot(userId, id, {
-        assignmentId: id,
-        revision: 1,
-        title: "Vocabulary",
-        words: words.data,
-        downloadedAt: new Date().toISOString(),
-      });
-    }
-  }, [words.data, userId, id]);
+    if (!accessDenied || !localSnapshot.data) return;
+    void removeOfflineSnapshot(userId, id).then(() => {
+      void queryClient.invalidateQueries({ queryKey: ["offline-vocab-snapshot", userId, id] });
+      void queryClient.invalidateQueries({ queryKey: ["offline-vocab-assignments", userId] });
+    }).catch(() => setStorageError(true));
+  }, [accessDenied, id, localSnapshot.data, queryClient, userId]);
+  const effectiveWords: VocabularyCard[] = accessDenied ? [] : words.data ?? localSnapshot.data?.words ?? [];
+  const effectiveProgress = pendingOps.data?.length
+    ? localProgress.data ?? progress.data
+    : progress.data ?? localProgress.data;
+  const study = effectiveProgress ?? { lastWordId: "", familiarity: {}, order: [], lastStudiedAt: null };
 
-  const effectiveWords: VocabularyCard[] = words.data?.length
-    ? words.data
-    : localSnapshot.data?.words ?? [];
-
-  const effectiveProgress = progress.data || localProgress.data || {
-    lastWordId: "",
-    familiarity: {},
-    order: [],
-    lastStudiedAt: null,
-  };
-
-  const order = effectiveProgress.order?.length
-    ? effectiveProgress.order
+  const order = study.order?.length
+    ? study.order
     : effectiveWords.map(w => w.id);
 
-  const index = Math.max(0, order.indexOf(effectiveProgress.lastWordId || ""));
+  const index = Math.max(0, order.indexOf(study.lastWordId || ""));
   const word = effectiveWords.find(item => item.id === order[index]);
 
   const [revealed, setRevealed] = useState(false);
@@ -167,11 +165,14 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
   const triggerSync = useCallback(async () => {
     setSyncStatus("syncing");
     try {
-      const res = await syncOfflineFlashcards(userId, id);
+      let res = await syncOfflineFlashcards(userId, id);
+      while (res.success && res.acknowledgedCount > 0 && res.remainingCount) {
+        res = await syncOfflineFlashcards(userId, id);
+      }
       void queryClient.invalidateQueries({ queryKey: ["offline-vocab-pending", userId, id] });
       void queryClient.invalidateQueries({ queryKey: ["offline-vocab-progress", userId, id] });
       void queryClient.invalidateQueries({ queryKey: progressKey });
-      setSyncStatus(res.success ? "success" : "error");
+      setSyncStatus(res.success && res.remainingCount === 0 ? "success" : "error");
     } catch {
       setSyncStatus("error");
     }
@@ -218,41 +219,57 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
     window.speechSynthesis.speak(utterance);
   }
 
-  async function cardBy(step: number) {
-    if (!order.length) return;
-    const nextWordId = order[(index + step + order.length) % order.length];
-    await enqueueFlashcardMutation(userId, id, { lastWordId: nextWordId });
+  async function saveChange(change: { wordId?: string; status?: "known" | "practice"; lastWordId?: string; order?: string[] }) {
+    if (accessDenied) return;
+    setStorageError(false);
+    try {
+      await enqueueFlashcardMutation(userId, id, change, study);
+    } catch {
+      // Keep server-only study working when durable storage cannot be opened.
+      if (navigator.onLine && pendingOps.isSuccess && pendingOps.data.length === 0) {
+        try {
+          const saved = await saveOnlineFlashcardChange(userId, id, change);
+          queryClient.setQueryData(progressKey, saved);
+          setRevealed(false);
+          return;
+        } catch {
+          setStorageError(true);
+          return;
+        }
+      }
+      setStorageError(true);
+      return;
+    }
     void queryClient.invalidateQueries({ queryKey: ["offline-vocab-progress", userId, id] });
     void queryClient.invalidateQueries({ queryKey: ["offline-vocab-pending", userId, id] });
     setRevealed(false);
-    if (isOnline) void triggerSync();
+    if (navigator.onLine) void triggerSync();
+  }
+
+  async function cardBy(step: number) {
+    if (!order.length) return;
+    await saveChange({ lastWordId: order[(index + step + order.length) % order.length] });
   }
 
   async function shuffle() {
+    if (!order.length) return;
     const shuffled = [...order];
     for (let i = shuffled.length - 1; i > 0; i--) {
       const other = Math.floor(Math.random() * (i + 1));
       [shuffled[i], shuffled[other]] = [shuffled[other], shuffled[i]];
     }
-    await enqueueFlashcardMutation(userId, id, { order: shuffled, lastWordId: shuffled[0] });
-    void queryClient.invalidateQueries({ queryKey: ["offline-vocab-progress", userId, id] });
-    void queryClient.invalidateQueries({ queryKey: ["offline-vocab-pending", userId, id] });
-    setRevealed(false);
-    if (isOnline) void triggerSync();
+    await saveChange({ order: shuffled, lastWordId: shuffled[0] });
   }
 
   async function setFamiliarity(status: "known" | "practice") {
-    if (!word) return;
-    await enqueueFlashcardMutation(userId, id, { wordId: word.id, status, lastWordId: word.id });
-    void queryClient.invalidateQueries({ queryKey: ["offline-vocab-progress", userId, id] });
-    void queryClient.invalidateQueries({ queryKey: ["offline-vocab-pending", userId, id] });
-    if (isOnline) void triggerSync();
+    if (word) await saveChange({ wordId: word.id, status, lastWordId: word.id });
   }
 
   // Keyboard accessibility
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.target instanceof Element && e.target.closest("button, a, input, textarea, select, [contenteditable]")) return;
+      if (!word || accessDenied) return;
       if (e.key === " " || e.key === "Enter") {
         e.preventDefault();
         setRevealed(prev => !prev);
@@ -270,10 +287,10 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [word, index, order]);
+  }, [word, index, order, accessDenied]);
 
   const pendingCount = pendingOps.data?.length ?? 0;
-  const isDownloaded = Boolean(localSnapshot.data);
+  const isDownloaded = Boolean(localSnapshot.data) && !accessDenied;
 
   return (
     <div className="space-y-4">
@@ -281,10 +298,14 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
         <Practice sessionId={session.data.sessionId} questions={session.data.questions} path={root + "/submit"} onComplete={onComplete} />
       ) : (
         <>
+      {accessDenied && <p role="alert">Vazifaga kirish yopilgan / Assignment access is unavailable.</p>}
+      {(storageError || pendingOps.isError) && <p role="alert">Oflayn o‘zgarish saqlanmadi / Offline progress could not be saved.</p>}
+      {downloadMutation.isError && <p role="alert">Oflayn yuklab bo‘lmadi / Offline download failed.</p>}
+      {syncStatus === "error" && <p role="alert">Sinxronlash tugamadi / Sync incomplete. Retry when online.</p>}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap gap-2">
               {(Object.keys(labels) as VocabularyMode[]).map(mode => (
-                <button className={control} type="button" key={mode} disabled={session.isPending} onClick={() => session.mutate(mode)}>{labels[mode]}</button>
+                <button className={control} type="button" key={mode} disabled={!isOnline || Boolean(accessDenied) || session.isPending} onClick={() => session.mutate(mode)}>{labels[mode]}</button>
               ))}
             </div>
 
@@ -297,7 +318,7 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
                 <button
                   type="button"
                   className={control + " text-xs"}
-                  disabled={downloadMutation.isPending}
+                  disabled={!isOnline || Boolean(accessDenied) || downloadMutation.isPending}
                   onClick={() => downloadMutation.mutate()}
                 >
                   {downloadMutation.isPending ? "Yuklanmoqda… / Downloading…" : "↓ Oflayn saqlash / Save offline"}
@@ -309,13 +330,13 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
                   type="button"
                   className="rounded-md bg-amber-500/10 px-2 py-1 text-amber-300 border border-amber-500/20 hover:bg-amber-500/20"
                   onClick={() => void triggerSync()}
-                  disabled={syncStatus === "syncing"}
+                  disabled={!isOnline || Boolean(accessDenied) || syncStatus === "syncing"}
                 >
                   {syncStatus === "syncing" ? "Sinxronlanmoqda…" : `↻ ${pendingCount} kutilmoqda / pending`}
                 </button>
               ) : (
                 <span className="rounded-md bg-white/5 px-2 py-1 text-white/60">
-                  {isOnline ? "● Sinxron / Synced" : "○ Oflayn / Offline"}
+                  {isOnline ? "● Onlayn / Online" : "○ Oflayn / Offline"}
                 </span>
               )}
             </div>
@@ -328,7 +349,7 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
               <h2 className="text-lg font-semibold">Flashcards</h2>
               {effectiveWords.length > 0 && (
                 <span className="text-xs text-white/60">
-                  {Object.values(effectiveProgress.familiarity || {}).filter(v => v === "known").length} / {effectiveWords.length} o‘rganilgan / known
+                  {Object.values(study.familiarity || {}).filter(v => v === "known").length} / {effectiveWords.length} o‘rganilgan / known
                 </span>
               )}
             </div>
@@ -375,14 +396,14 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
                   </button>
 
                   <button
-                    className={`${control} ${effectiveProgress.familiarity[word.id] === "known" ? "bg-emerald-600/30 border-emerald-500 text-emerald-300" : ""}`}
+                    className={`${control} ${study.familiarity[word.id] === "known" ? "bg-emerald-600/30 border-emerald-500 text-emerald-300" : ""}`}
                     type="button"
                     onClick={() => void setFamiliarity("known")}
                   >
                     ✓ Bilaman / Known
                   </button>
                   <button
-                    className={`${control} ${effectiveProgress.familiarity[word.id] === "practice" ? "bg-amber-600/30 border-amber-500 text-amber-300" : ""}`}
+                    className={`${control} ${study.familiarity[word.id] === "practice" ? "bg-amber-600/30 border-amber-500 text-amber-300" : ""}`}
                     type="button"
                     onClick={() => void setFamiliarity("practice")}
                   >
@@ -456,15 +477,38 @@ export default function Vocabulary({ userId }: { userId: string }) {
   });
   const [assignmentId, setAssignmentId] = useState("");
   const review = useMutation({ mutationFn: () => get<VocabularyReview>("/v1/vocabulary/srs/quiz") });
+  const internetUnavailable = useSessionStore((state) => !state.online)
+    || Boolean(tasks.error && typeof tasks.error === "object" && "status" in tasks.error && tasks.error.status === 0);
+  const offlineAssignments = useQuery({
+    queryKey: ["offline-vocab-assignments", userId],
+    queryFn: () => listOfflineSnapshots(userId),
+    enabled: internetUnavailable,
+    networkMode: "always",
+  });
   const assigned = tasks.isError ? undefined : tasks.data?.filter(task => task.vocabulary_set_id);
   const assignment = assigned?.find(task => task.id === assignmentId);
+  const offlineAssignment = internetUnavailable
+    ? offlineAssignments.data?.find(snapshot => snapshot.assignmentId === assignmentId) : undefined;
 
   return (
     <section className="space-y-4">
       <h1 className="text-2xl font-bold">Vocabulary</h1>
       <section className="card space-y-3 rounded-2xl p-4">
         <h2 className="text-lg font-semibold">Assigned vocabulary</h2>
-        {tasks.isPending && <p role="status">Loading assignments…</p>}
+        {internetUnavailable && (
+          <div>
+            <p className="text-sm">Oflayn to‘plamlar / Downloaded collections</p>
+            {offlineAssignments.isError && <p role="alert">Oflayn to‘plamlar ochilmadi / Could not read downloads.</p>}
+            <ul className="space-y-2">{offlineAssignments.data?.map(snapshot => (
+              <li key={snapshot.assignmentId}>
+                <button className={control} type="button" onClick={() => { review.reset(); setAssignmentId(snapshot.assignmentId); }}>
+                  {snapshot.title}
+                </button>
+              </li>
+            ))}</ul>
+          </div>
+        )}
+        {tasks.isPending && !internetUnavailable && <p role="status">Loading assignments…</p>}
         {tasks.isError && <p role="alert">{errorMessage(tasks.error)} <button className={control} onClick={() => void tasks.refetch()}>Retry</button></p>}
         {tasks.isSuccess && !assigned?.length && <p>No vocabulary assignments.</p>}
         <ul className="space-y-2">{assigned?.map(task => (
@@ -476,7 +520,7 @@ export default function Vocabulary({ userId }: { userId: string }) {
           </li>
         ))}</ul>
       </section>
-      {assignment && <Assignment key={assignment.id} id={assignment.id} userId={userId} onComplete={() => {
+      {(assignment || offlineAssignment) && <Assignment key={assignmentId} id={assignmentId} userId={userId} onComplete={() => {
         void queryClient.invalidateQueries({ queryKey: taskKey });
         void queryClient.invalidateQueries({ queryKey: ["vocabulary-history", userId] });
       }} />}

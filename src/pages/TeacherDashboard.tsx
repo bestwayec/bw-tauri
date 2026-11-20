@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { Route } from "@/App";
 import { get } from "@/lib/api";
 import type { GroupListItem } from "@/lib/group-contract.generated";
-import type { SubmissionItem } from "./GradingQueue";
+import type { SubmissionPage } from "./GradingQueue";
 
 interface Props {
   teacherName: string | null;
@@ -26,14 +26,14 @@ export default function TeacherDashboard({ teacherName, userId, onNavigate }: Pr
 
   const gradingQuery = useQuery({
     queryKey: ["teacher-submissions", userId],
-    queryFn: () => get<SubmissionItem[]>("/v1/teacher/submissions"),
+    queryFn: ({ signal }) => get<SubmissionPage>("/v1/teacher/submissions", { limit: 5, withTotal: 1 }, { signal }),
     staleTime: 30_000,
   });
 
   const groups = groupsQuery.data ?? [];
   const totalStudents = groups.reduce((sum, g) => sum + (g.studentsCount ?? 0), 0);
-  const submissions = gradingQuery.data ?? [];
-  const pendingCount = submissions.filter((s) => s.status === "pending").length;
+  const submissions = gradingQuery.data?.items ?? [];
+  const pendingCount = gradingQuery.data?.total ?? 0;
 
   return (
     <section className="space-y-6">

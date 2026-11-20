@@ -102,11 +102,11 @@ describe("TeacherDashboard", () => {
         studentsCount: 15,
       },
     ]);
-    client.setQueryData(["teacher-submissions", "teacher-1"], [
+    client.setQueryData(["teacher-submissions", "teacher-1"], { total: 71, items: [
       {
         id: "sub-1",
         studentName: "Ali Valiyev",
-        studentPhone: "+998901234567",
+        questionId: "question-1",
         examTitle: "IELTS Simulation",
         skill: "writing",
         subType: "Task 2",
@@ -117,7 +117,7 @@ describe("TeacherDashboard", () => {
         overallBand: null,
         teacherFeedback: "",
       },
-    ]);
+    ] });
 
     const html = renderToStaticMarkup(
       <QueryClientProvider client={client}>
@@ -128,6 +128,6 @@ describe("TeacherDashboard", () => {
     expect(html).toContain("Morning IELTS");
     expect(html).toContain("Ali Valiyev");
     expect(html).toContain("15 o‘quvchi");
-    expect(html).toContain("1 ta");
+    expect(html).toContain("71 ta");
   });
 });

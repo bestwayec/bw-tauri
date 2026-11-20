@@ -27,7 +27,7 @@ describe("StudentOfflineVocabWidget", () => {
     );
 
     expect(html).toContain("Offline Study");
-    expect(html).toContain("Lug‘at va Fleshkartalar (IndexedDB)");
+    expect(html).toContain("Lug‘at va fleshkartalar");
     expect(html).toContain("Fleshkartalarni ochish →");
   });
 });

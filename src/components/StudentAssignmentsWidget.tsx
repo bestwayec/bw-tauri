@@ -5,7 +5,7 @@ import type { Route } from "@/App";
 interface Props {
   userId?: string;
   onNavigate: (route: Route) => void;
-  onStartExamById?: (examId: string) => void;
+  onStartExam?: (assignmentId: string) => void;
 }
 
 function formatDeadline(iso: string): string {
@@ -23,7 +23,7 @@ function formatDeadline(iso: string): string {
   }
 }
 
-export function StudentAssignmentsWidget({ userId, onNavigate, onStartExamById }: Props) {
+export function StudentAssignmentsWidget({ userId, onNavigate, onStartExam }: Props) {
   const { data: assignments, isLoading, isError, refetch } = useQuery<StudentAssignmentItem[]>({
     queryKey: ["my-assignments", userId],
     queryFn: fetchMyAssignments,
@@ -48,7 +48,7 @@ export function StudentAssignmentsWidget({ userId, onNavigate, onStartExamById }
           <div>
             <h2 className="text-base font-bold text-white">Sinf topshiriqlari va uy vazifalari</h2>
             <p className="text-xs text-slate-400">
-              {activeAssignments.length > 0
+              {isLoading || isError ? null : activeAssignments.length > 0
                 ? `${activeAssignments.length} ta faol topshiriq mavjud`
                 : "Barcha topshiriqlar bajarilgan"}
             </p>
@@ -127,16 +127,10 @@ export function StudentAssignmentsWidget({ userId, onNavigate, onStartExamById }
                       Lug‘atni o‘rganish →
                     </button>
                   )}
-                  {task.exam_id && (
+                  {task.exam_id && onStartExam && (task.can_launch_exam ?? task.status === "pending") && (
                     <button
                       type="button"
-                      onClick={() => {
-                        if (onStartExamById && task.exam_id) {
-                          onStartExamById(task.exam_id);
-                        } else {
-                          onNavigate("exams");
-                        }
-                      }}
+                      onClick={() => onStartExam(task.id)}
                       className="btn-brand rounded-lg px-3 py-1.5 text-xs font-bold text-slate-950 shadow-sm hover:scale-105 transition-transform"
                     >
                       Imtihonni boshlash →

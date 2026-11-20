@@ -29,7 +29,8 @@ export function StudentOfflineVocabWidget({ onNavigate, userId }: Props) {
       const data = await getUserOfflineVocabularyOverview(activeUserId);
       setOverview(data);
     } catch {
-      // offline fallback
+      setOverview(null);
+      setSyncError("Oflayn to‘plamlarni o‘qib bo‘lmadi / Could not read downloads");
     } finally {
       setLoading(false);
     }
@@ -92,7 +93,7 @@ export function StudentOfflineVocabWidget({ onNavigate, userId }: Props) {
               }`}
             >
               <span className={`h-1.5 w-1.5 rounded-full ${isOnline ? "bg-emerald-400" : "bg-amber-400"}`} />
-              {isOnline ? "Online · Avto-sinxron" : "Offline Rejim"}
+              {isOnline ? "Onlayn / Online" : "Offline Rejim"}
             </span>
 
             {overview && overview.pendingMutationsCount > 0 ? (
@@ -107,7 +108,7 @@ export function StudentOfflineVocabWidget({ onNavigate, userId }: Props) {
           </div>
 
           <div className="text-sm font-semibold text-white">
-            Lug‘at va Fleshkartalar (IndexedDB)
+            Lug‘at va fleshkartalar
           </div>
 
           <div className="text-xs text-slate-400">
@@ -118,13 +119,13 @@ export function StudentOfflineVocabWidget({ onNavigate, userId }: Props) {
                 {overview.collectionCount} ta to‘plam ({overview.totalWords} ta so‘z) saqlangan
                 {overview.lastDownloadedAt ? ` · Yangilandi: ${new Date(overview.lastDownloadedAt).toLocaleDateString()}` : ""}
               </span>
-            ) : (
+            ) : !syncError ? (
               <span>Hali offline to‘plamlar yuklab olinmagan. Flashcard orqali yuklab oling.</span>
-            )}
+            ) : null}
           </div>
 
           {syncError && (
-            <div className="text-xs text-rose-400">
+            <div role="alert" className="text-xs text-rose-300">
               Xatolik: {syncError}
             </div>
           )}

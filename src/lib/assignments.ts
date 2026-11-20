@@ -15,6 +15,7 @@ export interface StudentAssignmentItem {
   lesson_order?: number | null;
   exam_id?: string | null;
   exam_title?: string | null;
+  can_launch_exam?: boolean;
   vocabulary_set_id?: string | null;
   deadline: string;
   min_pass_percent: number;
@@ -34,7 +35,8 @@ export interface StudentAttendanceItem {
 
 export async function fetchMyAssignments(): Promise<StudentAssignmentItem[]> {
   const data = await get<StudentAssignmentItem[]>("/v1/student/my-assignments");
-  return Array.isArray(data) ? data : [];
+  if (!Array.isArray(data)) throw new Error("Invalid assignment list");
+  return data;
 }
 
 export async function joinCohortByCode(code: string): Promise<{ cohort_name: string }> {

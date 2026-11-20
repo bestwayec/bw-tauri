@@ -10,12 +10,12 @@
  * - Syncs pending mutations when online and reconciles with server acknowledgements.
  * - Strictly avoids storing auth/refresh tokens in offline study storage.
  */
-import { offlineGet, offlinePut, offlinePurge, offlineList } from "./offline-store";
+import { offlineGet, offlineList, purgeDurableOfflinePrefix, updateDurableOfflineValue } from "./offline-store";
 import { get, patch, post } from "./api";
+import { useSessionStore } from "./session-store";
 import type {
   VocabularyCard,
   VocabularyCollectionSnapshot,
-  VocabularyFlashcardChange,
   VocabularyFlashcardMutation,
   VocabularyFlashcards,
 } from "./group-contract.generated";
@@ -44,10 +44,13 @@ export interface VocabularySyncResult {
   error?: string;
 }
 
+function accountNamespace(userId: string): string {
+  return "vocab." + encodeURIComponent(userId.trim()).replace(/\./g, "%2E");
+}
+
 function vocabNamespace(userId: string, assignmentId: string): string {
-  const safeUser = encodeURIComponent(userId.trim() || "anonymous");
   const safeAssignment = encodeURIComponent(assignmentId.trim());
-  return `vocab.${safeUser}.${safeAssignment}`;
+  return accountNamespace(userId) + "." + safeAssignment;
 }
 
 function generateOpId(): string {
@@ -57,266 +60,225 @@ function generateOpId(): string {
   return `op_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-/** Save a downloaded vocabulary snapshot to durable local storage. */
-export async function saveOfflineSnapshot(
-  userId: string,
-  assignmentId: string,
-  snapshot: OfflineVocabularySnapshot,
-): Promise<boolean> {
-  const ns = vocabNamespace(userId, assignmentId);
-  return offlinePut(ns, "snapshot", JSON.stringify(snapshot));
+interface StudyState {
+  snapshot: OfflineVocabularySnapshot | null;
+  progress: OfflineFlashcardState | null;
+  pending: VocabularyFlashcardMutation[];
 }
 
-/** Retrieve the local vocabulary snapshot if downloaded. */
-export async function getOfflineSnapshot(
-  userId: string,
-  assignmentId: string,
-): Promise<OfflineVocabularySnapshot | null> {
-  const ns = vocabNamespace(userId, assignmentId);
-  const raw = await offlineGet(ns, "snapshot");
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as OfflineVocabularySnapshot;
-  } catch {
-    return null;
-  }
-}
+const stateKey = "study_state";
 
-/** Save local flashcard study state. */
-export async function saveOfflineProgress(
-  userId: string,
-  assignmentId: string,
-  progress: OfflineFlashcardState,
-): Promise<boolean> {
-  const ns = vocabNamespace(userId, assignmentId);
-  return offlinePut(ns, "progress", JSON.stringify(progress));
-}
-
-/** Retrieve local flashcard study state. */
-export async function getOfflineProgress(
-  userId: string,
-  assignmentId: string,
-): Promise<OfflineFlashcardState | null> {
-  const ns = vocabNamespace(userId, assignmentId);
-  const raw = await offlineGet(ns, "progress");
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as OfflineFlashcardState;
-  } catch {
-    return null;
-  }
-}
-
-/** Retrieve all pending mutations waiting to sync to the server. */
-export async function getPendingMutations(
-  userId: string,
-  assignmentId: string,
-): Promise<VocabularyFlashcardMutation[]> {
-  const ns = vocabNamespace(userId, assignmentId);
-  const raw = await offlineGet(ns, "pending_mutations");
+function readQueue(raw: string | null): VocabularyFlashcardMutation[] {
   if (!raw) return [];
-  try {
-    const list = JSON.parse(raw);
-    return Array.isArray(list) ? list : [];
-  } catch {
-    return [];
+  const queue: unknown = JSON.parse(raw);
+  if (!Array.isArray(queue) || queue.some((op) => !op || typeof op.opId !== "string" || !op.opId)
+    || new Set(queue.map((op) => op.opId)).size !== queue.length) {
+    throw new Error("Offline vocabulary queue is damaged");
   }
+  return queue;
 }
 
-/** Record a new flashcard mutation into the durable pending queue. */
-export async function enqueueFlashcardMutation(
-  userId: string,
-  assignmentId: string,
-  change: {
-    wordId?: string;
-    status?: "known" | "practice";
-    lastWordId?: string;
-    order?: string[];
-  },
-): Promise<VocabularyFlashcardMutation> {
-  const mutation: VocabularyFlashcardMutation = {
-    opId: generateOpId(),
-    wordId: change.wordId,
-    status: change.status,
-    lastWordId: change.lastWordId,
-    order: change.order,
-    timestamp: new Date().toISOString(),
-  };
+function parseState(raw: string): StudyState {
+  const state = JSON.parse(raw) as StudyState;
+  if (!state || !Array.isArray(state.pending)) throw new Error("Offline vocabulary state is damaged");
+  state.pending = readQueue(JSON.stringify(state.pending));
+  return state;
+}
 
-  const existing = await getPendingMutations(userId, assignmentId);
-  const updated = [...existing, mutation];
+async function readStudyState(ns: string): Promise<StudyState> {
+  const raw = await offlineGet(ns, stateKey);
+  if (raw !== null) return parseState(raw);
+  // Preserve previously downloaded snapshots and pending changes on upgrade.
+  const [snapshot, progress, pending] = await Promise.all([
+    offlineGet(ns, "snapshot"), offlineGet(ns, "progress"), offlineGet(ns, "pending_mutations"),
+  ]);
+  return { snapshot: snapshot ? JSON.parse(snapshot) : null, progress: progress ? JSON.parse(progress) : null,
+    pending: readQueue(pending) };
+}
+
+async function updateStudyState<T>(
+  userId: string, assignmentId: string, change: (state: StudyState) => T,
+): Promise<T> {
+  if (!userId.trim() || !assignmentId.trim()) throw new Error("An account and assignment are required");
   const ns = vocabNamespace(userId, assignmentId);
-  await offlinePut(ns, "pending_mutations", JSON.stringify(updated));
+  const initial = await readStudyState(ns);
+  return updateDurableOfflineValue(ns, stateKey, (raw) => {
+    const state = raw === null ? initial : parseState(raw);
+    const result = change(state);
+    return { value: JSON.stringify(state), result };
+  });
+}
 
-  // Also update local progress snapshot immediately for instant UI and reload survival
-  const currentProgress = (await getOfflineProgress(userId, assignmentId)) || {
-    lastWordId: "",
-    familiarity: {},
-    order: [],
-    lastStudiedAt: null,
+export async function saveOfflineSnapshot(
+  userId: string, assignmentId: string, snapshot: OfflineVocabularySnapshot,
+): Promise<boolean> {
+  await updateStudyState(userId, assignmentId, (state) => { state.snapshot = snapshot; });
+  return true;
+}
+
+export async function getOfflineSnapshot(userId: string, assignmentId: string) {
+  return (await readStudyState(vocabNamespace(userId, assignmentId))).snapshot;
+}
+
+export async function saveOfflineProgress(
+  userId: string, assignmentId: string, progress: OfflineFlashcardState,
+): Promise<boolean> {
+  await updateStudyState(userId, assignmentId, (state) => { state.progress = progress; });
+  return true;
+}
+
+export async function getOfflineProgress(userId: string, assignmentId: string) {
+  return (await readStudyState(vocabNamespace(userId, assignmentId))).progress;
+}
+
+export async function getPendingMutations(userId: string, assignmentId: string) {
+  return (await readStudyState(vocabNamespace(userId, assignmentId))).pending;
+}
+
+function applyChange(
+  progress: OfflineFlashcardState | null, mutation: VocabularyFlashcardMutation,
+): OfflineFlashcardState {
+  const familiarity = { ...progress?.familiarity };
+  if (mutation.wordId && mutation.status) familiarity[mutation.wordId] = mutation.status;
+  return {
+    lastWordId: mutation.lastWordId ?? progress?.lastWordId ?? "",
+    familiarity,
+    order: mutation.order ?? progress?.order ?? [],
+    lastStudiedAt: mutation.timestamp ?? progress?.lastStudiedAt ?? null,
+    serverRevision: progress?.serverRevision,
   };
+}
 
-  if (change.lastWordId) currentProgress.lastWordId = change.lastWordId;
-  if (change.order) currentProgress.order = change.order;
-  if (change.wordId && change.status) {
-    currentProgress.familiarity[change.wordId] = change.status;
-  }
-  currentProgress.lastStudiedAt = mutation.timestamp ?? new Date().toISOString();
-
-  await saveOfflineProgress(userId, assignmentId, currentProgress);
+export async function enqueueFlashcardMutation(
+  userId: string, assignmentId: string, change: Omit<VocabularyFlashcardMutation, "opId" | "timestamp">,
+  baseline?: OfflineFlashcardState,
+): Promise<VocabularyFlashcardMutation> {
+  const mutation = { ...change, opId: generateOpId(), timestamp: new Date().toISOString() };
+  await updateStudyState(userId, assignmentId, (state) => {
+    assertStudyAccount(userId);
+    state.pending.push(mutation);
+    state.progress = applyChange(state.progress ?? baseline ?? null, mutation);
+  });
   return mutation;
 }
 
-/** Remove acknowledged mutation opIds from the durable pending queue. */
-export async function acknowledgeMutations(
-  userId: string,
-  assignmentId: string,
-  acknowledgedOpIds: string[],
-): Promise<number> {
-  if (!acknowledgedOpIds.length) return 0;
-  const ackSet = new Set(acknowledgedOpIds);
-  const existing = await getPendingMutations(userId, assignmentId);
-  const remaining = existing.filter((op) => !ackSet.has(op.opId));
-  const ns = vocabNamespace(userId, assignmentId);
-  await offlinePut(ns, "pending_mutations", JSON.stringify(remaining));
-  return existing.length - remaining.length;
+export function acknowledgeMutations(userId: string, assignmentId: string, acknowledgedOpIds: string[]) {
+  const acknowledged = new Set(acknowledgedOpIds);
+  return updateStudyState(userId, assignmentId, (state) => {
+    const count = state.pending.length;
+    state.pending = state.pending.filter((op) => !acknowledged.has(op.opId));
+    return count - state.pending.length;
+  });
 }
 
-/** Clear all pending mutations and cached data for a specific user upon logout / account switch. */
-export async function purgeAccountOfflineVocabulary(
-  userId: string,
-  assignmentIds: string[] = [],
-): Promise<void> {
-  for (const id of assignmentIds) {
-    const ns = vocabNamespace(userId, id);
-    await offlinePurge(ns);
+export async function purgeAccountOfflineVocabulary(userId: string, assignmentIds?: string[]): Promise<void> {
+  if (!userId.trim()) return;
+  if (assignmentIds) {
+    await Promise.all(assignmentIds.map((id) => purgeDurableOfflinePrefix(vocabNamespace(userId, id))));
+  } else {
+    await purgeDurableOfflinePrefix(accountNamespace(userId));
   }
 }
 
-/**
- * Synchronize local offline changes with the server.
- * Handles both the dedicated `/sync` endpoint and backward-compatible fallback to `/flashcards`.
- */
+function assertStudyAccount(userId: string) {
+  const { profile, accessToken } = useSessionStore.getState();
+  if (profile?.id !== userId) throw new Error("Vocabulary session has changed");
+  return accessToken;
+}
+
+async function accountRequest<T>(userId: string, send: (token: string) => Promise<T>): Promise<T> {
+  const token = assertStudyAccount(userId);
+  if (!token) throw new Error("Vocabulary session is unavailable");
+  try {
+    return await send(token);
+  } catch (error) {
+    if (error && typeof error === "object" && "status" in error && error.status === 401) {
+      assertStudyAccount(userId);
+      await useSessionStore.getState().refreshNow();
+      const fresh = assertStudyAccount(userId);
+      if (fresh) return send(fresh);
+    }
+    throw error;
+  }
+}
+
+function serverProgress(response: VocabularyFlashcards): OfflineFlashcardState {
+  return {
+    lastWordId: response.lastWordId,
+    familiarity: response.familiarity,
+    order: response.order,
+    lastStudiedAt: response.lastStudiedAt,
+    serverRevision: response.serverRevision,
+  };
+}
+
 export async function syncOfflineFlashcards(
-  userId: string,
-  assignmentId: string,
+  userId: string, assignmentId: string,
 ): Promise<VocabularySyncResult> {
   const pending = await getPendingMutations(userId, assignmentId);
-  const localProgress = await getOfflineProgress(userId, assignmentId);
-  const root = `/v1/student/assignments/${encodeURIComponent(assignmentId)}/vocabulary`;
-
-  if (!pending.length) {
-    return { success: true, acknowledgedCount: 0, remainingCount: 0 };
-  }
-
-  // Cap batch size defensively at 100
+  if (!pending.length) return { success: true, acknowledgedCount: 0, remainingCount: 0 };
   const batch = pending.slice(0, 100);
-  const payload: VocabularyFlashcardChange = {
-    mutations: batch,
-    lastWordId: localProgress?.lastWordId,
-    order: localProgress?.order,
-  };
-
+  const operationIds = new Set(batch.map((op) => op.opId));
+  const root = "/v1/student/assignments/" + encodeURIComponent(assignmentId) + "/vocabulary";
   try {
-    // Attempt dedicated sync endpoint first
-    let response: VocabularyFlashcards;
-    try {
-      response = await post<VocabularyFlashcards>(`${root}/flashcards/sync`, payload);
-    } catch {
-      // Fallback to PATCH /flashcards with mutations payload
-      response = await patch<VocabularyFlashcards>(`${root}/flashcards`, payload);
+    const response = await accountRequest(userId, (token) => post<VocabularyFlashcards>(root + "/flashcards/sync", { mutations: batch }, { token }));
+    if (!Array.isArray(response.acknowledgedOpIds) || !response.acknowledgedOpIds.length
+      || response.acknowledgedOpIds.some((id) => !operationIds.has(id))) {
+      throw new Error("Server did not acknowledge the submitted vocabulary operations");
     }
-
-    const acknowledged = response.acknowledgedOpIds || batch.map((m) => m.opId);
-    const removedCount = await acknowledgeMutations(userId, assignmentId, acknowledged);
-
-    // Save updated server-confirmed state
-    if (response) {
-      await saveOfflineProgress(userId, assignmentId, {
-        lastWordId: response.lastWordId,
-        familiarity: response.familiarity,
-        order: response.order,
-        lastStudiedAt: response.lastStudiedAt,
-        serverRevision: response.serverRevision,
-      });
-    }
-
-    const remaining = await getPendingMutations(userId, assignmentId);
-    return {
-      success: true,
-      acknowledgedCount: removedCount,
-      remainingCount: remaining.length,
-    };
+    const acknowledged = new Set(response.acknowledgedOpIds);
+    return await updateStudyState(userId, assignmentId, (state) => {
+      assertStudyAccount(userId);
+      const before = state.pending.length;
+      state.pending = state.pending.filter((op) => !acknowledged.has(op.opId));
+      if ((response.serverRevision ?? 0) >= (state.progress?.serverRevision ?? 0)) {
+        state.progress = state.pending.reduce(applyChange, serverProgress(response));
+      }
+      return { success: true, acknowledgedCount: before - state.pending.length, remainingCount: state.pending.length };
+    });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Sync failed";
-    const remaining = await getPendingMutations(userId, assignmentId);
-    return {
-      success: false,
-      acknowledgedCount: 0,
-      remainingCount: remaining.length,
-      error: message,
-    };
+    const message = error && typeof error === "object" && "message" in error ? String(error.message) : "Sync failed";
+    return { success: false, acknowledgedCount: 0, remainingCount: pending.length, error: message };
   }
 }
 
-/**
- * Download collection for offline study.
- * Fetches words snapshot and initial flashcard state, saving them durably.
- */
+export function saveOnlineFlashcardChange(
+  userId: string, assignmentId: string, change: Omit<VocabularyFlashcardMutation, "opId" | "timestamp">,
+) {
+  const endpoint = "/v1/student/assignments/" + encodeURIComponent(assignmentId) + "/vocabulary/flashcards";
+  return accountRequest(userId, (token) => patch<VocabularyFlashcards>(endpoint, change, { token }));
+}
+
 export async function downloadVocabularyForOffline(
-  userId: string,
-  assignmentId: string,
+  userId: string, assignmentId: string,
 ): Promise<OfflineVocabularySnapshot> {
-  const root = `/v1/student/assignments/${encodeURIComponent(assignmentId)}/vocabulary`;
-
-  let words: VocabularyCard[];
-  let revision = 1;
-  let title = "Vocabulary Collection";
-
-  try {
-    const snap = await get<VocabularyCollectionSnapshot>(`${root}/snapshot`);
-    words = snap.words;
-    revision = snap.revision;
-    title = snap.title;
-  } catch {
-    words = await get<VocabularyCard[]>(`${root}/words`);
-  }
-
-  const snapshot: OfflineVocabularySnapshot = {
-    assignmentId,
-    revision,
-    title,
-    words,
-    downloadedAt: new Date().toISOString(),
-  };
-
-  await saveOfflineSnapshot(userId, assignmentId, snapshot);
-
-  // Also fetch and seed server progress if available
-  try {
-    const progress = await get<VocabularyFlashcards>(`${root}/flashcards`);
-    if (progress) {
-      await saveOfflineProgress(userId, assignmentId, {
-        lastWordId: progress.lastWordId || (words[0] ? words[0].id : ""),
-        familiarity: progress.familiarity || {},
-        order: progress.order.length ? progress.order : words.map((w) => w.id),
-        lastStudiedAt: progress.lastStudiedAt,
-      });
+  const root = "/v1/student/assignments/" + encodeURIComponent(assignmentId) + "/vocabulary";
+  const [source, progress] = await accountRequest(userId, (token) => Promise.all([
+    get<VocabularyCollectionSnapshot>(root + "/snapshot", undefined, { token }),
+    get<VocabularyFlashcards>(root + "/flashcards", undefined, { token }),
+  ]));
+  const snapshot = { assignmentId, revision: source.revision, title: source.title, level: source.level,
+    words: source.words, downloadedAt: new Date().toISOString() };
+  await updateStudyState(userId, assignmentId, (state) => {
+    assertStudyAccount(userId);
+    state.snapshot = snapshot;
+    if (!state.pending.length && (progress.serverRevision ?? 0) >= (state.progress?.serverRevision ?? 0)) {
+      state.progress = serverProgress(progress);
     }
-  } catch {
-    // If progress cannot be fetched, initialize default local state
-    const current = await getOfflineProgress(userId, assignmentId);
-    if (!current) {
-      await saveOfflineProgress(userId, assignmentId, {
-        lastWordId: words[0] ? words[0].id : "",
-        familiarity: {},
-        order: words.map((w) => w.id),
-        lastStudiedAt: null,
-      });
-    }
-  }
-
+  });
   return snapshot;
+}
+
+export async function listOfflineSnapshots(userId: string): Promise<OfflineVocabularySnapshot[]> {
+  const { assignmentIds } = await getUserOfflineVocabularyOverview(userId);
+  const snapshots = await Promise.all(assignmentIds.map((id) => getOfflineSnapshot(userId, id)));
+  return snapshots.filter((snapshot) => snapshot !== null);
+}
+
+export async function removeOfflineSnapshot(userId: string, assignmentId: string): Promise<void> {
+  await updateStudyState(userId, assignmentId, (state) => {
+    state.snapshot = null;
+  });
 }
 
 export interface OfflineVocabularyOverview {
@@ -342,70 +304,29 @@ export interface BatchSyncResult {
 export async function getUserOfflineVocabularyOverview(
   userId: string,
 ): Promise<OfflineVocabularyOverview> {
-  const safeUser = encodeURIComponent(userId.trim() || "anonymous");
-  const records = await offlineList(`vocab.${safeUser}`);
+  const records = await offlineList(accountNamespace(userId));
 
-  const assignmentSet = new Set<string>();
-  let totalWords = 0;
-  let pendingMutationsCount = 0;
-  let lastDownloadedAt: string | null = null;
-  let lastStudiedAt: string | null = null;
-
-  for (const record of records) {
-    const lastDot = record.key.lastIndexOf(".");
-    if (lastDot === -1) continue;
-    const assignmentId = decodeURIComponent(record.key.slice(0, lastDot));
-    const subKey = record.key.slice(lastDot + 1);
-
-    if (subKey === "snapshot") {
-      try {
-        const snap = JSON.parse(record.value) as OfflineVocabularySnapshot;
-        if (snap && Array.isArray(snap.words)) {
-          assignmentSet.add(assignmentId);
-          totalWords += snap.words.length;
-          if (snap.downloadedAt) {
-            if (!lastDownloadedAt || new Date(snap.downloadedAt) > new Date(lastDownloadedAt)) {
-              lastDownloadedAt = snap.downloadedAt;
-            }
-          }
-        }
-      } catch {
-        // ignore malformed
-      }
-    } else if (subKey === "pending_mutations") {
-      try {
-        const list = JSON.parse(record.value);
-        if (Array.isArray(list)) {
-          pendingMutationsCount += list.length;
-          if (list.length > 0) {
-            assignmentSet.add(assignmentId);
-          }
-        }
-      } catch {
-        // ignore malformed
-      }
-    } else if (subKey === "progress") {
-      try {
-        const prog = JSON.parse(record.value) as OfflineFlashcardState;
-        if (prog && prog.lastStudiedAt) {
-          if (!lastStudiedAt || new Date(prog.lastStudiedAt) > new Date(lastStudiedAt)) {
-            lastStudiedAt = prog.lastStudiedAt;
-          }
-        }
-      } catch {
-        // ignore malformed
+  const ids = new Set(records.map(({ key }) => decodeURIComponent(key.slice(0, key.lastIndexOf(".")))));
+  const overview: OfflineVocabularyOverview = {
+    collectionCount: 0, totalWords: 0, pendingMutationsCount: 0,
+    lastDownloadedAt: null, lastStudiedAt: null, assignmentIds: [],
+  };
+  for (const id of ids) {
+    const { snapshot, progress, pending } = await readStudyState(vocabNamespace(userId, id));
+    if (snapshot || pending.length) overview.assignmentIds.push(id);
+    if (snapshot) {
+      overview.collectionCount++;
+      overview.totalWords += snapshot.words.length;
+      if (!overview.lastDownloadedAt || snapshot.downloadedAt > overview.lastDownloadedAt) {
+        overview.lastDownloadedAt = snapshot.downloadedAt;
       }
     }
+    overview.pendingMutationsCount += pending.length;
+    if (progress?.lastStudiedAt && (!overview.lastStudiedAt || progress.lastStudiedAt > overview.lastStudiedAt)) {
+      overview.lastStudiedAt = progress.lastStudiedAt;
+    }
   }
-
-  return {
-    collectionCount: assignmentSet.size,
-    totalWords,
-    pendingMutationsCount,
-    lastDownloadedAt,
-    lastStudiedAt,
-    assignmentIds: Array.from(assignmentSet),
-  };
+  return overview;
 }
 
 /**

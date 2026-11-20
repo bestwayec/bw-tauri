@@ -38,6 +38,7 @@ import ClickSpark from "@/components/ClickSpark";
 import CrashRecovery from "@/components/CrashRecovery";
 import ResumeExamModal, { persistActiveMockSession, persistActiveTestSession, clearActiveMockSession } from "@/components/ResumeExamModal";
 import { logout } from "@/lib/api";
+import { purgeAccountOfflineVocabulary } from "@/lib/offline-vocabulary";
 import { isAdminRole, isAllowedClientRole, isStaffRole, isTeacherRole, normalizeRole } from "@/lib/auth";
 import { useSessionStore } from "@/lib/session-store";
 import { tryTauriInvoke } from "@/hooks/useLockdown";
@@ -397,8 +398,16 @@ export default function App() {
   }, [isPrivilegedRole]);
 
   const handleLogout = async () => {
-    if (!confirm("Log out of Bestway Exam on this device?")) return;
+    if (!confirm("Log out of Bestway Exam on this device? Downloaded vocabulary and unsynced flashcard changes will be removed.")) return;
+    const accountId = student?.id;
     await logout().catch(() => undefined);
+    if (accountId) {
+      try {
+        await purgeAccountOfflineVocabulary(accountId);
+      } catch {
+        window.alert("Offline vocabulary could not be cleared. Remove this app’s local data before sharing the device.");
+      }
+    }
     setStudent(null);
     setActiveTest(null);
     setActiveStart(null);
@@ -574,7 +583,7 @@ export default function App() {
               )}
               {activeRoute === "examTrack" && <ExamTrack onBrowse={() => navigate('exams')} />}
               {activeRoute === "proctoring" && <LiveProctoring />}
-              {activeRoute === "grading" && <GradingQueue />}
+              {activeRoute === "grading" && student && <GradingQueue key={student.id} userId={student.id} />}
               {activeRoute === "groups" && student && <GroupsResults key={student.id} userId={student.id} role={student.role} />}
               {activeRoute === "centerOverview" && <CenterOverview onNavigate={navigate} />}
               {activeRoute === "studentResults" && <StudentResults />}

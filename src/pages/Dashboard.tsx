@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
 import type { Route } from "@/App";
-import type { ApiError } from "@/lib/api";
+import { get, type ApiError } from "@/lib/api";
 import { isStaffRole } from "@/lib/auth";
 import {
   listTests,
@@ -104,7 +104,7 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
   const [resumingId, setResumingId] = useState<string | null>(null);
   const [startingMockId, setStartingMockId] = useState<string | null>(null);
   const [startMockError, setStartMockError] = useState<string | null>(null);
-  const [picker, setPicker] = useState<{ mock: MockExamListItem; mode: MockAttemptMode; defaultSection?: MockSkill } | null>(null);
+  const [picker, setPicker] = useState<{ mock: MockExamListItem; mode: MockAttemptMode; defaultSection?: MockSkill; assignmentId?: string } | null>(null);
   const [watchdogExpired, setWatchdogExpired] = useState(false);
   const [showReadiness, setShowReadiness] = useState(false);
 
@@ -254,6 +254,14 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
     setStartingMockId(mock.id);
     setStartMockError(null);
     try {
+      if (picker?.assignmentId) {
+        const current = await get<{ id: string; type: string }>(
+          "/v1/student/assignments/" + encodeURIComponent(picker.assignmentId) + "/exam",
+        );
+        if (current.id !== mock.id || current.type !== mock.type) {
+          throw new Error("Biriktirilgan imtihon o‘zgardi / Assigned exam has changed");
+        }
+      }
       const start = await startMockExam(mock.id, {
         mode: choice.mode,
         flow: choice.flow,
@@ -265,6 +273,31 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
       setStartMockError(`${mock.title}: ${friendlyError(e)}`);
     } finally {
       setStartingMockId(null);
+    }
+  }
+
+  const [assignmentError, setAssignmentError] = useState<string | null>(null);
+  const [openingAssignment, setOpeningAssignment] = useState(false);
+  async function openAssignedExam(assignmentId: string) {
+    if (openingAssignment) return;
+    setOpeningAssignment(true);
+    setAssignmentError(null);
+    try {
+      const assigned = await get<{ id: string; type: string }>(
+        "/v1/student/assignments/" + encodeURIComponent(assignmentId) + "/exam",
+      );
+      const program = assigned.type === "multilevel" ? "MULTILEVEL" : "IELTS";
+      const exams = await listMockExams(program);
+      const exam = exams.find((candidate) => candidate.id === assigned.id && candidate.type === assigned.type);
+      if (!exam?.isPublished || exam.ready === false) {
+        throw new Error("Biriktirilgan imtihon hozir mavjud emas / Assigned exam is unavailable");
+      }
+      setStartMockError(null);
+      setPicker({ mock: exam, mode: "timed", assignmentId });
+    } catch (error) {
+      setAssignmentError(friendlyError(error));
+    } finally {
+      setOpeningAssignment(false);
     }
   }
 
@@ -412,27 +445,12 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
       <div className="grid gap-4 lg:grid-cols-12">
         <div className="space-y-4 lg:col-span-8">
           <StudentClassroomWidget />
+          {openingAssignment && <p role="status">Imtihon ochilmoqda… / Opening assigned exam…</p>}
+          {assignmentError && <p role="alert">{assignmentError}</p>}
           <StudentAssignmentsWidget
             userId={userId}
             onNavigate={onNavigate}
-            onStartExamById={(examId) => {
-              const matchedMock = publishedMocks.find((m) => m.id === examId);
-              if (matchedMock) {
-                handleStartMockChoice(matchedMock);
-                return;
-              }
-              const matchedTest = tVisible.find((t) => t.id === examId);
-              if (matchedTest) {
-                setResumingId(matchedTest.id);
-                setResumeError(null);
-                startTest(matchedTest.id)
-                  .then((start) => onStart(matchedTest, start))
-                  .catch((e) => setResumeError(friendlyError(e)))
-                  .finally(() => setResumingId(null));
-                return;
-              }
-              onNavigate("exams");
-            }}
+            onStartExam={(assignmentId) => void openAssignedExam(assignmentId)}
           />
         </div>
         <div className="space-y-4 lg:col-span-4">

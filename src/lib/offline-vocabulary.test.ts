@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acknowledgeMutations,
   downloadVocabularyForOffline,
@@ -14,6 +14,11 @@ import {
   syncOfflineFlashcards,
 } from "./offline-vocabulary";
 import * as api from "./api";
+import { offlinePut } from "./offline-store";
+const session = vi.hoisted(() => ({ account: "user-alice" }));
+vi.mock("./session-store", () => ({
+  useSessionStore: { getState: () => ({ profile: { id: session.account }, accessToken: "test-token" }) },
+}));
 import type { VocabularyCard } from "./group-contract.generated";
 
 vi.mock("./api", () => ({
@@ -35,9 +40,21 @@ describe("offline-vocabulary", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    vi.stubGlobal("navigator", undefined);
+    session.account = user1;
+    const entries = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      get length() { return entries.size; },
+      key: (index: number) => [...entries.keys()][index] ?? null,
+      getItem: (key: string) => entries.get(key) ?? null,
+      setItem: (key: string, value: string) => entries.set(key, value),
+      removeItem: (key: string) => entries.delete(key),
+    });
     await purgeAccountOfflineVocabulary(user1, [assignmentId]);
     await purgeAccountOfflineVocabulary(user2, [assignmentId]);
   });
+
+  afterEach(() => vi.unstubAllGlobals());
 
   it("isolates local data strictly by authenticated user account", async () => {
     await saveOfflineProgress(user1, assignmentId, {
@@ -177,7 +194,6 @@ describe("offline-vocabulary", () => {
     });
 
     vi.mocked(api.post).mockRejectedValueOnce(new Error("Network offline"));
-    vi.mocked(api.patch).mockRejectedValueOnce(new Error("Network offline"));
 
     const result = await syncOfflineFlashcards(user1, assignmentId);
     expect(result.success).toBe(false);
@@ -276,4 +292,51 @@ describe("offline-vocabulary", () => {
 
     await purgeAccountOfflineVocabulary(user1, [assign2]);
   });
+  it("fails visibly when durable storage is absent or rejects a write", async () => {
+    vi.stubGlobal("localStorage", undefined);
+    await expect(enqueueFlashcardMutation(user1, assignmentId, { lastWordId: "w1" })).rejects.toThrow("unavailable");
+    expect(await getPendingMutations(user1, assignmentId)).toEqual([]);
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: () => { throw new Error("Quota exceeded"); },
+    });
+    await expect(enqueueFlashcardMutation(user1, assignmentId, { lastWordId: "w1" })).rejects.toThrow("Quota exceeded");
+    expect(await getOfflineProgress(user1, assignmentId)).toBeNull();
+  });
+
+  it("keeps simultaneous edits and refuses to overwrite a corrupt upgrade queue", async () => {
+    const writes = await Promise.all(sampleWords.map(({ id }) =>
+      enqueueFlashcardMutation(user1, assignmentId, { wordId: id, status: "known" })));
+    expect(await getPendingMutations(user1, assignmentId)).toEqual(writes);
+    expect(await getOfflineProgress(user1, assignmentId)).toMatchObject({
+      familiarity: { w1: "known", w2: "known", w3: "known" },
+    });
+    await offlinePut("vocab." + user1 + ".broken", "pending_mutations", "invalid json");
+    await expect(enqueueFlashcardMutation(user1, "broken", { lastWordId: "w1" })).rejects.toThrow();
+  });
+
+  it("retains changes on missing acknowledgement and keeps edits made while a request is in flight", async () => {
+    const first = await enqueueFlashcardMutation(user1, assignmentId, { wordId: "w1", status: "known" });
+    const response = { lastWordId: "w1", familiarity: { w1: "known" }, order: [], lastStudiedAt: null };
+    vi.mocked(api.post).mockResolvedValueOnce(response);
+    expect(await syncOfflineFlashcards(user1, assignmentId)).toMatchObject({ success: false, remainingCount: 1 });
+    expect(api.patch).not.toHaveBeenCalled();
+    vi.mocked(api.post).mockImplementationOnce(async () => {
+      await enqueueFlashcardMutation(user1, assignmentId, { lastWordId: "w2" });
+      return { ...response, acknowledgedOpIds: [first.opId], serverRevision: 1 };
+    });
+    expect(await syncOfflineFlashcards(user1, assignmentId)).toMatchObject({ success: true, remainingCount: 1 });
+    expect(await getOfflineProgress(user1, assignmentId)).toMatchObject({ lastWordId: "w2" });
+    expect(await getPendingMutations(user1, assignmentId)).toMatchObject([{ lastWordId: "w2" }]);
+  });
+
+  it("clears all cached vocabulary for one account on logout", async () => {
+    await enqueueFlashcardMutation(user1, assignmentId, { lastWordId: "w1" });
+    session.account = user2;
+    await enqueueFlashcardMutation(user2, assignmentId, { lastWordId: "w2" });
+    await purgeAccountOfflineVocabulary(user1);
+    expect(await getPendingMutations(user1, assignmentId)).toEqual([]);
+    expect(await getPendingMutations(user2, assignmentId)).toMatchObject([{ lastWordId: "w2" }]);
+  });
+
 });

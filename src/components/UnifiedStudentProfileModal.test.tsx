@@ -77,18 +77,18 @@ describe("UnifiedStudentProfileModal", () => {
       </QueryClientProvider>,
     );
 
-    expect(html).toContain('role="dialog"');
+    expect(html).toContain("<dialog");
     expect(html).toContain('aria-modal="true"');
     expect(html).toContain('id="student-profile-title"');
-    expect(html).toContain("Alisher Navoiy");
-    expect(html).toContain("Faol a‘zo (Hozirgi sinf)");
-    expect(html).toContain("IELTS Intensive B2");
-    expect(html).toContain("Essay Writing Task 1");
-    expect(html).toContain("Band 7.5");
-    expect(html).toContain("Excellent cohesion and vocabulary variety.");
+    expect(html).not.toContain("Alisher Navoiy");
+    expect(html).not.toContain("Faol a‘zo (Hozirgi sinf)");
+    expect(html).not.toContain("IELTS Intensive B2");
+    expect(html).not.toContain("Essay Writing Task 1");
+    expect(html).not.toContain("Band 7.5");
+    expect(html).not.toContain("Excellent cohesion and vocabulary variety.");
   });
 
-  it("renders historical enrollment badge for former students", () => {
+  it("withholds a cached former student profile until it is reauthorized", () => {
     const client = createClient();
     client.setQueryData(
       ["classroom-student-history", "teacher-1", "group-456", "student-123"],
@@ -106,6 +106,6 @@ describe("UnifiedStudentProfileModal", () => {
       </QueryClientProvider>,
     );
 
-    expect(html).toContain("Sobiq a‘zo (Tarixiy sinf)");
+    expect(html).not.toContain("Sobiq a‘zo (Tarixiy sinf)");
   });
 });

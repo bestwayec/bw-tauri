@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { get } from "@/lib/api";
 import type { ClassroomStudentHistory } from "@/lib/group-contract.generated";
@@ -11,23 +11,29 @@ interface Props {
 }
 
 export function UnifiedStudentProfileModal({ groupId, studentId, userId, onClose }: Props) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose();
-      }
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const opener = document.activeElement;
+    dialog.showModal();
+    return () => {
+      dialog.close();
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  }, []);
 
   const path = `/v1/groups/${encodeURIComponent(groupId)}/member-history/${encodeURIComponent(studentId)}`;
-  const { data: history, isLoading, isError, refetch } = useQuery<ClassroomStudentHistory>({
+  const { data, isPending, isFetchedAfterMount, isError, refetch } = useQuery<ClassroomStudentHistory>({
     queryKey: ["classroom-student-history", userId, groupId, studentId],
     queryFn: ({ signal }) => get<ClassroomStudentHistory>(path, undefined, { signal }),
     enabled: Boolean(groupId && studentId),
+    refetchOnMount: "always",
+    gcTime: 0,
   });
 
+  const history = isFetchedAfterMount && !isError ? data : undefined;
+  const isLoading = isPending || (!isError && !isFetchedAfterMount);
   const attendance = history?.attendance ?? [];
   const presentCount = attendance.filter((a) => a.state === "present").length;
   const attendancePct = attendance.length > 0 ? Math.round((presentCount / attendance.length) * 100) : null;
@@ -42,11 +48,12 @@ export function UnifiedStudentProfileModal({ groupId, studentId, userId, onClose
   const feedbackList = history?.feedback ?? [];
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-md"
-      role="dialog"
+    <dialog
+      ref={dialogRef}
+      className="m-auto max-h-[90vh] w-[calc(100%-2rem)] max-w-2xl bg-transparent p-0 text-white backdrop:bg-black/75"
       aria-modal="true"
       aria-labelledby="student-profile-title"
+      onCancel={(e) => { e.preventDefault(); onClose(); }}
       onClick={(e) => {
         if (e.target === e.currentTarget) {
           onClose();
@@ -282,6 +289,6 @@ export function UnifiedStudentProfileModal({ groupId, studentId, userId, onClose
           </button>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }

@@ -224,3 +224,66 @@ export async function offlinePurge(namespace: string): Promise<void> {
     await offlineDelete(namespace, entry.key).catch(() => false);
   }
 }
+
+/** Vocabulary writes require a committed IndexedDB transaction or localStorage write. */
+export async function updateDurableOfflineValue<T>(
+  namespace: string,
+  key: string,
+  update: (current: string | null) => { value: string; result: T },
+): Promise<T> {
+  const storageKey = storeKey(namespace, key);
+  if (offlineStoreBackend() !== 'indexeddb') {
+    const store = localStore();
+    if (!store) throw new Error('Durable offline storage is unavailable');
+    const write = () => {
+      const next = update(store.getItem(storageKey));
+      store.setItem(storageKey, next.value);
+      return next.result;
+    };
+    if (typeof navigator !== 'undefined' && navigator.locks) {
+      return navigator.locks.request(storageKey, write);
+    }
+    return write();
+  }
+  const db = await database();
+  try {
+    return await new Promise<T>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      const store = tx.objectStore(STORE);
+      const request = store.get(storageKey);
+      let next: { value: string; result: T };
+      let failure: unknown;
+      request.onsuccess = () => {
+        try {
+          next = update((request.result as OfflineRecord | undefined)?.value ?? null);
+          store.put({ key: storageKey, value: next.value, updatedAt: Date.now() }, storageKey);
+        } catch (error) {
+          failure = error;
+          tx.abort();
+        }
+      };
+      tx.oncomplete = () => resolve(next.result);
+      tx.onabort = () => reject(failure ?? tx.error ?? new Error('Offline write was interrupted'));
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/** Account removal must report storage errors to the caller. */
+export async function purgeDurableOfflinePrefix(namespace: string): Promise<void> {
+  const prefix = storeKey(namespace, "");
+  if (offlineStoreBackend() === 'indexeddb') {
+    await idbRun('readwrite', (store) => store.delete(IDBKeyRange.bound(prefix, prefix + '\uffff')));
+  }
+  const local = localStore();
+  if (local) {
+    const keys = Array.from({ length: local.length }, (_, index) => local.key(index));
+    for (const key of keys) {
+      if (key?.startsWith(prefix)) local.removeItem(key);
+    }
+  }
+  for (const key of memory.keys()) {
+    if (key.startsWith(prefix)) memory.delete(key);
+  }
+}
