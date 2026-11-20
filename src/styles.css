@@ -1,5 +1,35 @@
 @import "tailwindcss";
 
+@layer components {
+  .workspace-panel {
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-card);
+    background: var(--surface);
+  }
+
+  .workspace-control {
+    min-height: 44px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-control);
+    background: var(--surface);
+    padding: 0.5rem 0.875rem;
+    font-size: 0.875rem;
+  }
+
+  .workspace-control:hover:not(:disabled) {
+    background: var(--surface-hover);
+  }
+
+  .workspace-control:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+  }
+
+  .workspace-control:disabled {
+    opacity: 0.55;
+  }
+}
+
 /*
  * BESTWAY desktop — frontend (bestway/frontend/src/app/globals.css) bilan
  * bir xil dizayn tokenlari. Frontend — yagona manba, bu fayl faqat aks ettiradi.

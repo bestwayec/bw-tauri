@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClassroomSchedule } from "../components/ClassroomSchedule";
 import { UnifiedStudentProfileModal } from "../components/UnifiedStudentProfileModal";
 import { del, downloadBlob, get, patch, post, put } from "../lib/api";
+import { getAppLanguage } from "../lib/ui-prefs";
 import type { ClassroomAssignment, ClassroomAssignmentInput, ClassroomBulkMembership, ClassroomVocabularyCollection, GroupDetail, ScheduleItem, VocabularyAssignmentReports } from "../lib/group-contract.generated";
 
 const inputStyle = "rounded-lg border border-white/15 bg-surface px-3 py-2 text-sm";
@@ -29,6 +30,9 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
   const [schedule, setSchedule] = useState<ScheduleItem[]>(group.schedule ?? []);
   const [teacherId, setTeacherId] = useState(group.teacherId ?? "");
   const [selection, setSelection] = useState<string[]>([]);
+  const [rosterSearch, setRosterSearch] = useState("");
+  const [rosterLimit, setRosterLimit] = useState(25);
+  const english = getAppLanguage() === "en";
   const isAdmin = role === "admin" || role === "super_admin";
   const teachers = useQuery({
     queryKey: ["classroom-teachers", userId],
@@ -143,12 +147,18 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
   const matching = candidates.data?.filter(candidate => !currentIds.has(candidate.id));
   const addIds = (matching ?? []).filter(item => selection.includes(item.id)).map(item => item.id);
   const removeIds = selection.filter(id => currentIds.has(id));
+  const filteredRoster = group.students.filter((student) => student.name.toLocaleLowerCase().includes(rosterSearch.trim().toLocaleLowerCase()));
   function toggleMember(id: string, checked: boolean) {
     setSelection(previous => checked ? [...previous, id] : previous.filter(item => item !== id));
   }
   return (
     <section className="grid gap-4 lg:grid-cols-2" aria-label={`${group.name} guruh ish maydoni`}>
-      <section className="card space-y-3 rounded-2xl p-4">
+      <nav className="flex flex-wrap gap-2 lg:col-span-2" aria-label={english ? "Classroom sections" : "Guruh bo‘limlari"}>
+        <a className="workspace-control inline-flex items-center" href="#classroom-roster">{english ? "Students" : "O‘quvchilar"}</a>
+        <a className="workspace-control inline-flex items-center" href="#classroom-attendance">{english ? "Attendance" : "Davomat"}</a>
+        <a className="workspace-control inline-flex items-center" href="#classroom-tasks">{english ? "Assignments" : "Vazifalar"}</a>
+      </nav>
+      <section id="classroom-roster" className="workspace-panel min-w-0 scroll-mt-4 space-y-3 p-4">
         <h2 className="text-lg font-semibold">Guruh tarkibi</h2>
         <form className="flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); if (name.trim().length >= 2) rename.mutate(); }}>
           <label className="grid gap-1">Guruh nomini tahrirlash
@@ -178,10 +188,16 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
             <button className={inputStyle} type="button" disabled={membership.isPending} onClick={() => membership.mutate({ id: candidate.id, remove: false })}>Qo‘shish</button>
           </li>)}
         </ul>)}
+        {group.students.length > 0 && <label className="block space-y-1.5 text-sm font-medium">
+          <span>{english ? "Search enrolled students" : "Guruhdagi o‘quvchilarni qidirish"}</span>
+          <input type="search" className="workspace-control w-full" value={rosterSearch}
+            onChange={(event) => { setRosterSearch(event.target.value); setRosterLimit(25); }} />
+        </label>}
+        {rosterSearch && filteredRoster.length === 0 && <p role="status">{english ? "No matching students" : "Mos o‘quvchi topilmadi"}</p>}
         <ul className="space-y-2">
-          {group.students.map(student => <li className="flex justify-between gap-2" key={student.studentId}>
+          {filteredRoster.slice(0, rosterLimit).map(student => <li className="flex flex-wrap justify-between gap-2" key={student.studentId}>
             <div className="flex items-center gap-2">
-              <input type="checkbox" checked={selection.includes(student.studentId)} onChange={event => toggleMember(student.studentId, event.target.checked)} />
+              <input type="checkbox" aria-label={student.name} checked={selection.includes(student.studentId)} onChange={event => toggleMember(student.studentId, event.target.checked)} />
               <button
                 type="button"
                 onClick={() => setViewStudentId(student.studentId)}
@@ -197,6 +213,9 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
             </span> : <button className={inputStyle} type="button" onClick={() => setRemoveId(student.studentId)}>Olib tashlash</button>}
           </li>)}
         </ul>
+        {filteredRoster.length > rosterLimit && <button type="button" className="workspace-control" onClick={() => setRosterLimit(rosterLimit + 25)}>
+          {english ? "Show more" : "Ko‘proq ko‘rsatish"} · {rosterLimit} / {filteredRoster.length}
+        </button>}
         <div className="flex flex-wrap gap-2">
           <button type="button" className={inputStyle} disabled={!addIds.length || bulk.isPending || membership.isPending} onClick={() => bulk.mutate({ action: "add", studentIds: addIds })}>Tanlanganlarni qo‘shish</button>
           <button type="button" className={inputStyle} disabled={!removeIds.length || bulk.isPending || membership.isPending} onClick={() => {
@@ -207,7 +226,7 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
         {membership.isError && <p role="alert">{errorMessage(membership.error)}</p>}
       </section>
 
-      <section className="card space-y-3 rounded-2xl p-4">
+      <section id="classroom-attendance" className="workspace-panel min-w-0 scroll-mt-4 space-y-3 p-4">
         <h2 className="text-lg font-semibold">Davomat</h2>
         <form className="flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); if (date && currentIds.has(studentId)) saveMark.mutate(); }}>
           <label className="grid gap-1">Sana (Toshkent)
@@ -234,7 +253,7 @@ export default function ClassroomWorkspace({ group, userId, role }: { group: Gro
         </ul> : <p>Bu sana uchun davomat belgilanmagan.</p>)}
       </section>
 
-      <section className="card space-y-3 rounded-2xl p-4 lg:col-span-2">
+      <section id="classroom-tasks" className="workspace-panel min-w-0 scroll-mt-4 space-y-3 p-4 lg:col-span-2">
         <h2 className="text-lg font-semibold">Guruh vazifalari</h2>
         <form className="flex flex-wrap items-end gap-2" onSubmit={event => {
           event.preventDefault();

@@ -27,7 +27,7 @@ describe("TeacherDashboard", () => {
     const client = createClient();
     const html = renderToStaticMarkup(
       <QueryClientProvider client={client}>
-        <TeacherDashboard teacherName="Komiljon" userId="teacher-1" onNavigate={vi.fn()} />
+        <TeacherDashboard teacherName="Komiljon" userId="teacher-1" onNavigate={vi.fn()} onOpenClassroom={vi.fn()} />
       </QueryClientProvider>
     );
 
@@ -57,7 +57,7 @@ describe("TeacherDashboard", () => {
 
     const html = renderToStaticMarkup(
       <QueryClientProvider client={client}>
-        <TeacherDashboard teacherName="Komiljon" userId="teacher-1" onNavigate={vi.fn()} />
+        <TeacherDashboard teacherName="Komiljon" userId="teacher-1" onNavigate={vi.fn()} onOpenClassroom={vi.fn()} />
       </QueryClientProvider>
     );
 
@@ -81,7 +81,7 @@ describe("TeacherDashboard", () => {
 
     const html = renderToStaticMarkup(
       <QueryClientProvider client={client}>
-        <TeacherDashboard teacherName="Komiljon" userId="teacher-1" onNavigate={vi.fn()} />
+        <TeacherDashboard teacherName="Komiljon" userId="teacher-1" onNavigate={vi.fn()} onOpenClassroom={vi.fn()} />
       </QueryClientProvider>
     );
 
@@ -121,7 +121,7 @@ describe("TeacherDashboard", () => {
 
     const html = renderToStaticMarkup(
       <QueryClientProvider client={client}>
-        <TeacherDashboard teacherName="Komiljon" userId="teacher-1" onNavigate={vi.fn()} />
+        <TeacherDashboard teacherName="Komiljon" userId="teacher-1" onNavigate={vi.fn()} onOpenClassroom={vi.fn()} />
       </QueryClientProvider>
     );
 

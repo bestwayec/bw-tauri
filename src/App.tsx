@@ -107,6 +107,7 @@ export default function App() {
   const queryClient = useQueryClient();
   const programs = usePrograms();
   const [route, setRoute] = useState<Route>("login");
+  const [classroomTarget, setClassroomTarget] = useState<{ userId: string; groupId: string } | null>(null);
   const [student, setStudent] = useState<Student | null>(null);
   const [, setRestoring] = useState(true);
   const [activeTest, setActiveTest] = useState<TestListItem | null>(null);
@@ -409,6 +410,7 @@ export default function App() {
       }
     }
     setStudent(null);
+    setClassroomTarget(null);
     setActiveTest(null);
     setActiveStart(null);
     setActiveMock(null);
@@ -440,7 +442,7 @@ export default function App() {
             <LoginBackdrop webgl={webgl} reduceMotion={reduceMotion} />
           <main className="relative flex min-h-full items-center justify-center p-6">
             <div className="w-full max-w-md">
-              <Suspense fallback={null}>
+              <Suspense fallback={<div role="status" className="workspace-panel p-5 text-sm text-fg-muted">Yuklanmoqda / Loading…</div>}>
                 <Login onLogin={handleLogin} />
               </Suspense>
             </div>
@@ -548,9 +550,9 @@ export default function App() {
           <main className="min-h-0 flex-1 overflow-y-auto px-6 pb-8 pt-6 2xl:px-10">
             <motion.div
               key={`${student?.id}:${activeRoute}:${activeRoute === "result" ? historyKey : ""}`}
-              initial={{ opacity: 0, y: 10 }}
+              initial={reduceMotion ? false : { opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.18, ease: "easeOut" }}
+              transition={{ duration: reduceMotion ? 0 : 0.14, ease: "easeOut" }}
             >
               <Suspense fallback={null}>
               {activeRoute === "dashboard" && (
@@ -559,6 +561,11 @@ export default function App() {
                     teacherName={student?.name ?? null}
                     userId={student?.id ?? ""}
                     onNavigate={navigate}
+                    onOpenClassroom={(groupId) => {
+                      if (!student) return;
+                      setClassroomTarget({ userId: student.id, groupId });
+                      navigate("groups");
+                    }}
                   />
                 ) : (
                   <Dashboard
@@ -584,7 +591,8 @@ export default function App() {
               {activeRoute === "examTrack" && <ExamTrack onBrowse={() => navigate('exams')} />}
               {activeRoute === "proctoring" && <LiveProctoring />}
               {activeRoute === "grading" && student && <GradingQueue key={student.id} userId={student.id} />}
-              {activeRoute === "groups" && student && <GroupsResults key={student.id} userId={student.id} role={student.role} />}
+              {activeRoute === "groups" && student && <GroupsResults key={student.id} userId={student.id} role={student.role}
+                initialGroupId={classroomTarget?.userId === student.id ? classroomTarget.groupId : undefined} />}
               {activeRoute === "centerOverview" && <CenterOverview onNavigate={navigate} />}
               {activeRoute === "studentResults" && <StudentResults />}
               {activeRoute === "profile" && (

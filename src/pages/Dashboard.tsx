@@ -375,8 +375,6 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
 
   return (
     <section className="space-y-6">
-      <ExamTracks />
-
       {/* Header Bar */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
@@ -426,18 +424,12 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
             })}
           </div>
 
-          <span className="hidden items-center gap-1.5 text-[11px] text-slate-400 sm:inline-flex" aria-live="polite">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" aria-hidden />
-            Auto-sync
-          </span>
-
           <button
             type="button"
             onClick={() => setShowReadiness(true)}
             className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-all shadow-sm"
             title="Audio, mikrofon va tarmoqni tekshirish"
           >
-            <span>🛡️</span>
             <span>Device Readiness</span>
           </button>
 
@@ -450,11 +442,13 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
         </div>
       </div>
 
-      {/* Live PIN Join */}
-      <LiveExamPinJoin
-        onJoinedMock={onStartMock}
-        onNavigateExams={() => onNavigate("exams")}
-      />
+      <nav aria-label="O‘qish / Learning" className="flex flex-wrap gap-2">
+        <button type="button" className="workspace-control" onClick={() => onNavigate("vocabulary")}>Lug‘at / Vocabulary</button>
+        <button type="button" className="workspace-control" onClick={() => onNavigate("history")}>Natijalar / Results</button>
+        {inProgress.length > 0 && <a className="workspace-control inline-flex items-center" href="#dashboard-resume">
+          Davom ettirish / Resume
+        </a>}
+      </nav>
 
       {/* Unified Student Workspace: Classroom, Assignments, Attendance & Offline Vocab */}
       <div className="grid gap-4 lg:grid-cols-12">
@@ -473,6 +467,9 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
           <StudentOfflineVocabWidget onNavigate={onNavigate} userId={userId} />
         </div>
       </div>
+
+      <ExamTracks />
+      <LiveExamPinJoin onJoinedMock={onStartMock} onNavigateExams={() => onNavigate("exams")} />
 
       {/* Hero CEFR / IELTS Level & Goal Progress Banner */}
       <div className="relative overflow-hidden rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-[#111827] via-[#0F172A] to-[#0B0F17] p-6 shadow-xl">
@@ -712,7 +709,7 @@ export default function Dashboard({ studentName, onNavigate, onStart, onStartMoc
       {/* Active In-Progress and Recent Activity Panels */}
       <div className="grid gap-4 xl:grid-cols-2">
         {/* Continue in-progress */}
-        <div className="rounded-2xl border border-emerald-500/15 bg-[#111827] p-5">
+        <div id="dashboard-resume" className="workspace-panel scroll-mt-4 p-5">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-white">Continue where you left off</h3>
             <span className="rounded-full bg-[#0B0F17] px-2 py-0.5 text-[11px] text-emerald-300 ring-1 ring-emerald-500/20">

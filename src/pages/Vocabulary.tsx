@@ -309,7 +309,7 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
               ))}
             </div>
 
-            <div className="flex items-center gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2 text-xs" aria-live="polite">
               {isDownloaded ? (
                 <span className="rounded-md bg-emerald-500/10 px-2 py-1 text-emerald-400 border border-emerald-500/20" title="Offline study available">
                   ✓ Oflayn tayyor / Offline ready
@@ -328,7 +328,7 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
               {pendingCount > 0 ? (
                 <button
                   type="button"
-                  className="rounded-md bg-amber-500/10 px-2 py-1 text-amber-300 border border-amber-500/20 hover:bg-amber-500/20"
+                  className="workspace-control text-warning"
                   onClick={() => void triggerSync()}
                   disabled={!isOnline || Boolean(accessDenied) || syncStatus === "syncing"}
                 >
@@ -344,8 +344,8 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
 
           {session.isError && <p role="alert">{errorMessage(session.error)}</p>}
 
-          <section className="card space-y-3 rounded-2xl p-4">
-            <div className="flex items-center justify-between">
+          <section className="workspace-panel space-y-3 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-lg font-semibold">Flashcards</h2>
               {effectiveWords.length > 0 && (
                 <span className="text-xs text-white/60">
@@ -365,7 +365,7 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
             {word && (
               <>
                 <button
-                  className={control + " min-h-24 w-full text-xl font-medium tracking-wide transition-colors hover:border-emerald-500/40"}
+                  className="workspace-control min-h-28 w-full break-words text-xl font-semibold tracking-wide"
                   type="button"
                   aria-pressed={revealed}
                   onClick={() => setRevealed(!revealed)}
@@ -385,7 +385,7 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
                   <button className={control} type="button" onClick={() => void cardBy(-1)}>
                     ← Oldingi / Prev
                   </button>
-                  <span aria-live="polite" className="text-sm font-medium px-2">
+                  <span aria-live="polite" className="px-2 text-sm font-medium tabular-nums">
                     {index + 1} / {order.length}
                   </span>
                   <button className={control} type="button" onClick={() => void cardBy(1)}>
@@ -398,6 +398,7 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
                   <button
                     className={`${control} ${study.familiarity[word.id] === "known" ? "bg-emerald-600/30 border-emerald-500 text-emerald-300" : ""}`}
                     type="button"
+                    aria-pressed={study.familiarity[word.id] === "known"}
                     onClick={() => void setFamiliarity("known")}
                   >
                     ✓ Bilaman / Known

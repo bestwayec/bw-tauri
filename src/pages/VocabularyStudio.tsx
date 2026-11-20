@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, patch, post } from "../lib/api";
+import { getAppLanguage } from "../lib/ui-prefs";
 import type {
   ClassroomAssignment, ClassroomAssignmentInput, GroupListItem,
   VocabularyAssignmentReports, VocabularyCollection, VocabularyCollectionWordInput,
@@ -209,6 +210,8 @@ function CollectionAssignments({ collection, userId }: { collection: Summary; us
 }
 
 export default function VocabularyStudio({ userId }: { userId: string }) {
+  const english = getAppLanguage() === "en";
+  const [search, setSearch] = useState("");
   const client = useQueryClient();
   const key = ["studio-collections", userId] as const;
   const collections = useQuery({ queryKey: key, queryFn: () => get<Summary[]>("/v1/vocabulary/sets", { owned: true }) });
@@ -228,10 +231,16 @@ export default function VocabularyStudio({ userId }: { userId: string }) {
   return (
     <section className="space-y-4">
       <h1 className="text-2xl font-bold">Vocabulary studio</h1>
-      <button className="btn-brand px-4 py-2" type="button" onClick={() => setEditId("")}>New collection</button>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="grid grow gap-1 text-sm">
+          {english ? "Search collections" : "To‘plamlarni qidirish"}
+          <input type="search" className="workspace-control w-full" value={search} onChange={(event) => setSearch(event.target.value)} />
+        </label>
+        <button className="workspace-control btn-brand" type="button" onClick={() => setEditId("")}>New collection</button>
+      </div>
       {collections.isError && <p role="alert">{message(collections.error)} <button className={control} onClick={() => void collections.refetch()}>Retry</button></p>}
       {collections.isPending && <p role="status">Loading collections…</p>}
-      <ul className="space-y-2">{collections.data?.map(collection => <li className="card flex flex-wrap items-center gap-3 rounded-xl p-3" key={collection.id}>
+      <ul className="space-y-2">{collections.data?.filter((collection) => collection.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())).map(collection => <li className="workspace-panel flex flex-wrap items-center gap-3 p-3" key={collection.id}>
         <span className="grow">{collection.title} · {collection.wordCount} words</span>
         <button className={control} type="button" onClick={() => setEditId(collection.id)}>Edit collection</button>
         <button className={control} type="button" onClick={() => setAssignment(collection)}>Assignments</button>

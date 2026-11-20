@@ -17,14 +17,14 @@ function errorMessage(error: unknown) {
   return "So‘rov bajarilmadi. Qayta urinib ko‘ring.";
 }
 
-export default function GroupsResults({ userId, role }: { userId: string; role?: string }) {
+export default function GroupsResults({ userId, role, initialGroupId = "" }: { userId: string; role?: string; initialGroupId?: string }) {
   const queryClient = useQueryClient();
   const [archived, setArchived] = useState(false);
   const [groupSearch, setGroupSearch] = useState("");
   const listPrefix = ["groups", userId] as const;
   const listKey = [...listPrefix, archived, groupSearch] as const;
   const groups = useQuery({ queryKey: listKey, queryFn: ({ signal }) => get<GroupListItem[]>("/v1/groups", { archived, search: groupSearch }, { signal }) });
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useState(initialGroupId);
   const groupId = groups.data?.find(group => group.id === selected)?.id ?? groups.data?.[0]?.id;
   const groupPath = `/v1/groups/${encodeURIComponent(groupId ?? "")}`;
   const detail = useQuery({

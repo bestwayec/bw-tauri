@@ -1,13 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import type { Route } from "@/App";
 import { get } from "@/lib/api";
 import type { GroupListItem } from "@/lib/group-contract.generated";
 import type { SubmissionPage } from "./GradingQueue";
+import { getAppLanguage } from "@/lib/ui-prefs";
 
 interface Props {
   teacherName: string | null;
   userId: string;
   onNavigate: (route: Route) => void;
+  onOpenClassroom: (groupId: string) => void;
 }
 
 function greeting(name: string | null): string {
@@ -17,7 +20,10 @@ function greeting(name: string | null): string {
   return `${part}${name ? `, ${name.split(" ")[0]} ustoz` : " ustoz"}`;
 }
 
-export default function TeacherDashboard({ teacherName, userId, onNavigate }: Props) {
+export default function TeacherDashboard({ teacherName, userId, onNavigate, onOpenClassroom }: Props) {
+  const english = getAppLanguage() === "en";
+  const [search, setSearch] = useState("");
+  const [visibleCount, setVisibleCount] = useState(8);
   const groupsQuery = useQuery({
     queryKey: ["groups", userId, false, ""],
     queryFn: () => get<GroupListItem[]>("/v1/groups", { archived: false }),
@@ -26,7 +32,9 @@ export default function TeacherDashboard({ teacherName, userId, onNavigate }: Pr
 
   const gradingQuery = useQuery({
     queryKey: ["teacher-submissions", userId],
-    queryFn: ({ signal }) => get<SubmissionPage>("/v1/teacher/submissions", { limit: 5, withTotal: 1 }, { signal }),
+    queryFn: ({ signal }) => get<{ total: number; items: Array<Pick<SubmissionPage["items"][number], "id" | "studentName" | "examTitle" | "skill">> }>(
+      "/v1/teacher/submissions", { limit: 5, withTotal: 1, summary: 1 }, { signal },
+    ),
     staleTime: 30_000,
   });
 
@@ -34,6 +42,7 @@ export default function TeacherDashboard({ teacherName, userId, onNavigate }: Pr
   const totalStudents = groups.reduce((sum, g) => sum + (g.studentsCount ?? 0), 0);
   const submissions = gradingQuery.data?.items ?? [];
   const pendingCount = gradingQuery.data?.total ?? 0;
+  const filtered = groups.filter((group) => group.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
 
   return (
     <section className="space-y-6">
@@ -158,8 +167,7 @@ export default function TeacherDashboard({ teacherName, userId, onNavigate }: Pr
         <div className="space-y-4 lg:col-span-8">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <span>🏫</span>
-              <span>Mening Sinflarim ({groups.length})</span>
+              <span>{english ? "My classrooms" : "Mening Sinflarim"}{groupsQuery.isSuccess ? ` (${groups.length})` : ""}</span>
             </h2>
             <button
               type="button"
@@ -206,12 +214,18 @@ export default function TeacherDashboard({ teacherName, userId, onNavigate }: Pr
             </div>
           )}
 
-          {!groupsQuery.isLoading && !groupsQuery.isError && groups.length > 0 && (
+          {groupsQuery.isSuccess && groups.length > 0 && <>
+            <label className="block space-y-1.5 text-sm font-medium">
+              <span>{english ? "Search classrooms" : "Guruhlarni qidirish"}</span>
+              <input className="workspace-control w-full" type="search" value={search}
+                onChange={(event) => { setSearch(event.target.value); setVisibleCount(8); }} />
+            </label>
+            {filtered.length === 0 && <p role="status" className="text-sm text-fg-muted">{english ? "No matching classrooms" : "Mos guruh topilmadi"}</p>}
             <div className="grid gap-3 sm:grid-cols-2">
-              {groups.map((group) => (
+              {filtered.slice(0, visibleCount).map((group) => (
                 <div
                   key={group.id}
-                  className="flex flex-col justify-between rounded-2xl border border-emerald-500/15 bg-[#111827] p-4 shadow-sm hover:border-emerald-500/35 transition-all"
+                  className="workspace-panel flex min-w-0 flex-col justify-between p-4"
                 >
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-2">
@@ -222,30 +236,26 @@ export default function TeacherDashboard({ teacherName, userId, onNavigate }: Pr
                     </div>
 
                     <p className="text-xs text-slate-400">
-                      {group.teacherName ? `Ustoz: ${group.teacherName}` : "Guruh faol"} · ID: <code className="font-mono text-slate-300">{group.id.slice(0, 8)}</code>
+                      {group.teacherName}
                     </p>
                   </div>
 
                   <div className="mt-4 flex items-center justify-between pt-3 border-t border-white/5">
                     <button
                       type="button"
-                      onClick={() => onNavigate("groups")}
-                      className="text-xs font-bold text-emerald-400 hover:text-emerald-300"
+                      onClick={() => onOpenClassroom(group.id)}
+                      className="workspace-control font-semibold"
                     >
-                      Ish maydoni →
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onNavigate("groups")}
-                      className="text-[11px] text-slate-400 hover:text-white"
-                    >
-                      Davomat & Vazifalar
+                      {english ? "Open classroom" : "Guruhni ochish"}
                     </button>
                   </div>
                 </div>
               ))}
             </div>
-          )}
+            {visibleCount < filtered.length && <button className="workspace-control" type="button" onClick={() => setVisibleCount(visibleCount + 8)}>
+              {english ? "Show more" : "Ko‘proq ko‘rsatish"} · {visibleCount} / {filtered.length}
+            </button>}
+          </>}
         </div>
 
         {/* Grading Queue Preview (4 cols) */}
