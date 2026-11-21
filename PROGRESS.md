@@ -4,6 +4,12 @@
 BestWay Windows desktop ilovasini (Tauri v2 / Rust, Win32, React 19, TypeScript, WebView2, IndexedDB, NSIS installer, signed updater) tubdan modernizatsiya qilish, xavfsizlik va barqarorlikni oshirish, imtihon ma'lumotlarining xavfsizligini (Zero Silent Data Loss) kafolatlash, kiosk rejimini mustahkamlash, offline tiklanishni kuchaytirish va 4GB RAM lab kompyuterlarida ishlash samaradorligini keskin oshirish.
 
 ## 2. Bajarildi
+-1. **BESTWAY NEXT — Stage 06 QA (2026-11-21) — #39**:
+   - Windows CI P0: `native_session_survives_new_credential_entry_and_load` beqaror edi (bir xil `session.rs` bilan `cf645e4` da o‘tgan). Keyring testlari ketma-ket ishlaydi, fixture nomlari noyob; ishlab chiqarishda keyring yozuvi yangi handle orqali o‘qib tekshirilgandan keyingina fayl zaxirasi o‘chiriladi (`8cf17a8`). Windows CI run 44872565399: PASS.
+   - `StudentAssignmentsWidget`: `null%`, noto‘g‘ri "hammasi bajarilgan", klaviatura tablari, akkauntga bog‘langan lug‘at havolasi tuzatildi; jsdom interaktiv testlar qo‘shildi.
+   - Vocabulary Studio: CSV/TSV/TXT import va takrorlarni aniqlash (`83fd6ac`).
+   - Real Django bilan veb→desktop lug‘at pariteti: PASS. Testlar: Vitest 493, Rust 33 (Linux), clippy, build PASS.
+   - Hujjatlar: `docs/BESTWAY_NEXT_STAGE06_NATIVE_ACCEPTANCE.md`, `docs/BESTWAY_NEXT_STAGE06_RELEASE_HANDOFF.md`. Jismoniy qurilma sinovlari: UNVERIFIED.
 0. **BESTWAY NEXT — Stage 05 Continuation & Delivery (2026-11-20) — #39 & #207, branch `feat/bestway-next-stage05-completion`**:
    - `src/styles.css`: tokenlar va sinf nomlari veb globals bilan 100% muvofiqlashtirildi (`.workspace-panel-interactive`, `.workspace-badge`, `.workspace-skeleton`, `.workspace-table`).
    - `src/components/common/`: qayta ishlatiluvchi komponentlar (`EmptyState`, `StatCard`, `StatusBadge`, `WorkspaceTable`) yaratildi.
