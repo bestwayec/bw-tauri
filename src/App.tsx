@@ -36,6 +36,7 @@ import ReauthModal from "@/components/ReauthModal";
 import { getDismissedVersion, resolveDesktopUpdate, type UpdateInfo } from "@/lib/version";
 import ClickSpark from "@/components/ClickSpark";
 import CrashRecovery from "@/components/CrashRecovery";
+import { SessionPersistenceNotice } from "@/components/SessionPersistenceNotice";
 import ResumeExamModal, { persistActiveMockSession, persistActiveTestSession, clearActiveMockSession } from "@/components/ResumeExamModal";
 import { logout } from "@/lib/api";
 import { purgeAccountOfflineVocabulary } from "@/lib/offline-vocabulary";
@@ -550,6 +551,7 @@ export default function App() {
           </div>
         ) : (
           <ClickSpark sparkColor="#10B981" sparkSize={10} sparkRadius={22} sparkCount={8} duration={420} className="flex min-h-0 flex-1 flex-col">
+          <SessionPersistenceNotice />
           <main className="min-h-0 flex-1 overflow-y-auto px-6 pb-8 pt-6 2xl:px-10">
             <motion.div
               key={`${student?.id}:${activeRoute}:${activeRoute === "result" ? historyKey : ""}`}
