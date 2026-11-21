@@ -144,11 +144,17 @@ it('explicitly clearing the profile cannot retain another account identity', asy
 
 it('does not publish a successful login before durable token storage acknowledges it', async () => {
   let acknowledge!: () => void;
-  vi.mocked(rustSessionSet).mockImplementationOnce(() => new Promise(resolve => { acknowledge = resolve; }));
+  vi.mocked(rustSessionSet).mockImplementationOnce(() => new Promise(resolve => { acknowledge = () => resolve('native'); }));
   const saving = setSession('new-access', 'new-refresh');
   expect(useSessionStore.getState().status).toBe('logged-out');
   expect(getAccessTokenCached()).toBeNull();
   acknowledge();
   await saving;
   expect(getAccessTokenCached()).toBe('new-access');
+});
+
+it('reports a memory-only session when the OS credential store is unavailable', async () => {
+  vi.mocked(rustSessionSet).mockResolvedValueOnce('memory_only');
+  await setSession('memory-access', 'memory-refresh');
+  expect(useSessionStore.getState().persistence).toBe('memory_only');
 });

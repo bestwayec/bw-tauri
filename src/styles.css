@@ -7,6 +7,18 @@
     background: var(--surface);
   }
 
+  .workspace-panel-interactive {
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-card);
+    background: var(--surface);
+    transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .workspace-panel-interactive:hover {
+    border-color: rgba(16, 185, 129, 0.35);
+    background: var(--surface-hover);
+  }
+
   .workspace-control {
     min-height: 44px;
     border: 1px solid var(--border-strong);
@@ -14,10 +26,13 @@
     background: var(--surface);
     padding: 0.5rem 0.875rem;
     font-size: 0.875rem;
+    color: var(--fg);
+    transition: background-color 0.15s ease, border-color 0.15s ease;
   }
 
   .workspace-control:hover:not(:disabled) {
     background: var(--surface-hover);
+    border-color: rgba(16, 185, 129, 0.4);
   }
 
   .workspace-control:focus-visible {
@@ -27,6 +42,80 @@
 
   .workspace-control:disabled {
     opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .workspace-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: 9999px;
+    padding: 0.125rem 0.625rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1.25;
+  }
+
+  .workspace-badge-brand {
+    background: rgba(16, 185, 129, 0.15);
+    color: #6EE7B7;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+  }
+
+  .workspace-badge-amber {
+    background: rgba(245, 158, 11, 0.15);
+    color: #FCD34D;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+  }
+
+  .workspace-badge-danger {
+    background: rgba(239, 68, 68, 0.15);
+    color: #FCA5A5;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+  }
+
+  .workspace-badge-info {
+    background: rgba(59, 130, 246, 0.15);
+    color: #93C5FD;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+  }
+
+  .workspace-badge-neutral {
+    background: rgba(148, 163, 184, 0.1);
+    color: #94A3B8;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+  }
+
+  .workspace-skeleton {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    background-color: rgba(30, 41, 59, 0.6);
+    border-radius: var(--radius-control);
+  }
+
+  .workspace-table {
+    width: 100%;
+    caption-side: bottom;
+    font-size: 0.875rem;
+    border-collapse: collapse;
+  }
+
+  .workspace-table th {
+    padding: 0.75rem 1rem;
+    text-align: left;
+    font-weight: 600;
+    color: var(--fg-muted);
+    border-bottom: 1px solid var(--border-strong);
+    background: rgba(17, 24, 39, 0.5);
+  }
+
+  .workspace-table td {
+    padding: 0.75rem 1rem;
+    vertical-align: middle;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .workspace-table tr:hover td {
+    background: var(--surface-hover);
   }
 }
 

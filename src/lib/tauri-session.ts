@@ -31,17 +31,26 @@ async function invokeRaw<T>(cmd: string, args?: Record<string, unknown>): Promis
   return (fn as (c: string, a?: Record<string, unknown>) => Promise<T>)(cmd, args);
 }
 
+/**
+ * Where Rust keeps the session: `native` = OS credential store (survives
+ * restart); `memory_only` = no usable protected store on this machine, so the
+ * session ends when the app exits (tokens are never written to a file).
+ */
+export type SessionPersistence = "native" | "memory_only";
+
 /** Null outside Tauri; the stored session (possibly empty) inside. */
-export type RustSessionSnapshot = Omit<RustSessionData, "refresh_token">;
+export type RustSessionSnapshot = Omit<RustSessionData, "refresh_token"> & {
+  persistence?: SessionPersistence;
+};
 
 export async function rustSessionGet(): Promise<RustSessionSnapshot | null> {
   if (!isTauriRuntime()) return null;
   return invokeRaw<RustSessionSnapshot>("session_get");
 }
 
-export async function rustSessionSet(data: RustSessionData, preserveRefresh = false): Promise<void> {
-  if (!isTauriRuntime()) return;
-  await invokeRaw<null>("session_set", { data, preserveRefresh });
+export async function rustSessionSet(data: RustSessionData, preserveRefresh = false): Promise<SessionPersistence | null> {
+  if (!isTauriRuntime()) return null;
+  return invokeRaw<SessionPersistence>("session_set", { data, preserveRefresh });
 }
 
 export async function rustSessionClear(): Promise<void> {

@@ -558,6 +558,7 @@ pub mod tests {
 
     #[test]
     fn test_machine_key_derivation_is_stable() {
+        let _native = crate::test_support::native_credential_lock();
         let key1 = get_or_derive_machine_key().expect("Key 1 should derive");
         let key2 = get_or_derive_machine_key().expect("Key 2 should derive");
         assert_eq!(key1, key2);

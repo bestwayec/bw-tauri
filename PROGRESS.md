@@ -4,6 +4,32 @@
 BestWay Windows desktop ilovasini (Tauri v2 / Rust, Win32, React 19, TypeScript, WebView2, IndexedDB, NSIS installer, signed updater) tubdan modernizatsiya qilish, xavfsizlik va barqarorlikni oshirish, imtihon ma'lumotlarining xavfsizligini (Zero Silent Data Loss) kafolatlash, kiosk rejimini mustahkamlash, offline tiklanishni kuchaytirish va 4GB RAM lab kompyuterlarida ishlash samaradorligini keskin oshirish.
 
 ## 2. Bajarildi
+-2. **BESTWAY NEXT — yakuniy bosqich (2026-11-21)**:
+   - P0 `c3ec47b`: tokenlar faqat OS ombori (Credential Manager / Keychain / Secret Service) da, read-back tekshiruvi bilan; ombor yo‘q bo‘lsa — faqat xotira rejimi va ogohlantirish; eski `session.json` ko‘chiriladi/o‘chiriladi. 40 ta Rust testi, Windows CI PASS.
+   - `ac22eb8`: lug‘at sahifasi bitta tilda (uz/en), katta fleshkarta, progress satri. `eb0b1ae`: real backend bilan kross-klient qabul skripti.
+   - Topilma: v1.0.12 `latest.json` faqat `darwin-x86_64` ni o‘z ichiga oladi — Windows/Linux/arm64 avtomatik yangilanmaydi; joriy workflow buni tuzatgan.
+   - RELIZ BLOCKED: `docs/BESTWAY_NEXT_STAGE06_RELEASE_VERIFICATION.md`.
+-1. **BESTWAY NEXT — Stage 06 QA (2026-11-21) — #39**:
+   - Windows CI P0: `native_session_survives_new_credential_entry_and_load` beqaror edi (bir xil `session.rs` bilan `cf645e4` da o‘tgan). Keyring testlari ketma-ket ishlaydi, fixture nomlari noyob; ishlab chiqarishda keyring yozuvi yangi handle orqali o‘qib tekshirilgandan keyingina fayl zaxirasi o‘chiriladi (`8cf17a8`). Windows CI run 44872565399: PASS.
+   - `StudentAssignmentsWidget`: `null%`, noto‘g‘ri "hammasi bajarilgan", klaviatura tablari, akkauntga bog‘langan lug‘at havolasi tuzatildi; jsdom interaktiv testlar qo‘shildi.
+   - Vocabulary Studio: CSV/TSV/TXT import va takrorlarni aniqlash (`83fd6ac`).
+   - Real Django bilan veb→desktop lug‘at pariteti: PASS. Testlar: Vitest 493, Rust 33 (Linux), clippy, build PASS.
+   - Hujjatlar: `docs/BESTWAY_NEXT_STAGE06_NATIVE_ACCEPTANCE.md`, `docs/BESTWAY_NEXT_STAGE06_RELEASE_HANDOFF.md`. Jismoniy qurilma sinovlari: UNVERIFIED.
+0. **BESTWAY NEXT — Stage 05 Continuation & Delivery (2026-11-20) — #39 & #207, branch `feat/bestway-next-stage05-completion`**:
+   - `src/styles.css`: tokenlar va sinf nomlari veb globals bilan 100% muvofiqlashtirildi (`.workspace-panel-interactive`, `.workspace-badge`, `.workspace-skeleton`, `.workspace-table`).
+   - `src/components/common/`: qayta ishlatiluvchi komponentlar (`EmptyState`, `StatCard`, `StatusBadge`, `WorkspaceTable`) yaratildi.
+   - `src/components/common/ui-primitives.test.tsx`: barcha yangi dizayn primitivlari uchun vitest testlari qo'shildi.
+   - `src/pages/Dashboard.tsx` va `TeacherDashboard.tsx`: KPI ko'rsatkichlari, retry boshqaruvi, bo'sh holatlar va sinf tezkor amallari ("Davomat / Attendance", "Vazifalar / Tasks") qo'shildi.
+   - `src/components/StudentAssignmentsWidget.tsx`: vazifalar uchun filter tablari (Faol, Barchasi, Tugallangan), status nishonlari va to'g'ridan-to'g'ri lug'at topshirig'ini ochish (`initialAssignmentId`) ulandi.
+   - `src/components/StudentAssignmentsWidget.test.tsx`: tab filtrlash, bo'sh va xatolik holatlari hamda amallar uchun yangi unit testlar to'plami yaratildi (4 ta test).
+   - `src/components/StudentClassroomWidget.tsx`: o'qituvchi ma'lumoti, o'quvchilar soni va dars jadvali ko'rsatildi.
+   - `src/pages/ClassroomWorkspace.tsx`: guruhni arxivlash/tiklash va o'quvchini boshqa guruhga ko'chirish (student transfer) modali yaratildi.
+   - `src/pages/GroupsResults.tsx`: `initialSection` parametri orqali to'g'ridan-to'g'ri bo'limga silliq o'tish (`scrollIntoView`) ta'minlandi.
+   - `src/pages/Vocabulary.tsx`: talabaga biriktirilgan lug'at to'plami ID'si bilan to'g'ridan-to'g'ri ochilish imkoniyati qo'shildi.
+   - `src/pages/VocabularyStudio.tsx`: guruh topshiriqlari hisoboti uchun CSV va Excel (.xlsx) eksport imkoniyati qo'shildi.
+   - CI Windows Validation Fix: `.github/workflows/windows-validation.yml` va `tools/windows-validation.mjs` da WebView2 jarayon daraxti rekursiv qidiruvi va 30 soniyalik polling joriy qilindi. GitHub Actions run `44788090274` 6m51s da 100% yashil o'tdi.
+   - Testlar: 61 ta test fayli, 485 ta vitest testi (100% PASS); release/windows unit testlari 6 ta pass (100% PASS).
+   - Git branch `feat/bestway-next-stage05-completion` push qilindi (PR #39: https://github.com/bestwayec/bw-tauri/pull/39).
 1. **BestWay Apps 2.0 (PR #36)**:
    - To'liq desktop va Android ilova auditi yakunlandi va PR #36 orqali `main` ga birlashtirildi (`19e9ec9`).
    - Android OAuth PKCE xavfsizligi, SharedPreferences sessiya tiklanishi, WebView xavfsizligi va CI 5/5 to'liq muvaffaqiyatli yakunlandi.
