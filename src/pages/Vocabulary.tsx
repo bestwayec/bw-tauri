@@ -17,21 +17,23 @@ import type {
   VocabularyCard, VocabularyFlashcards, VocabularyMode, VocabularyQuestion, VocabularyResult,
   VocabularyLearnerHistory, VocabularyReview, VocabularyReviewHistory, VocabularySession, VocabularySubmission,
 } from "../lib/group-contract.generated";
+import { useVocabularyText } from "./vocabulary-text";
 
 const control = "rounded-lg border border-white/15 bg-surface px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-emerald-300 disabled:opacity-50";
-const labels: Record<VocabularyMode, string> = {
-  mixed: "Mixed practice", spelling: "Spelling", eng_uzb: "English to Uzbek", uzb_eng: "Uzbek to English",
-};
+const MODES: VocabularyMode[] = ["mixed", "spelling", "eng_uzb", "uzb_eng"];
 
-function errorMessage(error: unknown) {
-  return typeof error === "object" && error && "message" in error ? String(error.message) : "Request failed.";
+function errorMessage(error: unknown, fallback: string) {
+  return typeof error === "object" && error && "message" in error ? String(error.message) : fallback;
 }
 
 function Result({ result }: { result: VocabularyResult }) {
+  const t = useVocabularyText();
   return (
-    <section className="card space-y-3 rounded-2xl p-4" aria-label="Vocabulary result">
-      <h2 className="text-lg font-semibold">Vocabulary result</h2>
-      <p>{result.score} / {result.totalWords} · {result.percentage}%</p>
+    <section className="card space-y-3 rounded-2xl p-4" aria-label={t.resultTitle}>
+      <h2 className="text-lg font-semibold">{t.resultTitle}</h2>
+      <p className="text-3xl font-bold tabular-nums">{result.percentage}%</p>
+      <p className="text-sm text-white/70 tabular-nums">{result.score} / {result.totalWords}</p>
+      {result.wrongAnswers.length > 0 && <h3 className="text-sm font-semibold">{t.resultWrong}</h3>}
       {result.wrongAnswers.length > 0 && <ul className="space-y-1">
         {result.wrongAnswers.map(word => <li key={word.wordId}>{word.english} — {word.uzbek}</li>)}
       </ul>}
@@ -42,6 +44,7 @@ function Result({ result }: { result: VocabularyResult }) {
 function Practice({
   sessionId, questions, path, onComplete,
 }: { sessionId: string; questions: VocabularyQuestion[]; path: string; onComplete: () => void }) {
+  const t = useVocabularyText();
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [index, setIndex] = useState(0);
   const prompt = useRef<HTMLLegendElement>(null);
@@ -53,7 +56,7 @@ function Practice({
   if (save.data) return <Result result={save.data} />;
 
   const question = questions[index];
-  if (!question) return <p>No words are due for review.</p>;
+  if (!question) return <p>{t.noDue}</p>;
   const complete = questions.every(item => Boolean(answers[item.wordId]?.trim()));
 
   function submit(event: FormEvent) {
@@ -67,7 +70,8 @@ function Practice({
 
   return (
     <form className="card space-y-4 rounded-2xl p-4" onSubmit={submit}>
-      <p aria-live="polite">Question {index + 1} / {questions.length}</p>
+      <p aria-live="polite">{t.question(index + 1, questions.length)}</p>
+      <div className="h-1.5 overflow-hidden rounded-full bg-white/10" aria-hidden><div className="h-full bg-emerald-500 transition-[width] motion-reduce:transition-none" style={{ width: `${((index + 1) / questions.length) * 100}%` }} /></div>
       <fieldset className="space-y-2" disabled={save.isPending}>
         <legend ref={prompt} tabIndex={-1} className="mb-2 text-lg font-semibold focus-visible:outline-2 focus-visible:outline-emerald-300">{question.prompt}</legend>
         {question.options.length ? question.options.map(option => (
@@ -76,23 +80,24 @@ function Practice({
             {option}
           </label>
         )) : <label className="grid gap-1">
-          Answer
+          {t.answer}
           <input className={control} value={answers[question.wordId] ?? ""} maxLength={500} onChange={event => setAnswers({ ...answers, [question.wordId]: event.target.value })} />
         </label>}
       </fieldset>
       <div className="flex flex-wrap gap-2">
-        <button className={control} type="button" disabled={!index || save.isPending} onClick={() => setIndex(index - 1)}>Previous</button>
-        <button className={control} type="button" disabled={index + 1 === questions.length || !answers[question.wordId]?.trim() || save.isPending} onClick={() => setIndex(index + 1)}>Next question</button>
+        <button className={control} type="button" disabled={!index || save.isPending} onClick={() => setIndex(index - 1)}>{t.previous}</button>
+        <button className={control} type="button" disabled={index + 1 === questions.length || !answers[question.wordId]?.trim() || save.isPending} onClick={() => setIndex(index + 1)}>{t.nextQuestion}</button>
         <button className="btn-brand px-4 py-2 disabled:opacity-50" disabled={!complete || save.isPending}>
-          {save.isPending ? "Submitting…" : "Submit answers"}
+          {save.isPending ? t.submitting : t.submit}
         </button>
       </div>
-      {save.isError && <p role="alert">{errorMessage(save.error)}</p>}
+      {save.isError && <p role="alert">{errorMessage(save.error, t.requestFailed)}</p>}
     </form>
   );
 }
 
 function Assignment({ id, userId, onComplete }: { id: string; userId: string; onComplete: () => void }) {
+  const t = useVocabularyText();
   const root = `/v1/student/assignments/${encodeURIComponent(id)}/vocabulary`;
   const queryClient = useQueryClient();
 
@@ -295,6 +300,7 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
   }, [word, index, order, accessDenied]);
 
   const pendingCount = pendingOps.data?.length ?? 0;
+  const knownCount = effectiveWords.filter(item => study.familiarity?.[item.id] === "known").length;
   const isDownloaded = Boolean(localSnapshot.data) && !accessDenied;
 
   return (
@@ -303,21 +309,21 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
         <Practice sessionId={session.data.sessionId} questions={session.data.questions} path={root + "/submit"} onComplete={onComplete} />
       ) : (
         <>
-      {accessDenied && <p role="alert">Vazifaga kirish yopilgan / Assignment access is unavailable.</p>}
-      {(storageError || pendingOps.isError) && <p role="alert">Oflayn o‘zgarish saqlanmadi / Offline progress could not be saved.</p>}
-      {downloadMutation.isError && <p role="alert">Oflayn yuklab bo‘lmadi / Offline download failed.</p>}
-      {syncStatus === "error" && <p role="alert">Sinxronlash tugamadi / Sync incomplete. Retry when online.</p>}
+      {accessDenied && <p role="alert">{t.accessDenied}</p>}
+      {(storageError || pendingOps.isError) && <p role="alert">{t.offlineSaveFailed}</p>}
+      {downloadMutation.isError && <p role="alert">{t.downloadFailed}</p>}
+      {syncStatus === "error" && <p role="alert">{t.syncFailed}</p>}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap gap-2">
-              {(Object.keys(labels) as VocabularyMode[]).map(mode => (
-                <button className={control} type="button" key={mode} disabled={!isOnline || Boolean(accessDenied) || session.isPending} onClick={() => session.mutate(mode)}>{labels[mode]}</button>
+              {MODES.map(mode => (
+                <button className={control} type="button" key={mode} disabled={!isOnline || Boolean(accessDenied) || session.isPending} onClick={() => session.mutate(mode)}>{t.modes[mode]}</button>
               ))}
             </div>
 
             <div className="flex flex-wrap items-center gap-2 text-xs" aria-live="polite">
               {isDownloaded ? (
-                <span className="rounded-md bg-emerald-500/10 px-2 py-1 text-emerald-400 border border-emerald-500/20" title="Offline study available">
-                  ✓ Oflayn tayyor / Offline ready
+                <span className="rounded-md bg-emerald-500/10 px-2 py-1 text-emerald-400 border border-emerald-500/20" title={t.offlineReadyHint}>
+                  {t.offlineReady}
                 </span>
               ) : (
                 <button
@@ -326,7 +332,7 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
                   disabled={!isOnline || Boolean(accessDenied) || downloadMutation.isPending}
                   onClick={() => downloadMutation.mutate()}
                 >
-                  {downloadMutation.isPending ? "Yuklanmoqda… / Downloading…" : "↓ Oflayn saqlash / Save offline"}
+                  {downloadMutation.isPending ? t.downloading : t.saveOffline}
                 </button>
               )}
 
@@ -337,67 +343,77 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
                   onClick={() => void triggerSync()}
                   disabled={!isOnline || Boolean(accessDenied) || syncStatus === "syncing"}
                 >
-                  {syncStatus === "syncing" ? "Sinxronlanmoqda…" : `↻ ${pendingCount} kutilmoqda / pending`}
+                  {syncStatus === "syncing" ? t.syncing : t.pending(pendingCount)}
                 </button>
               ) : (
                 <span className="rounded-md bg-white/5 px-2 py-1 text-white/60">
-                  {isOnline ? "● Onlayn / Online" : "○ Oflayn / Offline"}
+                  {isOnline ? t.online : t.offline}
                 </span>
               )}
             </div>
           </div>
 
-          {session.isError && <p role="alert">{errorMessage(session.error)}</p>}
+          {session.isError && <p role="alert">{errorMessage(session.error, t.requestFailed)}</p>}
 
           <section className="workspace-panel space-y-3 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-lg font-semibold">Flashcards</h2>
+              <h2 className="text-lg font-semibold">{t.flashcards}</h2>
               {effectiveWords.length > 0 && (
-                <span className="text-xs text-white/60">
-                  {Object.values(study.familiarity || {}).filter(v => v === "known").length} / {effectiveWords.length} o‘rganilgan / known
+                <span className="text-xs text-white/60 tabular-nums">
+                  {t.known(knownCount, effectiveWords.length)}
                 </span>
               )}
             </div>
+            {effectiveWords.length > 0 && (
+              <div className="h-1.5 overflow-hidden rounded-full bg-white/10" role="progressbar" aria-label={t.flashcards}
+                aria-valuemin={0} aria-valuemax={effectiveWords.length} aria-valuenow={knownCount}>
+                <div className="h-full bg-emerald-500 transition-[width] motion-reduce:transition-none" style={{ width: `${(knownCount / effectiveWords.length) * 100}%` }} />
+              </div>
+            )}
 
             {effectiveWords.length === 0 && (words.isPending || progress.isPending) && (
-              <p role="status">So‘zlar yuklanmoqda / Loading words…</p>
+              <p role="status">{t.loadingWords}</p>
             )}
 
             {effectiveWords.length === 0 && words.isError && !localSnapshot.data && (
-              <p role="alert">{errorMessage(words.error)} <button className={control} onClick={() => void words.refetch()}>Qayta urinish / Retry</button></p>
+              <p role="alert">{errorMessage(words.error, t.requestFailed)} <button className={control} onClick={() => void words.refetch()}>{t.retry}</button></p>
             )}
 
             {word && (
               <>
                 <button
-                  className="workspace-control min-h-28 w-full break-words text-xl font-semibold tracking-wide"
+                  className="workspace-control flex min-h-48 w-full flex-col items-center justify-center gap-2 break-words px-6 py-8 text-center"
                   type="button"
                   aria-pressed={revealed}
+                  aria-describedby="flashcard-hint"
                   onClick={() => setRevealed(!revealed)}
                 >
-                  {revealed ? word.uzbek : word.english}
+                  <span className="text-xs font-semibold uppercase tracking-wider text-white/50">{revealed ? t.back : t.front}</span>
+                  <span className="text-3xl font-semibold leading-snug sm:text-4xl">{revealed ? word.uzbek : word.english}</span>
+                  {word.partOfSpeech && !revealed && <span className="text-sm italic text-white/50">{word.partOfSpeech}</span>}
                 </button>
+                <p id="flashcard-hint" className="sr-only">{t.flipHint}</p>
 
                 {revealed && <div className="space-y-1 text-sm rounded-lg bg-white/5 p-3">
-                  {word.definition && <p><span className="text-white/60">Izoh / Def:</span> {word.definition}</p>}
-                  {word.contextSentence && <p><span className="text-white/60">Misol / Ex:</span> {word.contextSentence}</p>}
-                  {word.synonyms?.length ? <p><span className="text-white/60">Sinonim:</span> {word.synonyms.join(", ")}</p> : null}
+                  {word.definition && <p><span className="text-white/60">{t.definition}:</span> {word.definition}</p>}
+                  {word.contextSentence && <p><span className="text-white/60">{t.example}:</span> {word.contextSentence}</p>}
+                  {word.synonyms?.length ? <p><span className="text-white/60">{t.synonyms}:</span> {word.synonyms.join(", ")}</p> : null}
                   {word.pronunciation && <p className="font-mono text-emerald-400">/{word.pronunciation}/</p>}
                   {word.level && <span className="inline-block rounded bg-white/10 px-1.5 py-0.5 text-xs">{word.level}</span>}
                 </div>}
 
                 <div className="flex flex-wrap items-center gap-2 pt-2">
                   <button className={control} type="button" onClick={() => void cardBy(-1)}>
-                    ← Oldingi / Prev
+                    {t.prev}
                   </button>
                   <span aria-live="polite" className="px-2 text-sm font-medium tabular-nums">
                     {index + 1} / {order.length}
                   </span>
                   <button className={control} type="button" onClick={() => void cardBy(1)}>
-                    Keyingi / Next →
+                    {t.next}
                   </button>
                   <button className={control} type="button" onClick={() => void shuffle()}>
-                    Aralashtirish / Shuffle
+                    {t.shuffle}
                   </button>
 
                   <button
@@ -406,35 +422,35 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
                     aria-pressed={study.familiarity[word.id] === "known"}
                     onClick={() => void setFamiliarity("known")}
                   >
-                    ✓ Bilaman / Known
+                    {t.markKnown}
                   </button>
                   <button
                     className={`${control} ${study.familiarity[word.id] === "practice" ? "bg-amber-600/30 border-amber-500 text-amber-300" : ""}`}
                     type="button"
                     onClick={() => void setFamiliarity("practice")}
                   >
-                    ? Mashq kerak / Need practice
+                    {t.markPractice}
                   </button>
 
                   {(word.audioUrl || canSpeak) && (
                     <>
                       <button className={control} type="button" onClick={() => void pronounce()} disabled={muted}>
-                        🔊 Talaffuz / Pronounce
+                        {t.pronounce}
                       </button>
                       <button className={control} type="button" aria-pressed={muted} onClick={() => {
                         audio.current?.pause();
                         window.speechSynthesis?.cancel();
                         setMuted(!muted);
-                      }}>{muted ? "Unmute" : "Mute"}</button>
+                      }}>{muted ? t.unmute : t.mute}</button>
                     </>
                   )}
                 </div>
 
                 {word.audioUrl && <audio key={word.id} ref={audio} muted={muted} preload="none" src={word.audioUrl} />}
-                {audioErrorFor === word.id && <p role="status" className="text-xs text-amber-400">Talaffuz audiosi mavjud emas / Audio unavailable.</p>}
+                {audioErrorFor === word.id && <p role="status" className="text-xs text-amber-400">{t.audioUnavailable}</p>}
 
                 <div className="text-xs text-white/40 pt-1">
-                  Klaviatura: [Bo‘shliq/Enter] ochish · [←/→] o‘tish · [1/K] bilaman · [2/P] mashq
+                  {t.shortcuts}
                 </div>
               </>
             )}
@@ -446,6 +462,7 @@ function Assignment({ id, userId, onComplete }: { id: string; userId: string; on
 }
 
 function LearningHistory({ userId, review = false }: { userId: string; review?: boolean }) {
+  const t = useVocabularyText();
   const [page, setPage] = useState(1);
   const history = useQuery<VocabularyReviewHistory | VocabularyLearnerHistory>({
     queryKey: ["vocabulary-history", userId, review, page],
@@ -455,18 +472,18 @@ function LearningHistory({ userId, review = false }: { userId: string; review?: 
   });
   return (
     <section className="card space-y-3 rounded-2xl p-4">
-      <h2 className="font-semibold">{review ? "Review history" : "Vocabulary results history"}</h2>
-      {history.isPending && <p role="status">Loading history…</p>}
-      {history.isError && <p role="alert">{errorMessage(history.error)} <button className={control} onClick={() => void history.refetch()}>Retry</button></p>}
-      {history.data && !history.data.entries.length && <p>No activity yet.</p>}
+      <h2 className="font-semibold">{review ? t.historyReview : t.historyResults}</h2>
+      {history.isPending && <p role="status">{t.loadingHistory}</p>}
+      {history.isError && <p role="alert">{errorMessage(history.error, t.requestFailed)} <button className={control} onClick={() => void history.refetch()}>{t.retry}</button></p>}
+      {history.data && !history.data.entries.length && <p>{t.noActivity}</p>}
       <ul className="space-y-1">{history.data?.entries.map(row => "review__word__english" in row ? (
-        <li key={row.id}>{row.review__word__english} · {row.correct ? "Correct" : "Incorrect"} · {row.interval_days} day(s) · {row.mastered ? "Mastered" : "Learning"} · Next {new Date(row.next_review_at).toLocaleString()}</li>
+        <li key={row.id}>{row.review__word__english} · {row.correct ? t.correct : t.incorrect} · {t.days(row.interval_days)} · {row.mastered ? t.mastered : t.learning} · {t.nextReview} {new Date(row.next_review_at).toLocaleString()}</li>
       ) : (
         <li key={row.assignment_id}>{row.assignment__title} · {row.score_percent}% · {new Date(row.completed_at).toLocaleDateString()}</li>
       ))}</ul>
       {history.data && (page > 1 || history.data.hasNext) && <div className="flex gap-2">
-        <button className={control} disabled={page === 1} onClick={() => setPage(page - 1)}>Previous</button>
-        <button className={control} disabled={!history.data.hasNext} onClick={() => setPage(page + 1)}>Next</button>
+        <button className={control} disabled={page === 1} onClick={() => setPage(page - 1)}>{t.previous}</button>
+        <button className={control} disabled={!history.data.hasNext} onClick={() => setPage(page + 1)}>{t.nextPage}</button>
       </div>}
     </section>
   );
@@ -475,6 +492,7 @@ function LearningHistory({ userId, review = false }: { userId: string; review?: 
 type AssignedTask = { id: string; title: string; vocabulary_set_id: string | null; score_percent: number | null; deadline: string };
 
 export default function Vocabulary({ userId, initialAssignmentId = "" }: { userId: string; initialAssignmentId?: string }) {
+  const t = useVocabularyText();
   const queryClient = useQueryClient();
   const taskKey = ["vocabulary-assignments", userId] as const;
   const tasks = useQuery({
@@ -504,13 +522,13 @@ export default function Vocabulary({ userId, initialAssignmentId = "" }: { userI
 
   return (
     <section className="space-y-4">
-      <h1 className="text-2xl font-bold">Vocabulary</h1>
+      <h1 className="text-2xl font-bold">{t.title}</h1>
       <section className="card space-y-3 rounded-2xl p-4">
-        <h2 className="text-lg font-semibold">Assigned vocabulary</h2>
+        <h2 className="text-lg font-semibold">{t.assigned}</h2>
         {internetUnavailable && (
           <div>
-            <p className="text-sm">Oflayn to‘plamlar / Downloaded collections</p>
-            {offlineAssignments.isError && <p role="alert">Oflayn to‘plamlar ochilmadi / Could not read downloads.</p>}
+            <p className="text-sm">{t.downloaded}</p>
+            {offlineAssignments.isError && <p role="alert">{t.downloadsUnreadable}</p>}
             <ul className="space-y-2">{offlineAssignments.data?.map(snapshot => (
               <li key={snapshot.assignmentId}>
                 <button className={control} type="button" onClick={() => { review.reset(); setAssignmentId(snapshot.assignmentId); }}>
@@ -520,14 +538,14 @@ export default function Vocabulary({ userId, initialAssignmentId = "" }: { userI
             ))}</ul>
           </div>
         )}
-        {tasks.isPending && !internetUnavailable && <p role="status">Loading assignments…</p>}
-        {tasks.isError && <p role="alert">{errorMessage(tasks.error)} <button className={control} onClick={() => void tasks.refetch()}>Retry</button></p>}
-        {tasks.isSuccess && !assigned?.length && <p>No vocabulary assignments.</p>}
+        {tasks.isPending && !internetUnavailable && <p role="status">{t.loadingAssignments}</p>}
+        {tasks.isError && <p role="alert">{errorMessage(tasks.error, t.requestFailed)} <button className={control} onClick={() => void tasks.refetch()}>{t.retry}</button></p>}
+        {tasks.isSuccess && !assigned?.length && <p>{t.noAssignments}</p>}
         <ul className="space-y-2">{assigned?.map(task => (
           <li className="flex flex-wrap items-center justify-between gap-2" key={task.id}>
             <div>{task.title} <time className="block text-xs" dateTime={task.deadline}>{new Date(task.deadline).toLocaleString()}</time></div>
             <button className={control} type="button" onClick={() => { review.reset(); setAssignmentId(task.id); }}>
-              {task.score_percent === null ? "Study vocabulary" : `Review result · ${task.score_percent}%`}
+              {task.score_percent === null ? t.study : t.reviewResult(task.score_percent)}
             </button>
           </li>
         ))}</ul>
@@ -537,14 +555,14 @@ export default function Vocabulary({ userId, initialAssignmentId = "" }: { userI
         void queryClient.invalidateQueries({ queryKey: ["vocabulary-history", userId] });
       }} />}
       <section className="card space-y-3 rounded-2xl p-4">
-        <h2 className="text-lg font-semibold">Daily review</h2>
+        <h2 className="text-lg font-semibold">{t.daily}</h2>
         <button className={control} type="button" disabled={review.isPending} onClick={() => { setAssignmentId(""); review.mutate(); }}>
-          {review.isPending ? "Loading review…" : "Start daily review"}
+          {review.isPending ? t.loadingReview : t.startDaily}
         </button>
-        {review.isError && <p role="alert">{errorMessage(review.error)}</p>}
+        {review.isError && <p role="alert">{errorMessage(review.error, t.requestFailed)}</p>}
         {review.data && (review.data.sessionId ? (
           <Practice key={review.data.sessionId} sessionId={review.data.sessionId} questions={review.data.questions} path="/v1/vocabulary/srs/submit" onComplete={() => void queryClient.invalidateQueries({ queryKey: ["vocabulary-history", userId] })} />
-        ) : <p>No words are due for review.</p>)}
+        ) : <p>{t.noDue}</p>)}
       </section>
       <LearningHistory userId={userId} />
       <LearningHistory userId={userId} review />
