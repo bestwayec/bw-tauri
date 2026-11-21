@@ -214,15 +214,38 @@ fn save_to_disk_for(
     let raw = serde_json::to_string(data).unwrap_or_default();
     match keyring::Entry::new(service, account).and_then(|e| e.set_password(&raw)) {
         Ok(()) => {
-            // Keyring won: drop any stale file copy so only one store holds tokens.
-            remove_file_store(app_dir);
-            Ok(())
+            // A credential store can report success yet not return the secret to
+            // a new handle (volatile/locked logon sessions, policy-redirected
+            // stores). Deleting the file copy on such a write would silently
+            // lose the rotated refresh token at the next launch, so the file
+            // fallback is dropped only after an independent read-back matches.
+            match native_read_back(service, account) {
+                Ok(stored) if stored == raw => {
+                    remove_file_store(app_dir);
+                    Ok(())
+                }
+                Ok(_) => {
+                    eprintln!("[session] keyring read-back mismatch, file fallback");
+                    write_file_store(app_dir, data)
+                        .map_err(|io| format!("SESSION_STORAGE_FAILED: {io}"))
+                }
+                Err(e) => {
+                    eprintln!("[session] keyring read-back failed, file fallback: {e}");
+                    write_file_store(app_dir, data)
+                        .map_err(|io| format!("SESSION_STORAGE_FAILED: {io}"))
+                }
+            }
         }
         Err(e) => {
             eprintln!("[session] keyring write failed, file fallback: {e}");
             write_file_store(app_dir, data).map_err(|io| format!("SESSION_STORAGE_FAILED: {io}"))
         }
     }
+}
+
+/// Reads the credential through a fresh entry handle, as the next launch would.
+fn native_read_back(service: &str, account: &str) -> keyring::Result<String> {
+    keyring::Entry::new(service, account)?.get_password()
 }
 
 fn clear_disk_for(app_dir: &Path, service: &str, account: &str) {
@@ -510,21 +533,34 @@ mod tests {
         dir: PathBuf,
         service: String,
         account: String,
+        // Every fixture-backed store writes through the real OS credential
+        // store on Windows/macOS; keyring backends document undefined results
+        // under concurrent access, so fixtures run one at a time. Declared last
+        // so it is released only after `Drop` has cleaned the credential.
+        _native: std::sync::MutexGuard<'static, ()>,
     }
 
     impl SessionFixture {
         fn new() -> Self {
+            let native = crate::test_support::native_credential_lock();
+            // Parallel test threads can read the same coarse wall-clock value;
+            // the process-wide sequence guarantees a distinct credential target
+            // and directory per fixture, so one test's cleanup can never delete
+            // another test's synthetic credential.
+            static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+            let sequence = SEQUENCE.fetch_add(1, Ordering::SeqCst);
             let nonce = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let id = format!("{}-{nonce}", std::process::id());
+            let id = format!("{}-{sequence}-{nonce}", std::process::id());
             let dir = std::env::temp_dir().join(format!("bw-tauri-session-fixture-{id}"));
             std::fs::create_dir(&dir).unwrap();
             Self {
                 dir,
                 service: format!("uz.bestway.exam.test.{id}"),
                 account: "synthetic-session".to_string(),
+                _native: native,
             }
         }
 
@@ -594,8 +630,10 @@ mod tests {
             "native write must replace the fallback"
         );
         let fresh_entry = keyring::Entry::new(&fixture.service, &fixture.account).unwrap();
-        let saved: SessionData =
-            serde_json::from_str(&fresh_entry.get_password().unwrap()).unwrap();
+        let raw = fresh_entry
+            .get_password()
+            .unwrap_or_else(|e| panic!("native credential not readable by a fresh entry: {e:?}"));
+        let saved: SessionData = serde_json::from_str(&raw).unwrap();
         assert_eq!(saved, data);
         assert_eq!(
             load_from_disk_for(&fixture.dir, &fixture.service, &fixture.account),

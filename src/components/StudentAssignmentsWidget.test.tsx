@@ -131,7 +131,9 @@ describe("StudentAssignmentsWidget", () => {
     );
 
     expect(html).toContain("Hozircha biriktirilgan vazifalar yo‘q");
-    expect(html).toContain("Barcha topshiriqlar bajarilgan");
+    // An empty list must not claim the student completed everything.
+    expect(html).not.toContain("Barcha topshiriqlar bajarilgan");
+    expect(html).toContain("Hozircha topshiriq berilmagan");
   });
 
   it("renders error state when fetch fails", () => {

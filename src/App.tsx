@@ -108,8 +108,10 @@ export default function App() {
   const programs = usePrograms();
   const [route, setRoute] = useState<Route>("login");
   const [classroomTarget, setClassroomTarget] = useState<{ userId: string; groupId: string; section?: "roster" | "attendance" | "tasks" } | null>(null);
-  const [vocabularyAssignmentId, setVocabularyAssignmentId] = useState<string | undefined>(undefined);
+  // Scoped to the account that chose it so a deep link never follows a user switch.
+  const [vocabularyTarget, setVocabularyTarget] = useState<{ userId: string; assignmentId: string } | null>(null);
   const [student, setStudent] = useState<Student | null>(null);
+  const vocabularyAssignmentId = vocabularyTarget && vocabularyTarget.userId === student?.id ? vocabularyTarget.assignmentId : undefined;
   const [, setRestoring] = useState(true);
   const [activeTest, setActiveTest] = useState<TestListItem | null>(null);
   const [activeStart, setActiveStart] = useState<StartResult | null>(null);
@@ -572,13 +574,14 @@ export default function App() {
                   <Dashboard
                     studentName={student?.name ?? null}
                     onNavigate={(r) => {
-                      if (r === "vocabulary") setVocabularyAssignmentId(undefined);
+                      if (r === "vocabulary") setVocabularyTarget(null);
                       navigate(r);
                     }}
                     onStart={handleStartExam}
                     onStartMock={handleStartMock}
                     onSelectVocabulary={(assignmentId) => {
-                      setVocabularyAssignmentId(assignmentId);
+                      if (!student) return;
+                      setVocabularyTarget({ userId: student.id, assignmentId });
                       navigate("vocabulary");
                     }}
                   />

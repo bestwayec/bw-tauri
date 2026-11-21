@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState, type KeyboardEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchMyAssignments, type StudentAssignmentItem } from "@/lib/assignments";
 import type { Route } from "@/App";
@@ -9,6 +9,13 @@ interface Props {
   onNavigate: (route: Route) => void;
   onStartExam?: (assignmentId: string) => void;
   onSelectVocabulary?: (assignmentId: string) => void;
+}
+
+const TABS = ["active", "all", "completed"] as const;
+type Tab = (typeof TABS)[number];
+
+function scoreSuffix(score: number | null | undefined): string {
+  return typeof score === "number" && Number.isFinite(score) ? ` (${Math.round(score)}%)` : "";
 }
 
 function formatDeadline(iso: string): string {
@@ -34,7 +41,20 @@ export function StudentAssignmentsWidget({ userId, onNavigate, onStartExam, onSe
     refetchInterval: 60_000,
   });
 
-  const [tab, setTab] = useState<"active" | "all" | "completed">("active");
+  const [tab, setTab] = useState<Tab>("active");
+  const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ active: null, all: null, completed: null });
+  const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    const index = TABS.indexOf(tab);
+    let next: Tab | null = null;
+    if (event.key === "ArrowRight") next = TABS[(index + 1) % TABS.length];
+    else if (event.key === "ArrowLeft") next = TABS[(index + TABS.length - 1) % TABS.length];
+    else if (event.key === "Home") next = TABS[0];
+    else if (event.key === "End") next = TABS[TABS.length - 1];
+    if (!next) return;
+    event.preventDefault();
+    setTab(next);
+    tabRefs.current[next]?.focus();
+  };
 
   const activeAssignments = (assignments ?? []).filter(
     (a) => a.status === "pending" || a.status === "overdue" || a.status === "awaiting_review"
@@ -60,20 +80,27 @@ export function StudentAssignmentsWidget({ userId, onNavigate, onStartExam, onSe
           <div>
             <h2 className="text-base font-bold text-white">Sinf topshiriqlari va uy vazifalari</h2>
             <p className="text-xs text-slate-400">
-              {isLoading || isError ? null : activeAssignments.length > 0
+              {isLoading || isError || !assignments ? null : activeAssignments.length > 0
                 ? `${activeAssignments.length} ta faol topshiriq mavjud`
-                : "Barcha topshiriqlar bajarilgan"}
+                : assignments.length > 0
+                ? "Barcha topshiriqlar bajarilgan"
+                : "Hozircha topshiriq berilmagan"}
             </p>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           {assignments && assignments.length > 0 && (
-            <div className="flex rounded-xl border border-white/10 bg-slate-900/60 p-0.5" role="tablist">
+            <div className="flex rounded-xl border border-white/10 bg-slate-900/60 p-0.5" role="tablist" aria-label="Topshiriqlar filtri">
               <button
                 type="button"
                 role="tab"
+                id="assignments-tab-active"
+                ref={(node) => { tabRefs.current.active = node; }}
                 aria-selected={tab === "active"}
+                aria-controls="assignments-panel"
+                tabIndex={tab === "active" ? 0 : -1}
+                onKeyDown={onTabKeyDown}
                 onClick={() => setTab("active")}
                 className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-all ${
                   tab === "active" ? "bg-emerald-500 text-slate-950 font-bold" : "text-slate-300 hover:text-white"
@@ -84,7 +111,12 @@ export function StudentAssignmentsWidget({ userId, onNavigate, onStartExam, onSe
               <button
                 type="button"
                 role="tab"
+                id="assignments-tab-all"
+                ref={(node) => { tabRefs.current.all = node; }}
                 aria-selected={tab === "all"}
+                aria-controls="assignments-panel"
+                tabIndex={tab === "all" ? 0 : -1}
+                onKeyDown={onTabKeyDown}
                 onClick={() => setTab("all")}
                 className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-all ${
                   tab === "all" ? "bg-emerald-500 text-slate-950 font-bold" : "text-slate-300 hover:text-white"
@@ -95,7 +127,12 @@ export function StudentAssignmentsWidget({ userId, onNavigate, onStartExam, onSe
               <button
                 type="button"
                 role="tab"
+                id="assignments-tab-completed"
+                ref={(node) => { tabRefs.current.completed = node; }}
                 aria-selected={tab === "completed"}
+                aria-controls="assignments-panel"
+                tabIndex={tab === "completed" ? 0 : -1}
+                onKeyDown={onTabKeyDown}
                 onClick={() => setTab("completed")}
                 className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-all ${
                   tab === "completed" ? "bg-emerald-500 text-slate-950 font-bold" : "text-slate-300 hover:text-white"
@@ -141,7 +178,7 @@ export function StudentAssignmentsWidget({ userId, onNavigate, onStartExam, onSe
       )}
 
       {!isLoading && !isError && assignments && assignments.length > 0 && (
-        <div className="space-y-3">
+        <div className="space-y-3" role="tabpanel" id="assignments-panel" aria-labelledby={`assignments-tab-${tab}`}>
           {displayedAssignments.length === 0 ? (
             <p className="text-xs text-slate-400 text-center py-4">
               Ushbu bo‘limda topshiriqlar mavjud emas.
@@ -164,10 +201,10 @@ export function StudentAssignmentsWidget({ userId, onNavigate, onStartExam, onSe
                         <StatusBadge variant="amber">Tekshirilmoqda</StatusBadge>
                       )}
                       {task.status === "passed" && (
-                        <StatusBadge variant="brand">Bajarildi ({task.score_percent}%)</StatusBadge>
+                        <StatusBadge variant="brand">Bajarildi{scoreSuffix(task.score_percent)}</StatusBadge>
                       )}
                       {task.status === "failed" && (
-                        <StatusBadge variant="danger">O‘tmadi ({task.score_percent}%)</StatusBadge>
+                        <StatusBadge variant="danger">O‘tmadi{scoreSuffix(task.score_percent)}</StatusBadge>
                       )}
                       {task.status === "pending" && (
                         <StatusBadge variant="info">Faol</StatusBadge>
