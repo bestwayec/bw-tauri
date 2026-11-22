@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { get, patch, post } from "../lib/api";
+import { downloadBlob, get, patch, post } from "../lib/api";
+import { IMPORT_ACCEPT, MAX_IMPORT_BYTES, duplicateIndexes, mergeWithoutDuplicates, readFileText, spreadsheetToParserText } from "../lib/vocabulary-import";
 import { getAppLanguage } from "../lib/ui-prefs";
 import type {
   ClassroomAssignment, ClassroomAssignmentInput, GroupListItem,
@@ -28,10 +29,13 @@ function CollectionForm({ collection, onSaved, onCancel }: {
   const [paste, setPaste] = useState("");
   const [preview, setPreview] = useState(false);
   const [index, setIndex] = useState<number | null>(null);
+  const [importNote, setImportNote] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const duplicates = useMemo(() => duplicateIndexes(words), [words]);
 
   const parsed = useMutation({
-    mutationFn: () => post<{ words: Array<{ english: string; uzbek: string; context_sentence?: string; part_of_speech?: string }> }>(
-      "/v1/vocabulary/sets/parse-text", { rawText: paste },
+    mutationFn: (text: string = paste) => post<{ words: Array<{ english: string; uzbek: string; context_sentence?: string; part_of_speech?: string }> }>(
+      "/v1/vocabulary/sets/parse-text", { rawText: text },
     ),
   });
   const save = useMutation({
@@ -53,7 +57,7 @@ function CollectionForm({ collection, onSaved, onCancel }: {
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (save.isPending || !title.trim() || !words.length) return;
+    if (save.isPending || !title.trim() || !words.length || duplicates.size > 0) return;
     if (!preview) setPreview(true);
     else save.mutate();
   }
@@ -76,15 +80,33 @@ function CollectionForm({ collection, onSaved, onCancel }: {
         <label className="grid gap-1">Paste words
           <textarea className={control} rows={4} value={paste} placeholder="apple - olma" onChange={event => { setPaste(event.target.value); parsed.reset(); }} />
         </label>
-        <button className={control} type="button" disabled={!paste.trim() || parsed.isPending} onClick={() => parsed.mutate()}>Preview pasted words</button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button className={control} type="button" disabled={!paste.trim() || parsed.isPending} onClick={() => parsed.mutate(paste)}>Preview pasted words</button>
+          <input ref={fileRef} type="file" accept={IMPORT_ACCEPT} className="sr-only" aria-label="Import CSV, TSV or TXT"
+            onChange={async event => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (!file) return;
+              if (/\.xlsx?$/i.test(file.name)) { setImportNote("Excel files are not read directly. Save the sheet as CSV, or copy the two columns and paste them."); return; }
+              if (file.size > MAX_IMPORT_BYTES) { setImportNote("The file is larger than 512 KB. Split it into smaller lists."); return; }
+              setImportNote(null);
+              const text = spreadsheetToParserText(file.name, await readFileText(file));
+              setPaste(text);
+              parsed.mutate(text);
+            }} />
+          <button className={control} type="button" disabled={parsed.isPending} onClick={() => fileRef.current?.click()}>Import CSV / TSV / TXT</button>
+        </div>
+        {importNote && <p role="alert">{importNote}</p>}
         {parsed.isError && <p role="alert">{message(parsed.error)}</p>}
         {parsed.data && <div className="space-y-2">
           <ul className="max-h-36 overflow-y-auto">{parsed.data.words.map((word, i) => <li key={i}>{word.english} — {word.uzbek}</li>)}</ul>
           <button type="button" className={control} disabled={!parsed.data.words.length || words.length + parsed.data.words.length > 500} onClick={() => {
-            setWords(previous => [...previous, ...(parsed.data?.words ?? []).map(word => ({
+            const merged = mergeWithoutDuplicates(words, (parsed.data?.words ?? []).map(word => ({
               english: word.english, uzbek: word.uzbek,
               contextSentence: word.context_sentence, partOfSpeech: word.part_of_speech,
-            }))]);
+            })));
+            setWords(merged.words);
+            setImportNote(merged.skipped ? `${merged.skipped} duplicate word(s) already in the list were skipped.` : null);
             setPaste(""); parsed.reset(); setPreview(false);
           }}>Add {parsed.data.words.length} words</button>
         </div>}
@@ -96,7 +118,8 @@ function CollectionForm({ collection, onSaved, onCancel }: {
         }}>Add word</button>
         <ul className="max-h-72 divide-y divide-white/10 overflow-y-auto">
           {words.map((word, i) => <li className="flex flex-wrap justify-between gap-2 py-2" key={word.id ?? i}>
-            <span>{word.english || "New word"} — {word.uzbek || "Translation required"}</span>
+            <span>{word.english || "New word"} — {word.uzbek || "Translation required"}
+              {duplicates.has(i) && <span className="ml-2 rounded bg-amber-500/20 px-1.5 text-xs font-semibold text-amber-200">Duplicate</span>}</span>
             <div className="flex gap-2">
               <button className={control} type="button" onClick={() => setIndex(index === i ? null : i)} aria-expanded={index === i}>Edit word</button>
               <button className={control} type="button" onClick={() => {
@@ -124,10 +147,11 @@ function CollectionForm({ collection, onSaved, onCancel }: {
         </fieldset>}
       </div>
 
+      {duplicates.size > 0 && <p role="alert">{duplicates.size} highlighted row(s) repeat an earlier word with the same translation. Remove or edit them before saving.</p>}
       {preview && <p role="status">Review the {words.length} words above before saving.</p>}
       {save.isError && <p role="alert">{message(save.error)}</p>}
       <div className="flex flex-wrap gap-2">
-        <button className="btn-brand px-4 py-2 disabled:opacity-50" disabled={save.isPending || !title.trim() || !words.length || words.some(word => !word.english.trim() || !word.uzbek.trim())}>
+        <button className="btn-brand px-4 py-2 disabled:opacity-50" disabled={save.isPending || !title.trim() || !words.length || duplicates.size > 0 || words.some(word => !word.english.trim() || !word.uzbek.trim())}>
           {save.isPending ? "Saving…" : !preview ? "Preview collection" : collection ? "Save changes" : "Publish collection"}
         </button>
         <button className={control} type="button" disabled={save.isPending} onClick={onCancel}>Cancel</button>
@@ -153,10 +177,22 @@ function CollectionAssignments({ collection, userId }: { collection: Summary; us
     queryFn: () => get<ClassroomAssignment[]>(groupPath + "/assignments"),
     enabled: Boolean(groupId),
   });
+  const reportPath = groupPath + "/assignments/" + encodeURIComponent(reportId) + "/vocabulary-results";
   const report = useQuery({
     queryKey: ["studio-results", userId, groupId, reportId, reportPage, reportSearch],
-    queryFn: () => get<VocabularyAssignmentReports>(groupPath + "/assignments/" + encodeURIComponent(reportId) + "/vocabulary-results", { page: reportPage, search: reportSearch }),
+    queryFn: () => get<VocabularyAssignmentReports>(reportPath, { page: reportPage, search: reportSearch }),
     enabled: Boolean(groupId && reportId),
+  });
+  const exportReport = useMutation({
+    mutationFn: (format: "csv" | "xlsx") => downloadBlob(reportPath + "?download=" + format),
+    onSuccess: ({ blob, filename }, format) => {
+      const source = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = source;
+      anchor.download = filename || `vocabulary-results.${format}`;
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(source), 0);
+    },
   });
   const assign = useMutation({
     mutationFn: (body: ClassroomAssignmentInput) => post<ClassroomAssignment>(groupPath + "/assignments", body),
@@ -192,7 +228,18 @@ function CollectionAssignments({ collection, userId }: { collection: Summary; us
         </li>
       ))}</ul>
       {report.data && !report.isError && <div className="space-y-2">
-        <p>{report.data.completedCount} / {report.data.assignedCount} completed · {report.data.overdueCount} overdue</p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p>{report.data.completedCount} / {report.data.assignedCount} completed · {report.data.overdueCount} overdue</p>
+          <div className="flex gap-2">
+            <button className={control} type="button" disabled={exportReport.isPending} onClick={() => exportReport.mutate("csv")}>
+              {exportReport.isPending ? "…" : "CSV"}
+            </button>
+            <button className={control} type="button" disabled={exportReport.isPending} onClick={() => exportReport.mutate("xlsx")}>
+              {exportReport.isPending ? "…" : "XLSX"}
+            </button>
+          </div>
+        </div>
+        {exportReport.isError && <p role="alert">{message(exportReport.error)}</p>}
         <label className="grid gap-1">Search results
             <input className={control} value={reportSearch} onChange={event => { setReportSearch(event.target.value); setReportPage(1); }} />
           </label>

@@ -5,12 +5,14 @@ import { get } from "@/lib/api";
 import type { GroupListItem } from "@/lib/group-contract.generated";
 import type { SubmissionPage } from "./GradingQueue";
 import { getAppLanguage } from "@/lib/ui-prefs";
+import { StatCard } from "@/components/common/StatCard";
+import { EmptyState } from "@/components/common/EmptyState";
 
 interface Props {
   teacherName: string | null;
   userId: string;
   onNavigate: (route: Route) => void;
-  onOpenClassroom: (groupId: string) => void;
+  onOpenClassroom: (groupId: string, section?: "roster" | "attendance" | "tasks") => void;
 }
 
 function greeting(name: string | null): string {
@@ -80,70 +82,39 @@ export default function TeacherDashboard({ teacherName, userId, onNavigate, onOp
 
       {/* KPI Cards */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="flex items-center justify-between rounded-2xl border border-emerald-500/15 bg-[#111827] p-5 shadow-sm">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Faol Sinflar</p>
-            <p className="mt-1 text-2xl font-black text-white tabular-nums">
-              {groupsQuery.isLoading ? "…" : groupsQuery.isError ? "—" : groups.length}
-            </p>
-            {groupsQuery.isError ? (
-              <button
-                type="button"
-                onClick={() => void groupsQuery.refetch()}
-                className="mt-0.5 text-[10px] text-red-300 underline font-semibold"
-              >
-                Yuklab bo‘lmadi · Qayta urinish ⟳
-              </button>
-            ) : (
-              <p className="mt-0.5 text-[11px] text-slate-400">O‘quv guruhlari</p>
-            )}
-          </div>
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-lg">
-            🏫
-          </span>
-        </div>
+        <StatCard
+          label="Faol Sinflar"
+          value={groups.length}
+          isLoading={groupsQuery.isLoading}
+          isError={groupsQuery.isError}
+          onRetry={() => void groupsQuery.refetch()}
+          sub={groupsQuery.isError ? undefined : "O‘quv guruhlari"}
+          icon="🏫"
+        />
 
-        <div className="flex items-center justify-between rounded-2xl border border-emerald-500/15 bg-[#111827] p-5 shadow-sm">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Jami O‘quvchilar</p>
-            <p className="mt-1 text-2xl font-black text-emerald-400 tabular-nums">
-              {groupsQuery.isLoading ? "…" : groupsQuery.isError ? "—" : totalStudents}
-            </p>
-            {groupsQuery.isError ? (
-              <p className="mt-0.5 text-[10px] text-slate-400">Guruhlar yuklanmadi</p>
-            ) : (
-              <p className="mt-0.5 text-[11px] text-slate-400">Biriktirilgan talabalar</p>
-            )}
-          </div>
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-lg">
-            👥
-          </span>
-        </div>
+        <StatCard
+          label="Jami O‘quvchilar"
+          value={totalStudents}
+          isLoading={groupsQuery.isLoading}
+          isError={groupsQuery.isError}
+          accent={true}
+          sub={groupsQuery.isError ? "Guruhlar yuklanmadi" : "Biriktirilgan talabalar"}
+          icon="👥"
+        />
 
-        <div className="flex items-center justify-between rounded-2xl border border-emerald-500/15 bg-[#111827] p-5 shadow-sm">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Tekshirish Navbati</p>
-            <p className={`mt-1 text-2xl font-black tabular-nums ${gradingQuery.isError ? "text-red-400" : pendingCount > 0 ? "text-amber-400" : "text-white"}`}>
-              {gradingQuery.isLoading ? "…" : gradingQuery.isError ? "—" : pendingCount}
-            </p>
-            {gradingQuery.isError ? (
-              <button
-                type="button"
-                onClick={() => void gradingQuery.refetch()}
-                className="mt-0.5 text-[10px] text-red-300 underline font-semibold"
-              >
-                Xatolik · Qayta urinish ⟳
-              </button>
-            ) : (
-              <p className="mt-0.5 text-[11px] text-slate-400">Writing & Speaking ishlari</p>
-            )}
-          </div>
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-500/10 border border-amber-500/20 text-lg">
-            📝
-          </span>
-        </div>
+        <StatCard
+          label="Tekshirish Navbati"
+          value={pendingCount}
+          isLoading={gradingQuery.isLoading}
+          isError={gradingQuery.isError}
+          onRetry={() => void gradingQuery.refetch()}
+          retryLabel="Xatolik · Qayta urinish ⟳"
+          sub={gradingQuery.isError ? undefined : "Writing & Speaking ishlari"}
+          accent={pendingCount > 0}
+          icon="📝"
+        />
 
-        <div className="flex items-center justify-between rounded-2xl border border-emerald-500/15 bg-[#111827] p-5 shadow-sm">
+        <div className="workspace-panel flex items-center justify-between p-5 shadow-sm">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Lug‘at Studiyasi</p>
             <p className="mt-1 text-2xl font-black text-white tabular-nums">To‘plamlar</p>
@@ -199,19 +170,15 @@ export default function TeacherDashboard({ teacherName, userId, onNavigate, onOp
           )}
 
           {!groupsQuery.isLoading && !groupsQuery.isError && groups.length === 0 && (
-            <div className="rounded-2xl border border-white/10 bg-[#111827] p-8 text-center space-y-3">
-              <p className="text-sm font-semibold text-slate-200">Hozircha biriktirilgan sinf yo‘q</p>
-              <p className="text-xs text-slate-400">
-                O‘quvchilaringiz uchun yangi guruh yarating va taklif kodini ulashing.
-              </p>
-              <button
-                type="button"
-                onClick={() => onNavigate("groups")}
-                className="btn-brand rounded-xl px-4 py-2 text-xs font-bold text-slate-950"
-              >
-                Guruh ochish
-              </button>
-            </div>
+            <EmptyState
+              icon="🏫"
+              title="Hozircha biriktirilgan sinf yo‘q"
+              description="O‘quvchilaringiz uchun yangi guruh yarating va taklif kodini ulashing."
+              action={{
+                label: "Guruh ochish",
+                onClick: () => onNavigate("groups"),
+              }}
+            />
           )}
 
           {groupsQuery.isSuccess && groups.length > 0 && <>
@@ -240,14 +207,32 @@ export default function TeacherDashboard({ teacherName, userId, onNavigate, onOp
                     </p>
                   </div>
 
-                  <div className="mt-4 flex items-center justify-between pt-3 border-t border-white/5">
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-white/5">
                     <button
                       type="button"
                       onClick={() => onOpenClassroom(group.id)}
-                      className="workspace-control font-semibold"
+                      className="workspace-control font-semibold text-xs"
                     >
                       {english ? "Open classroom" : "Guruhni ochish"}
                     </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => onOpenClassroom(group.id, "attendance")}
+                        className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-medium text-slate-300 hover:border-emerald-500/30 hover:text-emerald-300 transition-all"
+                        title={english ? "Open attendance" : "Davomatni ochish"}
+                      >
+                        📋 {english ? "Attendance" : "Davomat"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onOpenClassroom(group.id, "tasks")}
+                        className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-medium text-slate-300 hover:border-emerald-500/30 hover:text-emerald-300 transition-all"
+                        title={english ? "Open assignments" : "Vazifalarni ochish"}
+                      >
+                        📝 {english ? "Tasks" : "Vazifalar"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}

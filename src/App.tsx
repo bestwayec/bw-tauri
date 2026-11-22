@@ -36,6 +36,7 @@ import ReauthModal from "@/components/ReauthModal";
 import { getDismissedVersion, resolveDesktopUpdate, type UpdateInfo } from "@/lib/version";
 import ClickSpark from "@/components/ClickSpark";
 import CrashRecovery from "@/components/CrashRecovery";
+import { SessionPersistenceNotice } from "@/components/SessionPersistenceNotice";
 import ResumeExamModal, { persistActiveMockSession, persistActiveTestSession, clearActiveMockSession } from "@/components/ResumeExamModal";
 import { logout } from "@/lib/api";
 import { purgeAccountOfflineVocabulary } from "@/lib/offline-vocabulary";
@@ -107,8 +108,11 @@ export default function App() {
   const queryClient = useQueryClient();
   const programs = usePrograms();
   const [route, setRoute] = useState<Route>("login");
-  const [classroomTarget, setClassroomTarget] = useState<{ userId: string; groupId: string } | null>(null);
+  const [classroomTarget, setClassroomTarget] = useState<{ userId: string; groupId: string; section?: "roster" | "attendance" | "tasks" } | null>(null);
+  // Scoped to the account that chose it so a deep link never follows a user switch.
+  const [vocabularyTarget, setVocabularyTarget] = useState<{ userId: string; assignmentId: string } | null>(null);
   const [student, setStudent] = useState<Student | null>(null);
+  const vocabularyAssignmentId = vocabularyTarget && vocabularyTarget.userId === student?.id ? vocabularyTarget.assignmentId : undefined;
   const [, setRestoring] = useState(true);
   const [activeTest, setActiveTest] = useState<TestListItem | null>(null);
   const [activeStart, setActiveStart] = useState<StartResult | null>(null);
@@ -547,6 +551,7 @@ export default function App() {
           </div>
         ) : (
           <ClickSpark sparkColor="#10B981" sparkSize={10} sparkRadius={22} sparkCount={8} duration={420} className="flex min-h-0 flex-1 flex-col">
+          <SessionPersistenceNotice />
           <main className="min-h-0 flex-1 overflow-y-auto px-6 pb-8 pt-6 2xl:px-10">
             <motion.div
               key={`${student?.id}:${activeRoute}:${activeRoute === "result" ? historyKey : ""}`}
@@ -561,18 +566,26 @@ export default function App() {
                     teacherName={student?.name ?? null}
                     userId={student?.id ?? ""}
                     onNavigate={navigate}
-                    onOpenClassroom={(groupId) => {
+                    onOpenClassroom={(groupId, section) => {
                       if (!student) return;
-                      setClassroomTarget({ userId: student.id, groupId });
+                      setClassroomTarget({ userId: student.id, groupId, section });
                       navigate("groups");
                     }}
                   />
                 ) : (
                   <Dashboard
                     studentName={student?.name ?? null}
-                    onNavigate={navigate}
+                    onNavigate={(r) => {
+                      if (r === "vocabulary") setVocabularyTarget(null);
+                      navigate(r);
+                    }}
                     onStart={handleStartExam}
                     onStartMock={handleStartMock}
+                    onSelectVocabulary={(assignmentId) => {
+                      if (!student) return;
+                      setVocabularyTarget({ userId: student.id, assignmentId });
+                      navigate("vocabulary");
+                    }}
                   />
                 )
               )}
@@ -583,7 +596,13 @@ export default function App() {
                   onStartMock={handleStartMock}
                 />
               )}
-              {activeRoute === "vocabulary" && student?.role === "student" && <Vocabulary key={student.id} userId={student.id} />}
+              {activeRoute === "vocabulary" && student?.role === "student" && (
+                <Vocabulary
+                  key={`${student.id}-${vocabularyAssignmentId ?? "all"}`}
+                  userId={student.id}
+                  initialAssignmentId={vocabularyAssignmentId}
+                />
+              )}
               {activeRoute === "vocabulary" && student && isStaffRole(student.role) && <VocabularyStudio key={student.id} userId={student.id} />}
               {activeRoute === "history" && (
                 <History refreshKey={historyKey} onStats={setStats} />
@@ -591,8 +610,15 @@ export default function App() {
               {activeRoute === "examTrack" && <ExamTrack onBrowse={() => navigate('exams')} />}
               {activeRoute === "proctoring" && <LiveProctoring />}
               {activeRoute === "grading" && student && <GradingQueue key={student.id} userId={student.id} />}
-              {activeRoute === "groups" && student && <GroupsResults key={student.id} userId={student.id} role={student.role}
-                initialGroupId={classroomTarget?.userId === student.id ? classroomTarget.groupId : undefined} />}
+              {activeRoute === "groups" && student && (
+                <GroupsResults
+                  key={classroomTarget?.userId === student.id ? `${student.id}-${classroomTarget.groupId}` : student.id}
+                  userId={student.id}
+                  role={student.role}
+                  initialGroupId={classroomTarget?.userId === student.id ? classroomTarget.groupId : undefined}
+                  initialSection={classroomTarget?.userId === student.id ? classroomTarget.section : undefined}
+                />
+              )}
               {activeRoute === "centerOverview" && <CenterOverview onNavigate={navigate} />}
               {activeRoute === "studentResults" && <StudentResults />}
               {activeRoute === "profile" && (

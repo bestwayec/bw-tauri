@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClassroomSchedule } from "../components/ClassroomSchedule";
 import { UnifiedStudentProfileModal } from "../components/UnifiedStudentProfileModal";
@@ -17,7 +17,17 @@ function errorMessage(error: unknown) {
   return "So‘rov bajarilmadi. Qayta urinib ko‘ring.";
 }
 
-export default function GroupsResults({ userId, role, initialGroupId = "" }: { userId: string; role?: string; initialGroupId?: string }) {
+export default function GroupsResults({
+  userId,
+  role,
+  initialGroupId = "",
+  initialSection,
+}: {
+  userId: string;
+  role?: string;
+  initialGroupId?: string;
+  initialSection?: "roster" | "attendance" | "tasks";
+}) {
   const queryClient = useQueryClient();
   const [archived, setArchived] = useState(false);
   const [groupSearch, setGroupSearch] = useState("");
@@ -26,6 +36,18 @@ export default function GroupsResults({ userId, role, initialGroupId = "" }: { u
   const groups = useQuery({ queryKey: listKey, queryFn: ({ signal }) => get<GroupListItem[]>("/v1/groups", { archived, search: groupSearch }, { signal }) });
   const [selected, setSelected] = useState(initialGroupId);
   const groupId = groups.data?.find(group => group.id === selected)?.id ?? groups.data?.[0]?.id;
+
+  useEffect(() => {
+    if (initialSection) {
+      const timer = window.setTimeout(() => {
+        const target = document.getElementById(`classroom-${initialSection}`);
+        if (target) {
+          target.scrollIntoView({ behavior: "smooth" });
+        }
+      }, 150);
+      return () => window.clearTimeout(timer);
+    }
+  }, [initialSection, groupId]);
   const groupPath = `/v1/groups/${encodeURIComponent(groupId ?? "")}`;
   const detail = useQuery({
     queryKey: ["group-detail", userId, groupId],

@@ -9,6 +9,20 @@ mod tray;
 mod update_probe;
 mod video_stream;
 
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::sync::{Mutex, MutexGuard};
+
+    static NATIVE_CREDENTIALS: Mutex<()> = Mutex::new(());
+
+    /// Tests that read or write the real OS credential store run one at a time.
+    pub(crate) fn native_credential_lock() -> MutexGuard<'static, ()> {
+        NATIVE_CREDENTIALS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{Emitter, Manager};

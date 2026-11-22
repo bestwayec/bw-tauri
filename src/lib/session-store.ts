@@ -121,6 +121,8 @@ interface SessionState {
   accessToken: string | null;
   deviceId: string;
   profile: StoredProfile | null;
+  /** `memory_only`: this device has no usable OS credential store; the user must sign in after restart. */
+  persistence: "native" | "memory_only" | "browser";
   initialize: () => Promise<void>;
   setSession: (input: {
     accessToken: string;
@@ -258,12 +260,13 @@ function parseProfile(json: string | null): StoredProfile | null {
 export const useSessionStore = create<SessionState>()((set, get) => {
   async function persist(accessToken: string | null, refreshToken: string | null | undefined, profile: StoredProfile | null, deviceId = get().deviceId) {
     if (isTauriRuntime()) {
-      await rustSessionSet({
+      const persistence = await rustSessionSet({
         access_token: accessToken,
         refresh_token: refreshToken ?? null,
         device_id: deviceId,
         profile_json: profile ? JSON.stringify(profile) : null,
       }, refreshToken === undefined);
+      if (persistence) set({ persistence });
     } else if (accessToken === null) {
       await secureRemoveItemAsync(ACCESS_KEY);
       await secureRemoveItemAsync(REFRESH_KEY);
@@ -282,6 +285,7 @@ export const useSessionStore = create<SessionState>()((set, get) => {
 
   return {
     status: "booting",
+    persistence: isTauriRuntime() ? "native" : "browser",
     online: typeof navigator === "undefined" ? true : navigator.onLine,
     accessToken: null,
     deviceId: ensureDeviceId(),
@@ -326,6 +330,7 @@ export const useSessionStore = create<SessionState>()((set, get) => {
           const stored = await rustSessionGet();
           access = stored?.access_token ?? null;
           if (stored?.device_id) set({ deviceId: stored.device_id });
+          if (stored?.persistence) set({ persistence: stored.persistence });
           profile = parseProfile(stored?.profile_json ?? null);
         } catch {
           access = null;

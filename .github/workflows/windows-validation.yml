@@ -33,7 +33,7 @@ jobs:
           workspaces: src-tauri -> target
       - run: npm ci --include=dev
       - run: npm test
-      - run: node --test tools/release-platforms.test.mjs tools/validate-release.test.mjs
+      - run: node --test tools/release-platforms.test.mjs tools/validate-release.test.mjs tools/windows-validation.test.mjs
       - run: npm run build
       - run: cargo check --locked
         working-directory: src-tauri
@@ -77,14 +77,73 @@ jobs:
               throw 'The Bestway Exam window did not appear'
             }
             $startup.Stop()
-            Start-Sleep -Seconds 3
-            $app.Refresh()
-            if ($app.HasExited) { throw 'App exited shortly after window creation' }
-            $webviews = @(Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe' AND ParentProcessId = $($app.Id)")
-            if (!$webviews.Count) { throw 'WebView2 child process did not start' }
-            $metrics = "Commit $env:GITHUB_SHA; first window $($startup.ElapsedMilliseconds) ms; app working set $([Math]::Round($app.WorkingSet64 / 1MB, 1)) MiB; WebView2 children $($webviews.Count)"
+
+            # Poll for WebView2 child processes (direct, indirect descendants, or attributed by command line)
+            $wvTimer = [Diagnostics.Stopwatch]::StartNew()
+            $webviews = @()
+            do {
+              Start-Sleep -Milliseconds 500
+              $app.Refresh()
+              if ($app.HasExited) { throw "App exited shortly after window creation with $($app.ExitCode)" }
+
+              $allProcs = @(Get-CimInstance Win32_Process)
+              $descendantPids = [System.Collections.Generic.HashSet[int]]::new()
+              $queue = [System.Collections.Generic.Queue[int]]::new()
+              $queue.Enqueue($app.Id)
+              while ($queue.Count -gt 0) {
+                $curr = $queue.Dequeue()
+                foreach ($p in $allProcs) {
+                  if ($p.ParentProcessId -eq $curr -and !$descendantPids.Contains($p.ProcessId)) {
+                    [void]$descendantPids.Add($p.ProcessId)
+                    $queue.Enqueue($p.ProcessId)
+                  }
+                }
+              }
+
+              $webviews = @($allProcs | Where-Object {
+                $_.Name -eq 'msedgewebview2.exe' -and (
+                  $_.ParentProcessId -eq $app.Id -or
+                  $descendantPids.Contains($_.ProcessId) -or
+                  ($_.CommandLine -and ($_.CommandLine -like "*bestway-app.exe*" -or $_.CommandLine -like "*uz.bestwayec.app*"))
+                )
+              })
+              if ($webviews.Count -gt 0) { break }
+            } while ($wvTimer.Elapsed.TotalSeconds -lt 30)
+
+            if (!$webviews.Count) {
+              Write-Warning "App PID: $($app.Id); HasExited: $($app.HasExited); WorkingSet: $($app.WorkingSet64)"
+              $allWv = @(Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'")
+              Write-Warning "Running msedgewebview2 processes: $($allWv.Count)"
+              foreach ($w in $allWv) {
+                Write-Warning "PID=$($w.ProcessId), Parent=$($w.ParentProcessId), CmdLine=$($w.CommandLine)"
+              }
+              throw 'WebView2 child process did not start within 30 seconds'
+            }
+
+            # Verify real application working set and startup evidence
+            $appWorkingSetMb = [Math]::Round($app.WorkingSet64 / 1MB, 1)
+            if ($app.WorkingSet64 -lt 10MB) {
+              throw "App working set memory too low ($appWorkingSetMb MiB), indicating stub or incomplete load"
+            }
+
+            $metrics = "Commit $env:GITHUB_SHA; first window $($startup.ElapsedMilliseconds) ms; app working set $appWorkingSetMb MiB; WebView2 children $($webviews.Count) (ready in $($wvTimer.ElapsedMilliseconds) ms)"
             Write-Host $metrics
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $metrics
+
+            # Inspect startup log if available
+            $logDirs = @(
+              Join-Path $env:APPDATA 'uz.bestwayec.app\logs',
+              Join-Path $env:LOCALAPPDATA 'uz.bestwayec.app\logs'
+            )
+            foreach ($dir in $logDirs) {
+              if (Test-Path $dir) {
+                $logFiles = Get-ChildItem -Path $dir -Filter "app-*.log"
+                foreach ($lf in $logFiles) {
+                  Write-Host "Log content from $($lf.Name):"
+                  Get-Content $lf.FullName | Write-Host
+                }
+              }
+            }
           } finally {
             if (!$app.HasExited) { Stop-Process -Id $app.Id -Force }
           }

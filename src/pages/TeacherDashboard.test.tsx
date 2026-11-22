@@ -129,5 +129,7 @@ describe("TeacherDashboard", () => {
     expect(html).toContain("Ali Valiyev");
     expect(html).toContain("15 o‘quvchi");
     expect(html).toContain("71 ta");
+    expect(html).toContain("Davomat");
+    expect(html).toContain("Vazifalar");
   });
 });
