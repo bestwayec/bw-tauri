@@ -74,6 +74,31 @@ describe('offline exam cache', () => {
     expect(await offline.resolvePendingAnswers('matt-1', [{ questionId: 'q-9', response: 'unknown' }])).toBe(0);
   });
 
+  it('removes an acknowledged answer even when its mirror write is still queued', async () => {
+    const offline = await freshModule();
+    const writing = offline.cacheAnswer('matt-1', 'q-1', 'accepted');
+    const resolving = offline.resolvePendingAnswers('matt-1', [{ questionId: 'q-1', response: 'accepted' }]);
+    expect(await writing).toBe(true);
+    expect(await resolving).toBe(1);
+    expect(await offline.readPendingAnswers('matt-1')).toEqual([]);
+  });
+
+  it('keeps an unacknowledged newer queued write and other attempts', async () => {
+    const offline = await freshModule();
+    await offline.cacheAnswer('matt-1', 'q-1', 'accepted');
+    await offline.cacheAnswer('other', 'q-1', 'other answer');
+    const writing = offline.cacheAnswer('matt-1', 'q-1', 'new edit');
+    const resolving = offline.resolvePendingAnswers('matt-1', [{ questionId: 'q-1', response: 'accepted' }]);
+    expect(await writing).toBe(true);
+    expect(await resolving).toBe(0);
+    expect(await offline.readPendingAnswers('matt-1')).toEqual([
+      expect.objectContaining({ questionId: 'q-1', response: 'new edit' }),
+    ]);
+    expect(await offline.readPendingAnswers('other')).toEqual([
+      expect.objectContaining({ questionId: 'q-1', response: 'other answer' }),
+    ]);
+  });
+
   it('reads the mirrored answers back for the runner to restore', async () => {
     const offline = await freshModule();
     await offline.cacheAnswer('matt-1', 'q-2', 'Second');

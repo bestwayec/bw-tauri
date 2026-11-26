@@ -110,6 +110,12 @@ export async function resolvePendingAnswers(
   acknowledged: Array<{ questionId: string; response: string }>,
 ): Promise<number> {
   const synced = new Map(acknowledged.map(answer => [answer.questionId, answer.response]));
+  // A fast server acknowledgement can arrive before the async local mirror
+  // commits. Wait for writes already queued for the acknowledged questions,
+  // then compare-and-delete only the exact value the server accepted.
+  await Promise.all([...synced.keys()].map(questionId =>
+    answerWrites.get(`${attemptId}:${questionId}`)?.catch(() => false),
+  ));
   const pending = await offlineList(answersNamespace(attemptId));
   let removed = 0;
   for (const entry of pending) {
