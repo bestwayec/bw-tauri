@@ -2,11 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AUDIO_CAPTURE_CONSTRAINTS,
   audioCaptureSupported,
+  listAudioInputDevices,
   microphoneTrack,
   openMicrophone,
   processingApplied,
   processingFlags,
   processingSummary,
+  selectSupportedAudioMimeType,
+  supportedAudioCodecs,
 } from "./audio-capture";
 
 function fakeTrack(settings: unknown, options: { throwOnGetSettings?: boolean } = {}) {
@@ -166,5 +169,67 @@ describe("audio processing reporting", () => {
         },
       } as unknown as MediaStream),
     ).toBeNull();
+  });
+});
+
+describe("device enumeration and codec support", () => {
+  it("lists audioinput devices with fallback labels and tolerates errors", async () => {
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        enumerateDevices: vi.fn().mockResolvedValue([
+          { kind: "videoinput", deviceId: "cam-1", label: "Camera" },
+          { kind: "audioinput", deviceId: "mic-1", label: "USB Headset" },
+          { kind: "audioinput", deviceId: "mic-2", label: "" },
+        ]),
+      },
+    });
+    await expect(listAudioInputDevices()).resolves.toEqual([
+      { deviceId: "mic-1", label: "USB Headset" },
+      { deviceId: "mic-2", label: "Microphone 2" },
+    ]);
+
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        enumerateDevices: vi.fn().mockRejectedValue(new Error("blocked")),
+      },
+    });
+    await expect(listAudioInputDevices()).resolves.toEqual([]);
+  });
+
+  it("selects the first supported MediaRecorder MIME type", () => {
+    vi.stubGlobal("MediaRecorder", {
+      isTypeSupported: (mime: string) => mime === "audio/mp4",
+    });
+    expect(selectSupportedAudioMimeType()).toBe("audio/mp4");
+
+    vi.stubGlobal("MediaRecorder", {
+      isTypeSupported: () => false,
+    });
+    expect(selectSupportedAudioMimeType()).toBeUndefined();
+  });
+
+  it("passes exact deviceId constraint when opening a specific microphone", async () => {
+    const stream = { id: "specific-stream" } as unknown as MediaStream;
+    const getUserMedia = vi.fn().mockResolvedValue(stream);
+    stubMicrophone(getUserMedia);
+    await expect(openMicrophone("mic-99")).resolves.toBe(stream);
+    expect(getUserMedia).toHaveBeenCalledWith({
+      audio: {
+        deviceId: { exact: "mic-99" },
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    });
+  });
+
+  it("returns playable codecs when document audio element reports support", () => {
+    vi.stubGlobal("document", {
+      createElement: () => ({
+        canPlayType: (mime: string) => (mime.includes("mpeg") || mime.includes("wav") ? "probably" : ""),
+      }),
+    });
+    expect(supportedAudioCodecs()).toEqual(["mp3", "wav"]);
   });
 });

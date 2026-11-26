@@ -312,6 +312,7 @@ export async function clearAttemptCache(attemptId: string): Promise<void> {
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem(`examui.queue.${attemptId}`);
       const essayPrefix = `examui.essay.${attemptId}.`;
+      const audioPrefix = `examui.audio.${attemptId}:`;
       const marksPrefix = `examui.marks.`;
       const keys: string[] = [];
       for (let i = 0; i < localStorage.length; i++) {
@@ -319,7 +320,7 @@ export async function clearAttemptCache(attemptId: string): Promise<void> {
         if (k) keys.push(k);
       }
       for (const k of keys) {
-        if (k.startsWith(essayPrefix) || (k.startsWith(marksPrefix) && k.includes(`.${attemptId}`))) {
+        if (k.startsWith(essayPrefix) || k.startsWith(audioPrefix) || (k.startsWith(marksPrefix) && k.includes(`.${attemptId}`))) {
           localStorage.removeItem(k);
         }
       }

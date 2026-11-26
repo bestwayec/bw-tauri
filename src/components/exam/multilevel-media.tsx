@@ -2,7 +2,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { recordingKey, recoverRecording, retainRecording, releaseRecording, markActiveRecording } from '@/lib/durable-recordings';
 import { startFullSpeakingCapture } from '@/lib/speaking-capture';
-import { openMicrophone, processingSummary } from '@/lib/audio-capture';
+import { openMicrophone, processingSummary, selectSupportedAudioMimeType } from '@/lib/audio-capture';
+import { claimExclusiveAudio, releaseExclusiveAudio } from '@/components/exam-ui/ListeningEngine';
+import { getVolume, setVolume, VOLUME_EVENT } from '@/lib/volume';
 import Waveform from './Waveform';
 
 export interface MediaPhase { startedAt: string; prepEndsAt: string; expiresAt: string; plays: number; serverTime: string; playLimit: number; responseSeconds?: number; minDurationMs?: number; maxDurationMs?: number; timingPolicy?: 'FULL_RESPONSE_WINDOW_V1' }
@@ -15,13 +17,31 @@ export function MultilevelListening({ prepare, play, load }: {
   const [phase, setPhase] = useState<MediaPhase | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [buffering, setBuffering] = useState(false);
   const [left, setLeft] = useState(0);
   const [src, setSrc] = useState<string | null>(null);
+  const [vol, setVol] = useState(() => getVolume() / 100);
   const audio = useRef<HTMLAudioElement>(null);
   const offset = useRef(0);
   const blobUrl = useRef<string | null>(null);
   const [playing, setPlaying] = useState(false);
-  useEffect(() => () => { if (blobUrl.current) URL.revokeObjectURL(blobUrl.current); }, []);
+  useEffect(() => {
+    const onVol = (e: Event) => {
+      const next = (e as CustomEvent<number>).detail / 100;
+      setVol(next);
+      if (audio.current) audio.current.volume = next;
+    };
+    window.addEventListener(VOLUME_EVENT, onVol);
+    return () => window.removeEventListener(VOLUME_EVENT, onVol);
+  }, []);
+  useEffect(() => () => {
+    const el = audio.current;
+    if (el) {
+      try { el.pause(); el.removeAttribute('src'); el.load(); } catch { /* ignore */ }
+      releaseExclusiveAudio(el);
+    }
+    if (blobUrl.current) URL.revokeObjectURL(blobUrl.current);
+  }, []);
   useEffect(() => {
     if (!phase) return;
     const tick = () => { const remaining = seconds(playing ? phase.expiresAt : phase.prepEndsAt, offset.current); setLeft(remaining); if (playing && remaining === 0) setPlaying(false); };
@@ -40,18 +60,51 @@ export function MultilevelListening({ prepare, play, load }: {
       if (!blobUrl.current) { blobUrl.current = URL.createObjectURL(await load()); setSrc(blobUrl.current); }
       const el = audio.current;
       if (!el) throw new Error('Audio element unavailable');
+      claimExclusiveAudio(el);
+      el.volume = getVolume() / 100;
       el.src = blobUrl.current; el.currentTime = 0; await el.play(); setPlaying(true);
     } catch (e) { setError(e instanceof Error ? e.message : 'Audio failed to load or play. Contact your supervisor.'); }
     finally { setBusy(false); }
   }
+  async function retryLocalPlayback() {
+    const el = audio.current;
+    if (!el || !blobUrl.current) return;
+    setError(null);
+    try {
+      claimExclusiveAudio(el);
+      el.volume = getVolume() / 100;
+      await el.play();
+      setPlaying(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Audio failed to play. Check headphones and retry.');
+    }
+  }
   return <div className="my-3 space-y-2 rounded-lg border border-current/20 p-3">
-    <audio ref={audio} src={src ?? undefined} onEnded={() => setPlaying(false)} onError={() => setError('Audio failed to play. Contact your supervisor.')}><track kind="captions" /></audio>
+    <audio
+      ref={audio}
+      src={src ?? undefined}
+      onWaiting={() => setBuffering(true)}
+      onCanPlay={() => setBuffering(false)}
+      onPlaying={() => { setBuffering(false); setError(null); }}
+      onEnded={() => { setPlaying(false); setBuffering(false); releaseExclusiveAudio(audio.current); }}
+      onError={() => { setBuffering(false); setError('Audio failed to play. Check headphones or retry.'); }}
+    ><track kind="captions" /></audio>
     {!phase ? <button type="button" disabled={busy} onClick={() => void start()}>Preview this part</button> : <>
-      <p role="status">{playing ? 'Playing' : left > 0 ? 'Preview' : 'Ready'} · {left}s · {phase.plays}/{phase.playLimit} plays</p>
+      <p role="status">{playing ? (buffering ? 'Buffering…' : 'Playing') : left > 0 ? 'Preview' : 'Ready'} · {left}s · {phase.plays}/{phase.playLimit} plays</p>
       <button type="button" disabled={busy || playing || left > 0 || phase.plays >= phase.playLimit} onClick={() => void playAudio()}>Play audio</button>
     </>}
-    <label className="block text-sm">Volume <input aria-label="Audio volume" type="range" min="0" max="1" step="0.05" defaultValue="1" onChange={(e) => { if (audio.current) audio.current.volume = Number(e.target.value); }} /></label>
-    {busy && <p role="status">Loading audio…</p>}{error && <p role="alert">{error}</p>}
+    <label className="block text-sm">Volume <input aria-label="Audio volume" type="range" min="0" max="1" step="0.05" value={vol} onChange={(e) => { const v = Number(e.target.value); setVol(v); setVolume(Math.round(v * 100)); if (audio.current) audio.current.volume = v; }} /></label>
+    {busy && <p role="status">Loading audio…</p>}
+    {error && (
+      <div role="alert" className="flex flex-wrap items-center gap-2 text-xs text-red-300">
+        <span>{error}</span>
+        {blobUrl.current && !playing && (
+          <button type="button" onClick={() => void retryLocalPlayback()} className="underline font-semibold">
+            Retry playback
+          </button>
+        )}
+      </div>
+    )}
   </div>;
 }
 
@@ -156,8 +209,18 @@ export function MultilevelRecorder({ attemptId, questionId, timed, initialHasAud
     try {
     const next = grantedPhase.current;
     const duration = next?.responseSeconds ?? (next ? (Date.parse(next.expiresAt) - Date.parse(next.prepEndsAt)) / 1000 : 0);
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
-    const mr = new MediaRecorder(stream.current, { mimeType }); recorder.current = mr;
+    const mimeType = selectSupportedAudioMimeType();
+    const mr = mimeType ? new MediaRecorder(stream.current, { mimeType }) : new MediaRecorder(stream.current);
+    recorder.current = mr;
+    const track = stream.current.getAudioTracks()[0];
+    if (track) {
+      track.onended = () => {
+        if (mr.state === 'recording') {
+          capture.current?.cancel();
+          setError('Microphone disconnected during recording. Reconnect and start a new response.');
+        }
+      };
+    }
     capture.current = startFullSpeakingCapture(mr, duration, { complete: (blob) => {
       stage('finalizing'); closeMicrophone();
       retainedRef.current = blob; setPending(blob);

@@ -53,20 +53,101 @@ export function audioCaptureFailure(error: unknown): string {
   }
 }
 
+export interface AudioInputDevice {
+  deviceId: string;
+  label: string;
+}
+
+/**
+ * Enumerate available microphone input devices (best-effort; never throws).
+ */
+export async function listAudioInputDevices(): Promise<AudioInputDevice[]> {
+  try {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.enumerateDevices) return [];
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    return devices
+      .filter((d) => d.kind === "audioinput")
+      .map((d, idx) => ({
+        deviceId: d.deviceId,
+        label: d.label?.trim() || `Microphone ${idx + 1}`,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Select the first supported recording MIME type for MediaRecorder, or undefined
+ * to let the host runtime pick its default without throwing.
+ */
+export function selectSupportedAudioMimeType(): string | undefined {
+  try {
+    if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") {
+      return undefined;
+    }
+    const candidates = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4;codecs=mp4a.40.2",
+      "audio/mp4",
+      "audio/ogg;codecs=opus",
+    ];
+    for (const mime of candidates) {
+      if (MediaRecorder.isTypeSupported(mime)) return mime;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Report which common listening exam audio codecs the WebView/browser can decode.
+ */
+export function supportedAudioCodecs(): string[] {
+  try {
+    if (typeof document === "undefined") return [];
+    const audio = document.createElement("audio");
+    if (typeof audio?.canPlayType !== "function") return [];
+    const probes: Array<[string, string]> = [
+      ["mp3", "audio/mpeg"],
+      ["aac/m4a", 'audio/mp4; codecs="mp4a.40.2"'],
+      ["opus/webm", 'audio/webm; codecs="opus"'],
+      ["ogg/vorbis", 'audio/ogg; codecs="vorbis"'],
+      ["wav", "audio/wav"],
+    ];
+    return probes.filter(([, mime]) => audio.canPlayType(mime) !== "").map(([name]) => name);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Open the microphone with echo cancellation, noise suppression and auto gain.
- * If advanced audio processing constraints fail with OverconstrainedError,
- * gracefully falls back to basic unconstrained audio (`{ audio: true, video: false }`).
+ * Optionally targets a specific `deviceId`. If advanced audio processing
+ * constraints fail with OverconstrainedError, gracefully falls back to basic
+ * unconstrained audio (`{ audio: true, video: false }`).
  *
  * Rejects with an `Error` carrying the friendly text and the original
  * DOMException `name` (existing call sites still branch on the name).
  */
-export async function openMicrophone(): Promise<MediaStream> {
+export async function openMicrophone(deviceId?: string): Promise<MediaStream> {
   if (!audioCaptureSupported()) {
     throw new Error("Microphone recording is unavailable on this device.");
   }
+  const constraints: MediaStreamConstraints = deviceId
+    ? {
+        audio: {
+          deviceId: { exact: deviceId },
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      }
+    : AUDIO_CAPTURE_CONSTRAINTS;
   try {
-    return await navigator.mediaDevices.getUserMedia(AUDIO_CAPTURE_CONSTRAINTS);
+    return await navigator.mediaDevices.getUserMedia(constraints);
   } catch (error) {
     const name =
       typeof error === "object" && error !== null ? (error as { name?: unknown }).name : undefined;

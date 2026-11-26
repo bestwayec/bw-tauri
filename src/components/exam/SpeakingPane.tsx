@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { RunnerQuestion } from "@/lib/tests";
 import { getRecordingDurability, markActiveRecording } from '@/lib/durable-recordings';
-import { microphoneTrack, openMicrophone, processingSummary } from '@/lib/audio-capture';
+import { listAudioInputDevices, microphoneTrack, openMicrophone, processingSummary, selectSupportedAudioMimeType, type AudioInputDevice } from '@/lib/audio-capture';
 import Waveform from './Waveform';
 
 type Props = {
@@ -50,6 +50,16 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
   // Live stream drives the waveform; the ref stays the single owner for cleanup.
   const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
   const [recElapsed, setRecElapsed] = useState(0);
+  const [devices, setDevices] = useState<AudioInputDevice[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
+
+  useEffect(() => {
+    let active = true;
+    void listAudioInputDevices().then((list) => {
+      if (active) setDevices(list);
+    });
+    return () => { active = false; };
+  }, []);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -195,7 +205,7 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
       // Constrained capture: echo cancellation + noise suppression + auto gain, with explicit fallback.
       let stream: MediaStream;
       try {
-        stream = await openMicrophone();
+        stream = await openMicrophone(selectedDeviceId || undefined);
       } catch (err) {
         const errName = typeof err === "object" && err !== null ? (err as { name?: unknown }).name : undefined;
         if (errName === "NotAllowedError" || errName === "PermissionDeniedError" || errName === "SecurityError") {
@@ -204,18 +214,37 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
         stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       }
       if (!alive.current) { stream.getTracks().forEach((track) => track.stop()); if (recordingKey) markActiveRecording(recordingKey, false); return; }
+      void listAudioInputDevices().then((list) => { if (alive.current) setDevices(list); });
       streamRef.current = stream;
       setLiveStream(stream);
       setRecElapsed(0);
       chunksRef.current = [];
-      const rec = new MediaRecorder(stream);
+      const mimeType = selectSupportedAudioMimeType();
+      const rec = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       recorderRef.current = rec;
+      let trackDisconnected = false;
+      const track = stream.getAudioTracks()[0];
+      if (track) {
+        track.onended = () => {
+          trackDisconnected = true;
+          if (rec.state === "recording") {
+            try { rec.stop(); } catch { /* ignore */ }
+          }
+        };
+      }
       rec.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
       };
       rec.onstop = () => {
         stopTracks();
-        const blob = new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" });
+        if (trackDisconnected) {
+          setRecState("error");
+          setRecError("Microphone was disconnected during recording. Reconnect your microphone and record again.");
+          recorderRef.current = null;
+          if (recordingKey) markActiveRecording(recordingKey, false);
+          return;
+        }
+        const blob = new Blob(chunksRef.current, { type: rec.mimeType || mimeType || "audio/webm" });
         setClipUrl((prev) => {
           if (prev) URL.revokeObjectURL(prev);
           return blob.size > 0 ? URL.createObjectURL(blob) : null;
@@ -359,6 +388,21 @@ export default function SpeakingPane({ q, num, fontSize, onBlob, uploadNote, rec
           <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">
             Practice recorder {recState === "recording" && <span className="text-red-300">● rec</span>}
           </p>
+          {devices.length > 1 && recState !== "recording" && (
+            <select
+              aria-label="Select microphone"
+              value={selectedDeviceId}
+              onChange={(e) => setSelectedDeviceId(e.target.value)}
+              className="max-w-[180px] truncate rounded-lg border border-white/15 bg-black/40 px-2 py-1 text-[11px] text-white/80"
+            >
+              <option value="">Default microphone</option>
+              {devices.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          )}
           <div className="ml-auto flex gap-1.5">
             {recState !== "recording" ? (
               <button

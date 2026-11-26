@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { microphoneTrack, openMicrophone, processingSummary } from "@/lib/audio-capture";
+import { microphoneTrack, openMicrophone, processingSummary, selectSupportedAudioMimeType } from "@/lib/audio-capture";
 import Waveform from "@/components/exam/Waveform";
 
 /** Length of the microphone test take, in seconds. */
@@ -142,7 +142,8 @@ export default function MicCheck() {
       streamRef.current = stream;
       setLiveStream(stream);
       chunksRef.current = [];
-      const rec = new MediaRecorder(stream);
+      const mimeType = selectSupportedAudioMimeType();
+      const rec = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       recorderRef.current = rec;
       rec.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) chunksRef.current.push(e.data);

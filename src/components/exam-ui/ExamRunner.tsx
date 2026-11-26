@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getVolume, setVolume, VOLUME_EVENT } from "@/lib/volume";
 import { isDefinitiveLogout, useSessionStore, verdictOf } from "@/lib/session-store";
+import { transitionExamPhase, type ExamPhase } from "@/lib/exam-state";
 import BlobImage from "@/components/exam/BlobImage";
 import GappedContent, { gapNumbersIn, hasGappedDocument } from "@/components/exam/GappedContent";
 import BottomNav from "./BottomNav";
@@ -683,18 +684,34 @@ export default function ExamRunner(p: ExamRunnerProps) {
 
   useEffect(() => {
     if (p.deadlineIso == null) return;
-    setRemaining(remainingMs(p.deadlineIso, offsetMs));
-    return startDeadlineMonitor(() => {
+    const refreshRemaining = () => {
       const r = remainingMs(p.deadlineIso, offsetMs);
       setRemaining(r);
       if (r != null) {
         void cacheTimerSeconds(p.attemptId, Math.max(0, Math.floor(r / 1000))).catch(() => undefined);
       }
+      if (r != null && r <= 0 && !submittingRef.current && !submittedRef.current) {
+        setTimeUp(true);
+        void doSubmit(true);
+      }
       return r;
-    }, () => {
+    };
+    refreshRemaining();
+    const stopMonitor = startDeadlineMonitor(refreshRemaining, () => {
       setTimeUp(true);
       void doSubmit(true);
     });
+    // Immediate resync after minimize, restore, or OS sleep/suspend.
+    const onWake = () => {
+      if (document.visibilityState === "visible") refreshRemaining();
+    };
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("focus", refreshRemaining);
+    return () => {
+      stopMonitor();
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("focus", refreshRemaining);
+    };
   }, [p.deadlineIso, offsetMs, doSubmit, p.attemptId]);
 
   // ---- navigation ----
@@ -787,6 +804,37 @@ export default function ExamRunner(p: ExamRunnerProps) {
     return () => window.clearTimeout(id);
   }, [leftWidth, p.attemptId]);
 
+  // Keyboard exam navigation: Alt+ArrowLeft/Right steps questions, Alt+F flags current question.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || total === 0) return;
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        jumpQ(Math.min(total - 1, currentQ + 1));
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        jumpQ(Math.max(0, currentQ - 1));
+      } else if (e.key === "f" || e.key === "F") {
+        e.preventDefault();
+        const q = allQuestions[currentQ];
+        if (q) toggleFlagById(q.id);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- uses currentQ/total/allQuestions
+  }, [currentQ, total, allQuestions]);
+
+  const examPhase: ExamPhase = useMemo(() => {
+    let phase: ExamPhase = "loading";
+    phase = transitionExamPhase(phase, "RECOVER_START");
+    if (recoveredRef.current) phase = transitionExamPhase(phase, "RECOVER_DONE");
+    if (saveState === "offline") phase = transitionExamPhase(phase, "DISCONNECT");
+    if (submitting) phase = transitionExamPhase(phase, "SUBMIT_START");
+    if (submittedRef.current) phase = transitionExamPhase(phase, "SUBMIT_COMPLETE");
+    return phase;
+  }, [saveState, submitting]);
+
   if (!part) {
     return (
       <section className="exam-empty">
@@ -806,6 +854,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
       data-exam-theme={contrastTheme === "standard" ? "light" : contrastTheme}
       data-contrast-theme={contrastTheme}
       data-simulator-mode={simulatorMode}
+      data-exam-phase={examPhase}
     >
       <TopBar
         back={p.onBack ? { label: "Sections", onClick: p.onBack } : null}
@@ -859,6 +908,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
               src={part.audioUrl}
               title={part.title ?? part.label}
               strict={part.strictAudio}
+              playbackKey={`${p.attemptId}:${part.key}`}
               {...(part.audioStartSec != null ? { audioStartSec: part.audioStartSec } : {})}
               {...(part.stimulusRef != null ? { stimulusRef: part.stimulusRef } : {})}
               onReviewComplete={() => stepPart(1)}
@@ -1207,6 +1257,7 @@ export function PartQuestions(props: {
           src={part.audioUrl}
           title={part.title ?? part.label}
           strict={part.strictAudio}
+          playbackKey={props.attemptId ? `${props.attemptId}:${part.key}` : undefined}
           {...(part.audioStartSec != null ? { audioStartSec: part.audioStartSec } : {})}
           {...(part.stimulusRef != null ? { stimulusRef: part.stimulusRef } : {})}
         />
