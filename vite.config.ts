@@ -2,7 +2,7 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
-import { DEFAULT_API_BASE_URL, validateApiBaseUrl } from "./src/lib/api-origin";
+import { DEFAULT_API_BASE_URL, validateApiBaseUrl } from "./src/lib/api-origin.ts";
 
 // https://vite.dev/config/
 // NOTE (CSP TA-12): Tailwind v4 prod output is fully static — @tailwindcss/vite

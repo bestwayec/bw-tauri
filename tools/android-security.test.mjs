@@ -90,3 +90,12 @@ test('P0-7: AndroidManifest and build.gradle enforce security requirements', () 
   assert.ok(buildGradle.includes('minSdk 24'), 'minSdkVersion must be at least 24');
   assert.ok(buildGradle.includes('targetSdk 34'), 'targetSdk must be 34');
 });
+
+test('P0-8: Android download listener, BuildConfig version sync, and lazy camera permission', () => {
+  assert.ok(mainActivity.includes('BuildConfig.VERSION_NAME'), 'APP_VERSION must mirror BuildConfig.VERSION_NAME');
+  const dlMatch = mainActivity.match(/webView\.setDownloadListener\s*\{[\s\S]*?return@setDownloadListener[\s\S]*?\}/);
+  assert.ok(dlMatch && dlMatch[0].includes('isTrustedOrigin(url)'), 'DownloadListener must block untrusted download URLs');
+  const audioPermMatch = mainActivity.match(/private fun requestAudioPermission\(\)[\s\S]*?\n    \}/);
+  assert.ok(audioPermMatch, 'requestAudioPermission must exist');
+  assert.ok(!audioPermMatch[0].includes('Manifest.permission.CAMERA'), 'requestAudioPermission must not request CAMERA eagerly at startup');
+});

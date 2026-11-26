@@ -50,7 +50,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         const val BASE_URL = "https://bestwayec.uz/?platform=mobile_app"
         const val API_BASE_URL = "https://api.bestwayec.uz/v1"
-        const val APP_VERSION = "1.0.12"
+        val APP_VERSION: String = BuildConfig.VERSION_NAME
         private val TRUSTED_HOSTS = setOf("bestwayec.uz", "api.bestwayec.uz")
         private val GOOGLE_OAUTH_HOSTS = setOf("accounts.google.com", "oauth2.googleapis.com")
 
@@ -681,6 +681,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.setDownloadListener { url, userAgent, contentDisposition, mimetype, _ ->
+            if (!isTrustedOrigin(url)) {
+                Toast.makeText(this, "Untrusted download blocked", Toast.LENGTH_SHORT).show()
+                return@setDownloadListener
+            }
             try {
                 val request = DownloadManager.Request(Uri.parse(url)).apply {
                     setMimeType(mimetype)
@@ -891,9 +895,7 @@ class MainActivity : AppCompatActivity() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.MODIFY_AUDIO_SETTINGS) != PackageManager.PERMISSION_GRANTED) {
             permissions.add(Manifest.permission.MODIFY_AUDIO_SETTINGS)
         }
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            permissions.add(Manifest.permission.CAMERA)
-        }
+        // CAMERA is requested lazily in onPermissionRequest only when a trusted origin asks for video capture.
         if (permissions.isNotEmpty()) {
             ActivityCompat.requestPermissions(
                 this,

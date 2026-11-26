@@ -111,27 +111,35 @@ export default function CenterOverview({ onNavigate }: Props) {
             <span className="text-xs text-white/40">/ {totalSeats} seats</span>
           </div>
           <div className="mt-2 flex items-center gap-1.5 text-[11px] text-emerald-400">
-            <span className="h-2 w-2 animate-ping rounded-full bg-emerald-400" />
-            Across 3 active labs
+            <span className="h-2 w-2 rounded-full bg-emerald-400" />
+            Across {labs.filter((l) => l.status === "in_session").length} active labs
           </div>
         </div>
 
         <div className="card rounded-2xl p-4">
-          <p className="text-xs font-medium uppercase tracking-wider text-white/40">Tests Today</p>
-          <p className="mt-2 text-3xl font-extrabold text-white">114</p>
-          <p className="mt-2 text-[11px] text-emerald-400/80">98.2% completion rate</p>
+          <p className="text-xs font-medium uppercase tracking-wider text-white/40">Occupied Capacity</p>
+          <p className="mt-2 text-3xl font-extrabold text-white">
+            {totalSeats > 0 ? `${Math.round((activeSeats / totalSeats) * 100)}%` : "—"}
+          </p>
+          <p className="mt-2 text-[11px] text-white/50">
+            {labs.length > 0 ? "Live seat utilization" : "Awaiting lab telemetry"}
+          </p>
         </div>
 
         <div className="card rounded-2xl p-4">
-          <p className="text-xs font-medium uppercase tracking-wider text-white/40">Security Incidents</p>
-          <p className="mt-2 text-3xl font-extrabold text-amber-400">3</p>
-          <p className="mt-2 text-[11px] text-amber-300/80">2 blurs, 1 shortcut blocked</p>
+          <p className="text-xs font-medium uppercase tracking-wider text-white/40">Active Proctors</p>
+          <p className="mt-2 text-3xl font-extrabold text-amber-400">
+            {new Set(labs.map((l) => l.proctorName).filter(Boolean)).size}
+          </p>
+          <p className="mt-2 text-[11px] text-white/50">Assigned across labs</p>
         </div>
 
         <div className="card rounded-2xl p-4">
-          <p className="text-xs font-medium uppercase tracking-wider text-white/40">Kiosk Integrity</p>
-          <p className="mt-2 text-3xl font-extrabold text-emerald-400">100%</p>
-          <p className="mt-2 text-[11px] text-white/40">WH_KEYBOARD_LL active</p>
+          <p className="text-xs font-medium uppercase tracking-wider text-white/40">Lockdown Policy</p>
+          <p className="mt-2 text-3xl font-extrabold text-emerald-400">
+            {labs.length > 0 ? "Enforced" : "Standby"}
+          </p>
+          <p className="mt-2 text-[11px] text-white/40">Client kiosk mode ready</p>
         </div>
       </div>
 
@@ -139,7 +147,7 @@ export default function CenterOverview({ onNavigate }: Props) {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-base font-bold text-white">Testing Rooms & Labs Overview</h2>
-          <span className="text-xs text-white/50">4 total computer labs</span>
+          <span className="text-xs text-white/50">{labs.length} computer labs reported</span>
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
