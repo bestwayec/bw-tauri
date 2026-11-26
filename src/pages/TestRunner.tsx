@@ -3,6 +3,7 @@ import ExamRunner from "@/components/exam-ui/ExamRunner";
 import { legacyStartToParts } from "@/components/exam-ui/model";
 import type { PassageMarks } from "@/components/exam-ui/PassagePane";
 import { saveAnswer, saveMarks, submitAttempt, type StartResult, type TestListItem } from "@/lib/tests";
+import { resolvePendingAnswers } from "@/lib/offline-exam";
 
 type Props = {
   test: TestListItem;
@@ -43,9 +44,21 @@ export default function TestRunner({ test, start, studentName, onExit, onFinish 
       submitLabel={`Submit (${parts.reduce((s, x) => s + x.questions.length, 0)} Q)`}
       saveOne={(qid, value) => saveAnswer(start.attemptId, qid, value).then(() => undefined)}
       saveMany={(items) => {
-        // Legacy tests API has no bulk endpoint — save sequentially.
+        // Legacy tests API has no bulk endpoint — save sequentially and resolve
+        // any items that succeeded even if a subsequent item fails.
         const run = async () => {
-          for (const it of items) await saveAnswer(start.attemptId, it.questionId, it.response);
+          const succeeded: Array<{ questionId: string; response: string }> = [];
+          try {
+            for (const it of items) {
+              await saveAnswer(start.attemptId, it.questionId, it.response);
+              succeeded.push({ questionId: it.questionId, response: it.response });
+            }
+          } catch (err) {
+            if (succeeded.length > 0) {
+              void resolvePendingAnswers(start.attemptId, succeeded).catch(() => undefined);
+            }
+            throw err;
+          }
         };
         return run();
       }}

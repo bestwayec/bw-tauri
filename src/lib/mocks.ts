@@ -737,9 +737,9 @@ export async function saveMockAnswer(
 
 export async function bulkMockAnswers(
   attemptId: string,
-  answers: Array<{ questionId: string; response: string }>,
-): Promise<{ saved: number }> {
-  const receipt = await post<{ saved: number }>(
+  answers: Array<{ questionId: string; response: string; editedAt?: number }>,
+): Promise<{ saved: number; stale?: Record<string, string> }> {
+  const receipt = await post<{ saved: number; stale?: Record<string, string> }>(
     `/mock/attempts/${encodeURIComponent(attemptId)}/answers`,
     { answers },
   );

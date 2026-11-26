@@ -9,6 +9,25 @@
  * Namespaced key format: `offline.<namespace>.<key>`.
  */
 export type OfflineBackend = 'indexeddb' | 'localstorage' | 'none';
+export type DurabilityTier = 'indexeddb' | 'localstorage' | 'memory' | 'failed';
+
+export interface OfflineWriteResult {
+  ok: boolean;
+  tier: DurabilityTier;
+  error?: string;
+}
+
+export interface OfflineListResult {
+  ok: boolean;
+  entries: Array<{ key: string; value: string }>;
+  error?: string;
+}
+
+export interface OfflineGetResult {
+  ok: boolean;
+  value: string | null;
+  error?: string;
+}
 
 interface OfflineRecord {
   key: string;
@@ -93,104 +112,197 @@ async function idbList(): Promise<OfflineRecord[]> {
     : [];
 }
 
-function memoryList(namespace: string): OfflineRecord[] {
-  const prefix = `${PREFIX}${namespace}.`;
-  return [...memory.entries()]
-    .filter(([key]) => key.startsWith(prefix))
-    .map(([key, value]) => ({ key, value, updatedAt: 0 }));
+function errorMessage(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === 'string' && err) return err;
+  return 'Offline storage operation failed';
 }
 
-/** Write one value. Returns false when storage is unavailable or full. */
-export async function offlinePut(namespace: string, key: string, value: string): Promise<boolean> {
+/**
+ * Write one value with explicit durability reporting.
+ * Attempts primary backend (IndexedDB), falls back to localStorage on IDB failure,
+ * and falls back to volatile RAM if disk storage is unavailable or full.
+ */
+export async function offlinePutDurable(
+  namespace: string,
+  key: string,
+  value: string,
+  allowMemoryFallback = true,
+): Promise<OfflineWriteResult> {
   const storageKey = storeKey(namespace, key);
-  try {
-    if (offlineStoreBackend() === 'indexeddb') {
+  const currentBackend = offlineStoreBackend();
+
+  if (currentBackend === 'indexeddb') {
+    try {
       const record: OfflineRecord = { key: storageKey, value, updatedAt: Date.now() };
       await idbRun('readwrite', (store) => store.put(record, storageKey));
-      return true;
+      // Remove any older fallback copies once primary IDB succeeds.
+      const store = localStore();
+      try { store?.removeItem(storageKey); } catch { /* ignore */ }
+      memory.delete(storageKey);
+      return { ok: true, tier: 'indexeddb' };
+    } catch (idbErr) {
+      const msg = errorMessage(idbErr);
+      const store = localStore();
+      if (store) {
+        try {
+          store.setItem(storageKey, value);
+          memory.delete(storageKey);
+          return { ok: true, tier: 'localstorage', error: msg };
+        } catch (lsErr) {
+          if (allowMemoryFallback) memory.set(storageKey, value);
+          return { ok: false, tier: allowMemoryFallback ? 'memory' : 'failed', error: `${msg}; ${errorMessage(lsErr)}` };
+        }
+      }
+      if (allowMemoryFallback) memory.set(storageKey, value);
+      return { ok: false, tier: allowMemoryFallback ? 'memory' : 'failed', error: msg };
     }
+  }
+
+  if (currentBackend === 'localstorage') {
     const store = localStore();
     if (store) {
-      store.setItem(storageKey, value);
-      return true;
+      try {
+        store.setItem(storageKey, value);
+        memory.delete(storageKey);
+        return { ok: true, tier: 'localstorage' };
+      } catch (lsErr) {
+        if (allowMemoryFallback) memory.set(storageKey, value);
+        return { ok: false, tier: allowMemoryFallback ? 'memory' : 'failed', error: errorMessage(lsErr) };
+      }
     }
-    memory.set(storageKey, value);
-    return true;
-  } catch {
-    return false;
   }
+
+  if (allowMemoryFallback) {
+    memory.set(storageKey, value);
+    return { ok: false, tier: 'memory', error: 'No durable disk storage available (memory only)' };
+  }
+  return { ok: false, tier: 'failed', error: 'No durable disk storage available' };
+}
+
+/** Write one value. Returns false when durable storage is unavailable or full (memory fallback still works when backend is 'none'). */
+export async function offlinePut(namespace: string, key: string, value: string): Promise<boolean> {
+  const allowMem = offlineStoreBackend() === 'none';
+  const result = await offlinePutDurable(namespace, key, value, allowMem);
+  if (result.ok) return true;
+  // Preserve legacy contract: when neither IndexedDB nor localStorage exists at all, memory fallback returns true.
+  return allowMem && result.tier === 'memory';
+}
+
+/** Read one value with explicit read-error reporting so failures are distinguishable from missing keys. */
+export async function offlineGetStrict(namespace: string, key: string): Promise<OfflineGetResult> {
+  const storageKey = storeKey(namespace, key);
+  let idbError: string | undefined;
+  if (offlineStoreBackend() === 'indexeddb') {
+    try {
+      const record = await idbRun<OfflineRecord | undefined>('readonly', (store) => store.get(storageKey));
+      if (record && typeof record.value === 'string') {
+        return { ok: true, value: record.value };
+      }
+    } catch (err) {
+      idbError = errorMessage(err);
+    }
+  }
+  const store = localStore();
+  if (store) {
+    try {
+      const val = store.getItem(storageKey);
+      if (val !== null) return { ok: !idbError, value: val, ...(idbError ? { error: idbError } : {}) };
+    } catch (err) {
+      return { ok: false, value: memory.get(storageKey) ?? null, error: idbError ?? errorMessage(err) };
+    }
+  }
+  const mem = memory.get(storageKey) ?? null;
+  if (idbError) return { ok: false, value: mem, error: idbError };
+  return { ok: true, value: mem };
 }
 
 /** Read one value, or null when missing/unreadable. */
 export async function offlineGet(namespace: string, key: string): Promise<string | null> {
-  const storageKey = storeKey(namespace, key);
-  try {
-    if (offlineStoreBackend() === 'indexeddb') {
-      const record = await idbRun<OfflineRecord | undefined>('readonly', (store) => store.get(storageKey));
-      return record && typeof record.value === 'string' ? record.value : null;
+  return (await offlineGetStrict(namespace, key)).value;
+}
+
+/** List every entry of one namespace with explicit read-error reporting (includes fallback tiers if IDB failed). */
+export async function offlineListStrict(namespace: string): Promise<OfflineListResult> {
+  const prefix = `${PREFIX}${namespace}.`;
+  const merged = new Map<string, string>();
+  let readError: string | undefined;
+
+  if (offlineStoreBackend() === 'indexeddb') {
+    try {
+      const records = await idbList();
+      for (const record of records) {
+        if (record.key.startsWith(prefix)) {
+          merged.set(record.key.slice(prefix.length), record.value);
+        }
+      }
+    } catch (err) {
+      readError = errorMessage(err);
     }
-    const store = localStore();
-    if (store) return store.getItem(storageKey);
-    return memory.get(storageKey) ?? null;
-  } catch {
-    return null;
   }
+
+  const store = localStore();
+  if (store) {
+    try {
+      for (let i = 0; i < store.length; i++) {
+        const key = store.key(i);
+        if (key && key.startsWith(prefix)) {
+          const shortKey = key.slice(prefix.length);
+          if (!merged.has(shortKey)) {
+            merged.set(shortKey, store.getItem(key) ?? '');
+          }
+        }
+      }
+    } catch (err) {
+      readError = readError ?? errorMessage(err);
+    }
+  }
+
+  for (const [key, value] of memory.entries()) {
+    if (key.startsWith(prefix)) {
+      const shortKey = key.slice(prefix.length);
+      if (!merged.has(shortKey)) {
+        merged.set(shortKey, value);
+      }
+    }
+  }
+
+  const entries = [...merged.entries()].map(([key, value]) => ({ key, value }));
+  return { ok: !readError, entries, ...(readError ? { error: readError } : {}) };
 }
 
 /** Every entry of one namespace, with the namespace prefix stripped from `key`. */
 export async function offlineList(namespace: string): Promise<Array<{ key: string; value: string }>> {
-  const prefix = `${PREFIX}${namespace}.`;
-  try {
-    let records: OfflineRecord[];
-    if (offlineStoreBackend() === 'indexeddb') {
-      records = await idbList();
-    } else {
-      const store = localStore();
-      if (store) {
-        records = [];
-        for (let i = 0; i < store.length; i++) {
-          const key = store.key(i);
-          if (key && key.startsWith(prefix)) records.push({ key, value: store.getItem(key) ?? '', updatedAt: 0 });
-        }
-      } else {
-        records = memoryList(namespace);
-      }
-    }
-    return records
-      .filter((record) => record.key.startsWith(prefix))
-      .map((record) => ({ key: record.key.slice(prefix.length), value: record.value }));
-  } catch {
-    return [];
-  }
+  return (await offlineListStrict(namespace)).entries;
 }
 
 /** Remove one value. True when the delete was performed. */
 export async function offlineDelete(namespace: string, key: string): Promise<boolean> {
   const storageKey = storeKey(namespace, key);
-  try {
-    if (offlineStoreBackend() === 'indexeddb') {
+  let ok = true;
+  if (offlineStoreBackend() === 'indexeddb') {
+    try {
       await idbRun('readwrite', (store) => store.delete(storageKey));
-      return true;
+    } catch {
+      ok = false;
     }
-    const store = localStore();
-    if (store) {
-      store.removeItem(storageKey);
-      return true;
-    }
-    memory.delete(storageKey);
-    return true;
-  } catch {
-    return false;
   }
+  const store = localStore();
+  if (store) {
+    try { store.removeItem(storageKey); } catch { ok = false; }
+  }
+  memory.delete(storageKey);
+  return ok;
 }
 
 /** Delete an acknowledged snapshot only if no newer write replaced it. */
 export async function offlineDeleteIfValue(namespace: string, key: string, expected: string): Promise<boolean> {
   const storageKey = storeKey(namespace, key);
+  let removedAny = false;
   try {
     if (offlineStoreBackend() === 'indexeddb') {
       const db = await database();
-      return await new Promise<boolean>((resolve, reject) => {
+      removedAny = await new Promise<boolean>((resolve, reject) => {
         const tx = db.transaction(STORE, 'readwrite');
         let removed = false;
         const store = tx.objectStore(STORE);
@@ -205,16 +317,23 @@ export async function offlineDeleteIfValue(namespace: string, key: string, expec
         tx.onerror = tx.onabort = () => { db.close(); reject(tx.error); };
       });
     }
-    const store = localStore();
-    if (store) {
-      if (store.getItem(storageKey) !== expected) return false;
-      store.removeItem(storageKey);
-    } else {
-      if (memory.get(storageKey) !== expected) return false;
-      memory.delete(storageKey);
-    }
-    return true;
-  } catch { return false; }
+  } catch {
+    /* still check fallback tiers */
+  }
+  const store = localStore();
+  if (store) {
+    try {
+      if (store.getItem(storageKey) === expected) {
+        store.removeItem(storageKey);
+        removedAny = true;
+      }
+    } catch { /* ignore */ }
+  }
+  if (memory.get(storageKey) === expected) {
+    memory.delete(storageKey);
+    removedAny = true;
+  }
+  return removedAny;
 }
 
 /** Drop a whole namespace (e.g. when an attempt is finished). */

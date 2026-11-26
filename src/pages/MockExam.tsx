@@ -147,14 +147,14 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
   const deadlineIso = start.sectionDeadlines?.[skill] ?? start.overallDeadlineAt ?? start.deadlineAt ?? null;
 
   useEffect(() => {
-    if (start.exam.specificationVersion || skill !== 'speaking') return;
+    if (skill !== 'speaking') return;
     let alive = true;
     void Promise.all(section.groups.flatMap((group) => group.questions.map(async (question) => {
       const blob = await recoverRecording(recordingKey(attemptId, question.id));
       if (alive && blob) setPendingTakes((takes) => ({ ...takes, [question.id]: blob }));
     }))).catch(() => { if (alive) setRecoveryError('Local recording recovery is unavailable. Keep this page open if you have an unuploaded take.'); });
     return () => { alive = false; };
-  }, [attemptId, section.groups, skill, start.exam.specificationVersion]);
+  }, [attemptId, section.groups, skill]);
 
   async function handleBlob(qid: string, blob: Blob) {
     if (uploading.current.has(qid)) return;
@@ -258,7 +258,7 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
       showVolume={skill === "listening"}
       submitLabel={`Submit ${MOCK_SKILL_LABEL[skill]}`}
       saveOne={(qid, value) => saveMockAnswer(attemptId, qid, value).then(() => undefined)}
-      saveMany={(items) => bulkMockAnswers(attemptId, items).then(() => undefined)}
+      saveMany={(items) => bulkMockAnswers(attemptId, items)}
       submit={async () => {
         if (hasActiveRecording(attemptId)) {
           throw new Error('Ovoz yozish jarayoni davom etmoqda. Iltimos, avval yozishni yakunlang.');
@@ -271,7 +271,8 @@ export default function MockExam({ start, section, studentName, onExit, onBackTo
         }
         if (start.exam.specificationVersion && start.flowMode === 'full_test' && skill !== 'speaking') {
           const next = await post<{ currentSkill: MockShapedSection['skill']; serverTime: string; sectionDeadlines: MockStartResult['sectionDeadlines']; overallDeadlineAt: string | null }>(`/mock/attempts/${attemptId}/advance`, {});
-          onAdvance?.({ ...start, ...next }); return;
+          onAdvance?.({ ...start, ...next });
+          return 'advanced';
         }
         // Single-section attempts are already scoped server-side: submit the
         // attempt as it stands. Multi-section attempts still declare the

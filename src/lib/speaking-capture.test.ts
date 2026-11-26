@@ -64,6 +64,21 @@ describe('native full Speaking response capture', () => {
     expect(() => capture(recorder, duration, callbacks())).toThrow('Speaking timing');
     expect(recorder.state).toBe('inactive');
   });
+  it('preserves a completed take even when OS timer jitter delays stop by 500ms', async () => {
+    const recorder = new FakeRecorder(), events = callbacks();
+    let timerCallback: (() => void) | undefined;
+    const origSetTimeout = globalThis.setTimeout;
+    vi.stubGlobal('setTimeout', (fn: () => void, _ms?: number) => {
+      timerCallback = fn;
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    });
+    capture(recorder, 30, events);
+    await vi.advanceTimersByTimeAsync(30_500);
+    timerCallback?.();
+    vi.stubGlobal('setTimeout', origSetTimeout);
+    expect(events.complete).toHaveBeenCalledOnce();
+    expect(events.interrupted).not.toHaveBeenCalled();
+  });
   it('provides no early Stop control in practice or timed responses', () => {
     for (const timed of [false, true]) {
       const markup = renderToStaticMarkup(createElement(MultilevelRecorder, { attemptId: 'a', questionId: 'q', timed, initialHasAudio: false, startPhase: vi.fn(), upload: vi.fn() }));

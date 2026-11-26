@@ -534,6 +534,9 @@ export default function App() {
                           },
                         };
                         setActiveMockStart(normalizedNext);
+                        if (activeMock) {
+                          persistActiveMockSession(activeMock, normalizedNext, next.currentSkill ?? undefined);
+                        }
                         const nextTarget =
                           normalizedSections.find(
                             (s) => normalizeMockSkill(s.skill) === normalizeMockSkill(next.currentSkill),

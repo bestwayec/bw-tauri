@@ -159,7 +159,7 @@ import WritingImageOcr from "./WritingImageOcr";
 import { cacheAnswer } from "@/lib/offline-exam";
 import { useEffect, useRef } from "react";
 
-/** Essay editor with live word count, minimum target indicators, 3s auto-save, and handwriting OCR. */
+/** Essay editor with live word count, IME safety, immediate local backup, and one-time crash recovery. */
 export function EssayWidget({
   q,
   value,
@@ -172,15 +172,22 @@ export function EssayWidget({
   const words = countWords(value);
   const isTargetMet = words >= targetWords;
   const lastSavedValue = useRef(value);
+  const didRecoverRef = useRef<string | null>(null);
+  const isComposingRef = useRef(false);
+  const essayStorageKey = attemptId && q.id ? `examui.essay.${attemptId}.${q.id}` : null;
 
-  // Auto-save to IndexedDB & localStorage every 3 seconds if modified
+  // Persist to IndexedDB & localStorage every 3 seconds if modified (backup on top of ExamRunner keystroke mirror)
   useEffect(() => {
-    if (!attemptId || !q.id) return;
+    if (!attemptId || !q.id || !essayStorageKey) return;
     const interval = window.setInterval(() => {
       if (value !== lastSavedValue.current) {
         lastSavedValue.current = value;
         try {
-          localStorage.setItem(`examui.essay.${attemptId}.${q.id}`, value);
+          if (value === "") {
+            localStorage.removeItem(essayStorageKey);
+          } else {
+            localStorage.setItem(essayStorageKey, value);
+          }
           void cacheAnswer(attemptId, q.id, value).catch(() => undefined);
         } catch {
           /* private mode fallback */
@@ -188,21 +195,39 @@ export function EssayWidget({
       }
     }, 3000);
     return () => window.clearInterval(interval);
-  }, [attemptId, q.id, value]);
+  }, [attemptId, q.id, value, essayStorageKey]);
 
-  // Crash / reload recovery fallback: restore if local value was empty
+  // One-time crash / reload recovery on initial mount for this question only.
+  // Never resurrects text after the candidate intentionally deletes or clears their essay.
   useEffect(() => {
-    if (!value && attemptId && q.id) {
+    const scope = essayStorageKey ?? "";
+    if (!scope || didRecoverRef.current === scope) return;
+    didRecoverRef.current = scope;
+    if (value) return;
+    try {
+      const cached = localStorage.getItem(scope);
+      if (cached && cached.trim()) {
+        lastSavedValue.current = cached;
+        onChange(cached, false);
+      }
+    } catch {
+      /* ignore */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional one-time mount recovery per question
+  }, [essayStorageKey]);
+
+  function handleTextChange(next: string) {
+    lastSavedValue.current = next;
+    if (essayStorageKey && !isComposingRef.current) {
       try {
-        const cached = localStorage.getItem(`examui.essay.${attemptId}.${q.id}`);
-        if (cached && cached.trim()) {
-          onChange(cached, false);
-        }
+        if (next === "") localStorage.removeItem(essayStorageKey);
+        else localStorage.setItem(essayStorageKey, next);
       } catch {
         /* ignore */
       }
     }
-  }, [attemptId, q.id, value, onChange]);
+    onChange(next);
+  }
 
   return (
     <div className="space-y-2">
@@ -215,12 +240,20 @@ export function EssayWidget({
             mode === "append" && value.trim()
               ? `${value.trim()}\n\n${ocrText}`
               : ocrText;
+          handleTextChange(next);
           onChange(next, true);
         }}
       />
       <textarea
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onCompositionStart={() => {
+          isComposingRef.current = true;
+        }}
+        onCompositionEnd={(e) => {
+          isComposingRef.current = false;
+          handleTextChange(e.currentTarget.value);
+        }}
+        onChange={(e) => handleTextChange(e.target.value)}
         rows={12}
         spellCheck={false}
         autoCorrect="off"

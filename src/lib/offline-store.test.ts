@@ -143,4 +143,52 @@ describe('offline store backend selection', () => {
     await store.offlineDelete('exam', 'attempt-1');
     expect(await store.offlineGet('exam', 'attempt-1')).toBeNull();
   });
+
+  it('reports explicit durability tiers on IndexedDB quota/write failure and distinguishes read failure from empty', async () => {
+    vi.stubGlobal('indexedDB', {
+      open: () => {
+        const request: Record<string, unknown> = {};
+        request.result = {
+          close() {},
+          transaction() {
+            const tx: Record<string, unknown> = { error: new DOMException('QuotaExceededError', 'QuotaExceededError') };
+            tx.objectStore = () => ({
+              put: () => ({}),
+              get: () => ({}),
+              getAll: () => ({}),
+            });
+            queueMicrotask(() => (tx.onerror as () => void)?.());
+            return tx;
+          },
+        };
+        queueMicrotask(() => (request.onsuccess as () => void)?.());
+        return request;
+      },
+    });
+    const store = await freshStore();
+    expect(store.offlineStoreBackend()).toBe('indexeddb');
+
+    // Falls back to localStorage when IndexedDB write fails
+    const fallbackWrite = await store.offlinePutDurable('answers.a1', 'q1', 'hello');
+    expect(fallbackWrite.ok).toBe(true);
+    expect(fallbackWrite.tier).toBe('localstorage');
+    expect(fallbackWrite.error).toContain('QuotaExceededError');
+
+    // Strict list reports ok: false on IDB read error while still returning fallback entries
+    const listed = await store.offlineListStrict('answers.a1');
+    expect(listed.ok).toBe(false);
+    expect(listed.error).toContain('QuotaExceededError');
+    expect(listed.entries).toEqual([{ key: 'q1', value: 'hello' }]);
+
+    // Strict get reports ok: false on IDB read error while returning fallback entry
+    const got = await store.offlineGetStrict('answers.a1', 'q1');
+    expect(got.ok).toBe(false);
+    expect(got.value).toBe('hello');
+
+    // When both IndexedDB and localStorage fail, reports memory-only (ok: false, tier: 'memory')
+    vi.stubGlobal('localStorage', fakeStorage({ failWrites: true }));
+    const memWrite = await store.offlinePutDurable('answers.a1', 'q2', 'in-ram');
+    expect(memWrite.ok).toBe(false);
+    expect(memWrite.tier).toBe('memory');
+  });
 });

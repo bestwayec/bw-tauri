@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getVolume, setVolume, VOLUME_EVENT } from "@/lib/volume";
-import { isDefinitiveLogout, verdictOf } from "@/lib/session-store";
+import { isDefinitiveLogout, useSessionStore, verdictOf } from "@/lib/session-store";
 import BlobImage from "@/components/exam/BlobImage";
 import GappedContent, { gapNumbersIn, hasGappedDocument } from "@/components/exam/GappedContent";
 import BottomNav from "./BottomNav";
@@ -30,12 +30,14 @@ import { answerRuleHint, exceedsAnswerConstraint, type AnswerRule } from '@/lib/
 import type { CheatScope } from '@/lib/cheat';
 import { releaseKioskLockdown, useLockdown, type LockdownCheatEvent } from '@/hooks/useLockdown';
 import {
-  cacheAnswer,
+  cacheAnswerDurable,
   cacheTimerSeconds,
   clearAttemptCache,
-  readPendingAnswers,
+  readPendingAnswersStrict,
+  recordUnacceptedAnswers,
   resolvePendingAnswers,
   startOfflineSync,
+  type AnswerDurabilityState,
 } from '@/lib/offline-exam';
 import { clearSecurityLog, logLockdownEvent, type SecurityLogEntry } from '@/lib/proctoring';
 import { useAntiCheatGuard } from '@/hooks/useAntiCheatGuard';
@@ -72,9 +74,9 @@ export interface ExamRunnerProps {
   showVolume: boolean;
   submitLabel: string;
   saveOne: (qid: string, value: string) => Promise<void>;
-  saveMany: (items: Array<{ questionId: string; response: string }>) => Promise<void>;
-  /** Performs submit AND parent navigation. */
-  submit: () => Promise<void>;
+  saveMany: (items: Array<{ questionId: string; response: string; editedAt?: number }>) => Promise<{ stale?: Record<string, string> } | void>;
+  /** Performs submit AND parent navigation. Returns 'advanced' on mid-exam section transition. */
+  submit: () => Promise<void | 'advanced'>;
   onSpeakBlob?: (qid: string, blob: Blob) => void;
   speakNote?: (qid: string) => string | null;
   persistMarks?: (partKey: string, marks: PassageMarks) => void;
@@ -113,11 +115,17 @@ function queueKey(attemptId: string): string {
   return `examui.queue.${attemptId}`;
 }
 
-function loadQueue(attemptId: string): { answers: Record<string, string>; dirty: string[] } {
+function loadQueue(
+  attemptId: string,
+  accountId?: string | null,
+): { answers: Record<string, string>; dirty: string[] } {
   try {
     const raw = localStorage.getItem(queueKey(attemptId));
     if (!raw) return { answers: {}, dirty: [] };
-    const p = JSON.parse(raw) as { answers?: unknown; dirty?: unknown };
+    const p = JSON.parse(raw) as { accountId?: unknown; answers?: unknown; dirty?: unknown };
+    if (accountId && typeof p.accountId === "string" && p.accountId !== accountId) {
+      return { answers: {}, dirty: [] };
+    }
     return {
       answers:
         p.answers && typeof p.answers === "object"
@@ -231,14 +239,22 @@ export default function ExamRunner(p: ExamRunnerProps) {
   });
 
 
+  const currentAccountId = useSessionStore((s) => s.profile?.id ?? null);
   const versioned = p.parts.some((part) => part.questions.some((q) => q.guidance));
-  const writableIds = new Set(p.parts.flatMap((part) => part.questions.map((q) => q.id)));
+  const writableIds = useMemo(
+    () => new Set(p.parts.flatMap((part) => part.questions.map((q) => q.id))),
+    [p.parts],
+  );
   const [partIdx, setPartIdx] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>(() => {
     // Merge the persisted offline queue: only ids that were still unsaved
     // (dirty) overlay the server snapshot — saved answers are authoritative.
     try {
-      return restoreAnswers(p.initialAnswers, loadQueue(p.attemptId), versioned ? writableIds : undefined);
+      return restoreAnswers(
+        p.initialAnswers,
+        loadQueue(p.attemptId, useSessionStore.getState().profile?.id ?? null),
+        versioned ? writableIds : undefined,
+      );
     } catch {
       return p.initialAnswers;
     }
@@ -281,18 +297,23 @@ export default function ExamRunner(p: ExamRunnerProps) {
   const [error, setError] = useState<string | null>(null);
   const [timeUp, setTimeUp] = useState(false);
   const [leftWidth, setLeftWidth] = useState(() => readSplit(p.attemptId));
+  const [staleConflicts, setStaleConflicts] = useState<Record<string, { local: string; server: string }>>({});
 
   const dirty = useRef<Set<string>>(
     new Set(
       (() => {
         try {
-          return loadQueue(p.attemptId).dirty.filter((id) => !versioned || writableIds.has(id));
+          return loadQueue(p.attemptId, useSessionStore.getState().profile?.id ?? null).dirty.filter(
+            (id) => !versioned || writableIds.has(id),
+          );
         } catch {
           return [];
         }
       })(),
     ),
   );
+  const editedAtRef = useRef<Record<string, number>>({});
+  const localDurabilityRef = useRef<AnswerDurabilityState>("locally_persisted");
   const answersRef = useRef(answers);
   useEffect(() => {
     answersRef.current = answers;
@@ -301,21 +322,26 @@ export default function ExamRunner(p: ExamRunnerProps) {
 
   // Multilevel writes synchronously so a section remount or immediate reload
   // cannot cancel the last keystroke's persistence timer.
-  function persistQueue() {
+  function persistQueue(): boolean {
     if (persistTimer.current) window.clearTimeout(persistTimer.current);
-    const write = () => {
-      try {
-        if (dirty.current.size === 0) localStorage.removeItem(queueKey(p.attemptId));
-        else {
-          const snap: Record<string, string> = {};
-          for (const id of dirty.current) snap[id] = answersRef.current[id] ?? "";
-          localStorage.setItem(queueKey(p.attemptId), JSON.stringify({ answers: snap, dirty: [...dirty.current] }));
-        }
-      } catch {
-        /* private mode — memory only */
+    try {
+      if (dirty.current.size === 0) localStorage.removeItem(queueKey(p.attemptId));
+      else {
+        const snap: Record<string, string> = {};
+        for (const id of dirty.current) snap[id] = answersRef.current[id] ?? "";
+        localStorage.setItem(
+          queueKey(p.attemptId),
+          JSON.stringify({
+            ...(currentAccountId ? { accountId: currentAccountId } : {}),
+            answers: snap,
+            dirty: [...dirty.current],
+          }),
+        );
       }
-    };
-    write();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   // Offline-first restore: an answer given while the connection was down lives
@@ -327,38 +353,51 @@ export default function ExamRunner(p: ExamRunnerProps) {
     let alive = true;
     void (async () => {
       try {
-        const pending = await readPendingAnswers(p.attemptId);
+        const result = await readPendingAnswersStrict(p.attemptId, currentAccountId);
         if (!alive) return;
         recoveredRef.current = true;
+        if (!result.ok) {
+          localDurabilityRef.current = "persistence_failed";
+          setSaveState("persistence_failed");
+          setError(
+            `Local offline storage could not be read (${result.error ?? "read failed"}). Keep this window open and verify your answers.`,
+          );
+        }
+        const pending = result.answers;
         if (pending.length === 0) {
-          setSaveState(dirty.current.size ? "saving" : "saved");
+          if (result.ok) setSaveState(dirty.current.size ? "saving" : "saved");
           return;
         }
         const restored: Record<string, string> = {};
         for (const item of pending) {
           if (versioned && !writableIds.has(item.questionId)) continue;
+          if (typeof item.editedAt === "number") editedAtRef.current[item.questionId] = item.editedAt;
           // Do not overwrite edits typed while IndexedDB recovery was pending.
           if (dirty.current.has(item.questionId)) continue;
           restored[item.questionId] = item.response;
         }
         const ids = Object.keys(restored);
         if (ids.length === 0) {
-          setSaveState(dirty.current.size ? "saving" : "saved");
+          if (result.ok) setSaveState(dirty.current.size ? "saving" : "saved");
           return;
         }
         answersRef.current = { ...answersRef.current, ...restored };
         for (const id of ids) dirty.current.add(id);
         setAnswers((current) => ({ ...current, ...restored }));
-        setSaveState("saving");
+        if (result.ok) setSaveState("saving");
         persistQueue();
       } catch {
-        if (alive) setSaveState("error");
+        if (alive) {
+          localDurabilityRef.current = "persistence_failed";
+          setSaveState("persistence_failed");
+        }
       }
     })();
     return () => {
       alive = false;
     };
-  }, [p.attemptId, p.initialAnswers, versioned, writableIds]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per attempt mount to restore pending offline edits
+  }, [p.attemptId, p.initialAnswers, versioned, writableIds, currentAccountId]);
 
   useEffect(
     () => () => {
@@ -427,34 +466,79 @@ export default function ExamRunner(p: ExamRunnerProps) {
     const ids = [...dirty.current];
     if (ids.length === 0) return;
     setSaveState("saving");
-    const payload = ids.map((id) => ({ questionId: id, response: answersRef.current[id] ?? "" }));
+    const payload = ids.map((id) => ({
+      questionId: id,
+      response: answersRef.current[id] ?? "",
+      editedAt: editedAtRef.current[id] ?? (Date.now() + offsetMs),
+    }));
     const operation = (async () => {
     try {
+      let bulkResult: { stale?: Record<string, string> } | void = undefined;
       if (payload.length === 1) await p.saveOne(payload[0].questionId, payload[0].response);
-      else await p.saveMany(payload);
-      for (const item of payload) if (answersRef.current[item.questionId] === item.response) dirty.current.delete(item.questionId);
+      else bulkResult = await p.saveMany(payload);
+      const staleMap = bulkResult && typeof bulkResult === "object" && bulkResult.stale && typeof bulkResult.stale === "object"
+        ? bulkResult.stale
+        : null;
+      const acknowledgedItems: Array<{ questionId: string; response: string }> = [];
+      for (const item of payload) {
+        if (staleMap && item.questionId in staleMap) {
+          setStaleConflicts((prev) => ({
+            ...prev,
+            [item.questionId]: { local: item.response, server: staleMap[item.questionId] },
+          }));
+          continue;
+        }
+        if (answersRef.current[item.questionId] === item.response) {
+          dirty.current.delete(item.questionId);
+        }
+        acknowledgedItems.push({ questionId: item.questionId, response: item.response });
+      }
       persistQueue();
       // The server holds these now — drop the offline mirror entries.
-      void resolvePendingAnswers(p.attemptId, payload).catch(() => undefined);
+      if (acknowledgedItems.length > 0) {
+        void resolvePendingAnswers(p.attemptId, acknowledgedItems).catch(() => undefined);
+      }
+      if (staleMap && Object.keys(staleMap).length > 0) {
+        localDurabilityRef.current = "conflict_detected";
+        setSaveState("conflict_detected");
+        return;
+      }
       if (dirty.current.size === 0) {
         try {
           localStorage.removeItem(queueKey(p.attemptId));
         } catch {
           /* ignore */
         }
+        localDurabilityRef.current = "server_acknowledged";
         setSaveState(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "saved");
       }
     } catch (e) {
+      const code = errorCode(e);
+      if (code === "MOCK_TIME_UP" || code === "TEST_TIME_UP" || code === "MOCK_SECTION_TIME_UP") {
+        void recordUnacceptedAnswers(
+          p.attemptId,
+          payload.map(({ questionId, response }) => ({ questionId, response })),
+          String(code),
+        ).catch(() => undefined);
+        setError(
+          "The server deadline expired before your latest offline edits could be accepted. Unaccepted local edits were preserved for audit.",
+        );
+      }
       for (const id of ids) dirty.current.add(id);
-      persistQueue();
-      setSaveState(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "error");
+      const queueOk = persistQueue();
+      if (!queueOk && (localDurabilityRef.current === "memory_only" || localDurabilityRef.current === "persistence_failed")) {
+        setSaveState(localDurabilityRef.current);
+      } else {
+        setSaveState(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "error");
+      }
       notifyExamAuthIssue(e);
       throw e;
     }
     })();
     saveInFlight.current = operation;
     try { await operation; } finally { saveInFlight.current = null; }
-  }, [p]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- persistQueue reads stable refs
+  }, [p, offsetMs]);
 
   useEffect(() => {
     const handleOnline = () => {
@@ -466,12 +550,36 @@ export default function ExamRunner(p: ExamRunnerProps) {
 
   function setAnswer(qid: string, value: string, immediate = false) {
     if (submittingRef.current || submittedRef.current) return;
+    const editedAt = Date.now() + offsetMs;
+    editedAtRef.current[qid] = editedAt;
     answersRef.current = { ...answersRef.current, [qid]: value };
     dirty.current.add(qid);
-    persistQueue();
+    setStaleConflicts((prev) => {
+      if (!(qid in prev)) return prev;
+      const next = { ...prev };
+      delete next[qid];
+      return next;
+    });
+    const queueOk = persistQueue();
     // Mirror every answer locally the moment it is typed, before any request:
     // this survives a reload or a crash with no network at all.
-    void cacheAnswer(p.attemptId, qid, value).catch(() => undefined);
+    void cacheAnswerDurable(p.attemptId, qid, value, {
+      editedAt,
+      accountId: currentAccountId ?? undefined,
+    }).then((res) => {
+      if (!res.ok) {
+        const nextState = res.state === "memory_only" && !queueOk ? "memory_only" : !queueOk ? "persistence_failed" : "locally_persisted";
+        localDurabilityRef.current = nextState;
+        if (nextState === "memory_only" || nextState === "persistence_failed") {
+          setSaveState(nextState);
+          setError(
+            `Disk storage unavailable (${res.error ?? "quota/error"}). Answers are in memory only — do not close the app until online sync succeeds.`,
+          );
+        }
+      } else {
+        localDurabilityRef.current = "locally_persisted";
+      }
+    }).catch(() => undefined);
     setAnswers((a) => (a[qid] === value ? a : { ...a, [qid]: value }));
     if (allQuestions.some((q) => q.guidance)) { setSaveState('saving'); scheduleFlush(); return; }
     if (immediate) {
@@ -495,6 +603,16 @@ export default function ExamRunner(p: ExamRunnerProps) {
       attemptId: p.attemptId,
       flush: () => flush(),
       onState: (state) => {
+        if (localDurabilityRef.current === "memory_only" || localDurabilityRef.current === "persistence_failed") {
+          if (dirty.current.size > 0) {
+            setSaveState(localDurabilityRef.current);
+            return;
+          }
+        }
+        if (localDurabilityRef.current === "conflict_detected" && Object.keys(staleConflicts).length > 0) {
+          setSaveState("conflict_detected");
+          return;
+        }
         if (state === "offline") setSaveState("offline");
         else if (state === "pending") {
           if (saveInFlight.current) setSaveState("saving");
@@ -506,6 +624,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
         }
       },
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- staleConflicts checked for sync indicator only
   }, [flush, p.attemptId]);
 
   // ---- countdown (server-corrected) + auto-submit ----
@@ -521,7 +640,15 @@ export default function ExamRunner(p: ExamRunnerProps) {
         // answers before the submit call is made.
         await flushBeforeSubmission(flush, { versioned, auto }, (e) => setError(friendlyError(e)));
         submittedRef.current = true;
-        await p.submit();
+        const outcome = await p.submit();
+        if (outcome === 'advanced') {
+          // Section transition in full_test: keep attempt cache, security trail, and kiosk lock active.
+          submittedRef.current = false;
+          submittingRef.current = false;
+          setSubmitting(false);
+          setSaveState("saved");
+          return;
+        }
         // The attempt is handed in: forget the local copies of its exam, its
         // mirrored answers and its security trail so the next attempt starts clean.
         void clearAttemptCache(p.attemptId).catch(() => undefined);
@@ -884,6 +1011,54 @@ export default function ExamRunner(p: ExamRunnerProps) {
         )}
         </ErrorBoundary>
       </main>
+
+      {Object.keys(staleConflicts).length > 0 && (
+        <div role="alert" className="mx-4 mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
+          <p className="font-bold text-amber-300">
+            Sync conflict detected: a newer answer was saved on the server from another session.
+          </p>
+          <div className="mt-2 space-y-1.5">
+            {Object.entries(staleConflicts).map(([qid, pair]) => (
+              <div key={qid} className="flex flex-wrap items-center justify-between gap-2 rounded bg-black/20 px-2.5 py-1.5">
+                <span className="truncate">
+                  Q{allQuestions.find((q) => q.id === qid)?.number ?? qid}: Server="{pair.server.slice(0, 60)}" vs Local="{pair.local.slice(0, 60)}"
+                </span>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    className="rounded bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold text-white"
+                    onClick={() => {
+                      answersRef.current = { ...answersRef.current, [qid]: pair.server };
+                      setAnswers((prev) => ({ ...prev, [qid]: pair.server }));
+                      dirty.current.delete(qid);
+                      persistQueue();
+                      void resolvePendingAnswers(p.attemptId, [{ questionId: qid, response: pair.local }]).catch(() => undefined);
+                      setStaleConflicts((prev) => {
+                        const next = { ...prev };
+                        delete next[qid];
+                        if (Object.keys(next).length === 0) {
+                          localDurabilityRef.current = "server_acknowledged";
+                          setSaveState("saved");
+                        }
+                        return next;
+                      });
+                    }}
+                  >
+                    Use server answer
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded bg-amber-600 px-2 py-0.5 text-[11px] font-semibold text-white"
+                    onClick={() => setAnswer(qid, pair.local, true)}
+                  >
+                    Keep mine &amp; overwrite
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {error && (
         <p role="alert" className="exam-error">

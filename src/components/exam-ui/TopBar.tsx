@@ -6,6 +6,9 @@ export type SaveState =
   | "saving"
   | "saving_local"
   | "local_awaiting_sync"
+  | "memory_only"
+  | "persistence_failed"
+  | "conflict_detected"
   | "offline"
   | "error"
   | "submitting";
@@ -150,7 +153,13 @@ export default function TopBar(p: Props) {
             : p.saveState === "saving_local"
             ? "Saving locally…"
             : p.saveState === "local_awaiting_sync"
-            ? "Saved locally / awaiting sync"
+            ? "Saved locally — pending sync"
+            : p.saveState === "memory_only"
+            ? "Memory only — local disk save unavailable! Do not close app"
+            : p.saveState === "persistence_failed"
+            ? "Local save failed — retry or check disk space"
+            : p.saveState === "conflict_detected"
+            ? "Sync conflict — newer server answer detected"
             : p.saveState === "submitting"
             ? "Submission pending…"
             : p.saveState === "saved"
@@ -158,10 +167,16 @@ export default function TopBar(p: Props) {
             : p.saveState === "saving"
               ? "Saving…"
               : p.saveState === "offline"
-                ? "Offline — answers not yet saved to server"
+                ? "Offline — saved locally, awaiting connection"
                 : "Save failed — answers not yet saved to server"}
         </span>
-        {(p.saveState === "offline" || p.saveState === "error") && p.onRetrySave && (
+        {(p.saveState === "offline" ||
+          p.saveState === "error" ||
+          p.saveState === "local_awaiting_sync" ||
+          p.saveState === "memory_only" ||
+          p.saveState === "persistence_failed" ||
+          p.saveState === "conflict_detected") &&
+          p.onRetrySave && (
           <button type="button" className="exam-btn-ghost" onClick={p.onRetrySave}>Retry saving</button>
         )}
       </div>

@@ -7,7 +7,16 @@
  * flushes them to the server, silently when the student is offline and
  * automatically as soon as the connection returns.
  */
-import { offlineDelete, offlineDeleteIfValue, offlineGet, offlineList, offlinePut, offlinePurge } from './offline-store';
+import {
+  offlineDelete,
+  offlineDeleteIfValue,
+  offlineGet,
+  offlineListStrict,
+  offlinePut,
+  offlinePutDurable,
+  offlinePurge,
+  type DurabilityTier,
+} from './offline-store';
 
 /** Background sync cadence while an attempt is open. */
 export const OFFLINE_SYNC_INTERVAL_MS = 10_000;
@@ -15,8 +24,25 @@ export const OFFLINE_SYNC_INTERVAL_MS = 10_000;
 /** What the runner shows for the sync indicator. */
 export type OfflineSyncState = 'synced' | 'pending' | 'offline';
 
+/** Explicit durability states for exam answers (Zero Silent Data Loss). */
+export type AnswerDurabilityState =
+  | 'server_acknowledged'
+  | 'locally_persisted'
+  | 'pending_sync'
+  | 'memory_only'
+  | 'persistence_failed'
+  | 'conflict_detected';
+
+export interface DurableAnswerResult {
+  ok: boolean;
+  tier: DurabilityTier;
+  state: AnswerDurabilityState;
+  error?: string;
+}
+
 const EXAM_NAMESPACE = 'exam';
 const TIMER_NAMESPACE = 'timer';
+const UNACCEPTED_NAMESPACE = 'unaccepted';
 const answersNamespace = (attemptId: string) => `answers.${attemptId}`;
 
 function isOnline(): boolean {
@@ -48,22 +74,67 @@ export async function readCachedExam<T = unknown>(attemptId: string): Promise<T 
 }
 
 // Preserve keystroke order even when separate IndexedDB opens finish out of order.
-const answerWrites = new Map<string, Promise<boolean>>();
+const answerWrites = new Map<string, Promise<DurableAnswerResult>>();
+
+/**
+ * Mirror one answer locally with explicit durability feedback before it reaches the server.
+ */
+export async function cacheAnswerDurable(
+  attemptId: string,
+  questionId: string,
+  response: string,
+  opts?: { editedAt?: number; accountId?: string },
+): Promise<DurableAnswerResult> {
+  const key = `${attemptId}:${questionId}`;
+  const previous = answerWrites.get(key) ?? Promise.resolve<DurableAnswerResult>({
+    ok: true,
+    tier: 'indexeddb',
+    state: 'locally_persisted',
+  });
+  const payload: MirroredAnswer = {
+    questionId,
+    response,
+    at: Date.now(),
+    ...(typeof opts?.editedAt === 'number' && Number.isFinite(opts.editedAt) ? { editedAt: opts.editedAt } : {}),
+    ...(opts?.accountId ? { accountId: opts.accountId } : {}),
+  };
+  const entry = JSON.stringify(payload);
+  const write = previous
+    .catch((): DurableAnswerResult => ({ ok: false, tier: 'failed', state: 'persistence_failed' }))
+    .then(async (): Promise<DurableAnswerResult> => {
+      const res = await offlinePutDurable(answersNamespace(attemptId), questionId, entry);
+      if (res.ok) {
+        return { ok: true, tier: res.tier, state: 'locally_persisted', ...(res.error ? { error: res.error } : {}) };
+      }
+      if (res.tier === 'memory') {
+        return { ok: false, tier: 'memory', state: 'memory_only', ...(res.error ? { error: res.error } : {}) };
+      }
+      return { ok: false, tier: 'failed', state: 'persistence_failed', ...(res.error ? { error: res.error } : {}) };
+    });
+  answerWrites.set(key, write);
+  try {
+    return await write;
+  } catch (err) {
+    return {
+      ok: false,
+      tier: 'failed',
+      state: 'persistence_failed',
+      error: err instanceof Error ? err.message : 'Local persistence failed',
+    };
+  } finally {
+    if (answerWrites.get(key) === write) answerWrites.delete(key);
+  }
+}
 
 /** Mirror one answer locally before it reaches the server. */
 export async function cacheAnswer(
   attemptId: string,
   questionId: string,
   response: string,
+  opts?: { editedAt?: number; accountId?: string },
 ): Promise<boolean> {
-  const key = `${attemptId}:${questionId}`;
-  const previous = answerWrites.get(key) ?? Promise.resolve(true);
-  const entry = JSON.stringify({ questionId, response, at: Date.now() });
-  const write = previous.catch(() => false).then(() => offlinePut(answersNamespace(attemptId), questionId, entry));
-  answerWrites.set(key, write);
-  try { return await write; }
-  catch { return false; }
-  finally { if (answerWrites.get(key) === write) answerWrites.delete(key); }
+  const res = await cacheAnswerDurable(attemptId, questionId, response, opts);
+  return res.ok;
 }
 
 /** A locally mirrored answer that the server has not acknowledged yet. */
@@ -71,37 +142,56 @@ export interface MirroredAnswer {
   questionId: string;
   response: string;
   at?: number;
+  editedAt?: number;
+  accountId?: string;
+}
+
+export interface PendingAnswersReadResult {
+  ok: boolean;
+  answers: MirroredAnswer[];
+  error?: string;
 }
 
 /**
- * The mirrored (not yet acknowledged) answers, oldest write first.
- *
- * Read on mount by the runner: an answer a student gave while the connection
- * was down exists only here, so it must be restored into the exam instead of
- * silently disappearing.
+ * Read mirrored (not yet acknowledged) answers with explicit read-failure detection,
+ * so a storage read failure never masquerades as empty data.
  */
-export async function readPendingAnswers(attemptId: string): Promise<MirroredAnswer[]> {
-  const entries = await offlineList(answersNamespace(attemptId));
+export async function readPendingAnswersStrict(
+  attemptId: string,
+  accountId?: string | null,
+): Promise<PendingAnswersReadResult> {
+  const listed = await offlineListStrict(answersNamespace(attemptId));
   const out: MirroredAnswer[] = [];
-  for (const entry of entries) {
+  for (const entry of listed.entries) {
     try {
       const parsed = JSON.parse(entry.value) as Partial<MirroredAnswer>;
       if (typeof parsed?.questionId !== 'string' || typeof parsed.response !== 'string') continue;
+      if (accountId && parsed.accountId && parsed.accountId !== accountId) continue;
       out.push({
         questionId: parsed.questionId,
         response: parsed.response,
         ...(typeof parsed.at === 'number' ? { at: parsed.at } : {}),
+        ...(typeof parsed.editedAt === 'number' ? { editedAt: parsed.editedAt } : {}),
+        ...(typeof parsed.accountId === 'string' ? { accountId: parsed.accountId } : {}),
       });
     } catch {
       /* a corrupt mirror entry must never break the restore path */
     }
   }
-  return out.sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+  out.sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+  return { ok: listed.ok, answers: out, ...(listed.error ? { error: listed.error } : {}) };
+}
+
+/**
+ * The mirrored (not yet acknowledged) answers, oldest write first.
+ */
+export async function readPendingAnswers(attemptId: string, accountId?: string | null): Promise<MirroredAnswer[]> {
+  return (await readPendingAnswersStrict(attemptId, accountId)).answers;
 }
 
 /** How many locally mirrored answers have not been acknowledged yet. */
 export async function pendingAnswerCount(attemptId: string): Promise<number> {
-  return (await offlineList(answersNamespace(attemptId))).length;
+  return (await offlineListStrict(answersNamespace(attemptId))).entries.length;
 }
 
 /** Drop exactly the answers the server acknowledged; returns how many went. */
@@ -116,7 +206,7 @@ export async function resolvePendingAnswers(
   await Promise.all([...synced.keys()].map(questionId =>
     answerWrites.get(`${attemptId}:${questionId}`)?.catch(() => false),
   ));
-  const pending = await offlineList(answersNamespace(attemptId));
+  const pending = (await offlineListStrict(answersNamespace(attemptId))).entries;
   let removed = 0;
   for (const entry of pending) {
     if (!synced.has(entry.key)) continue;
@@ -127,6 +217,53 @@ export async function resolvePendingAnswers(
     } catch { /* keep unreadable entries rather than delete unacknowledged data */ }
   }
   return removed;
+}
+
+/**
+ * Preserve recoverable evidence for answers rejected after an authoritative
+ * server deadline expired, without modifying or overriding the server deadline.
+ */
+export async function recordUnacceptedAnswers(
+  attemptId: string,
+  items: Array<{ questionId: string; response: string }>,
+  reason: string,
+): Promise<boolean> {
+  if (items.length === 0) return true;
+  const payload = JSON.stringify({
+    attemptId,
+    reason,
+    recordedAt: Date.now(),
+    answers: items,
+  });
+  const res = await offlinePutDurable(UNACCEPTED_NAMESPACE, attemptId, payload);
+  return res.ok;
+}
+
+export interface UnacceptedEvidence {
+  attemptId: string;
+  reason: string;
+  recordedAt: number;
+  answers: Array<{ questionId: string; response: string }>;
+}
+
+export async function readUnacceptedAnswers(attemptId: string): Promise<UnacceptedEvidence | null> {
+  try {
+    const raw = await offlineGet(UNACCEPTED_NAMESPACE, attemptId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<UnacceptedEvidence>;
+    if (!Array.isArray(parsed?.answers)) return null;
+    return {
+      attemptId,
+      reason: typeof parsed.reason === 'string' ? parsed.reason : 'DEADLINE_EXPIRED',
+      recordedAt: typeof parsed.recordedAt === 'number' ? parsed.recordedAt : 0,
+      answers: parsed.answers.filter(
+        (a): a is { questionId: string; response: string } =>
+          Boolean(a && typeof a.questionId === 'string' && typeof a.response === 'string'),
+      ),
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** Cache the remaining timer seconds locally for an attempt. */
@@ -171,6 +308,25 @@ export async function clearAttemptCache(attemptId: string): Promise<void> {
   await offlineDelete(EXAM_NAMESPACE, attemptId).catch(() => false);
   await offlineDelete(TIMER_NAMESPACE, attemptId).catch(() => false);
   await offlinePurge(answersNamespace(attemptId)).catch(() => undefined);
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(`examui.queue.${attemptId}`);
+      const essayPrefix = `examui.essay.${attemptId}.`;
+      const marksPrefix = `examui.marks.`;
+      const keys: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k) keys.push(k);
+      }
+      for (const k of keys) {
+        if (k.startsWith(essayPrefix) || (k.startsWith(marksPrefix) && k.includes(`.${attemptId}`))) {
+          localStorage.removeItem(k);
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 /**

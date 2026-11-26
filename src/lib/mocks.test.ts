@@ -195,8 +195,8 @@ describe('answer acknowledgements', () => {
     vi.mocked(post).mockResolvedValueOnce(receipt);
     await expect(bulkMockAnswers('a', answers)).rejects.toMatchObject({ code: 'SCHEMA_MISMATCH' });
   });
-  it('accepts a full batch acknowledgement', async () => {
-    vi.mocked(post).mockResolvedValueOnce({ saved: 2 });
-    await expect(bulkMockAnswers('a', answers)).resolves.toEqual({ saved: 2 });
+  it('accepts a full batch acknowledgement and preserves stale revision map', async () => {
+    vi.mocked(post).mockResolvedValueOnce({ saved: 2, stale: { q1: 'newer server answer' } });
+    await expect(bulkMockAnswers('a', answers)).resolves.toEqual({ saved: 2, stale: { q1: 'newer server answer' } });
   });
 });

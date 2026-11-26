@@ -14,7 +14,7 @@ export function startFullSpeakingCapture(recorder: MediaRecorder, responseSecond
   recorder.onstop = () => {
     clearTimeout(timer);
     const elapsed = stoppedAt == null ? 0 : stoppedAt - startedAt;
-    if (interrupted || !completed || elapsed < responseSeconds * 1000 || elapsed > responseSeconds * 1000 + 250) { callbacks.interrupted(); return; }
+    if (interrupted || !completed || elapsed < responseSeconds * 1000 || elapsed > responseSeconds * 1000 + 5000) { callbacks.interrupted(); return; }
     const blob = new Blob(chunks, { type: recorder.mimeType });
     if (!blob.size) { callbacks.failed('The microphone produced an empty recording. Check the device and retry.'); return; }
     callbacks.complete(blob);

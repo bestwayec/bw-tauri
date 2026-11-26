@@ -680,7 +680,7 @@ textarea.field {
 .exam-savestate-local_awaiting_sync, .exam-savestate-submitting {
   color: var(--orange, #F59E0B);
 }
-.exam-savestate-offline, .exam-savestate-error {
+.exam-savestate-offline, .exam-savestate-error, .exam-savestate-memory_only, .exam-savestate-persistence_failed, .exam-savestate-conflict_detected {
   color: var(--ex-danger);
 }
 .exam-topbar-controls {

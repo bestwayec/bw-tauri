@@ -234,4 +234,42 @@ describe('background answer sync worker', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(await offline.pendingAnswerCount('matt-1')).toBe(1);
   });
+
+  it('tracks explicit durability states, isolates accounts, preserves unaccepted deadline evidence, and cleans up essay keys', async () => {
+    const offline = await freshModule();
+    const okWrite = await offline.cacheAnswerDurable('matt-1', 'q-1', 'O‘zbekiston taraqqiyoti', {
+      editedAt: 1700000001000,
+      accountId: 'stu-1',
+    });
+    expect(okWrite).toMatchObject({ ok: true, state: 'locally_persisted' });
+
+    const crossAccount = await offline.readPendingAnswersStrict('matt-1', 'stu-2');
+    expect(crossAccount.ok).toBe(true);
+    expect(crossAccount.answers).toEqual([]);
+
+    const ownAccount = await offline.readPendingAnswersStrict('matt-1', 'stu-1');
+    expect(ownAccount.ok).toBe(true);
+    expect(ownAccount.answers).toEqual([
+      expect.objectContaining({
+        questionId: 'q-1',
+        response: 'O‘zbekiston taraqqiyoti',
+        editedAt: 1700000001000,
+        accountId: 'stu-1',
+      }),
+    ]);
+
+    expect(await offline.recordUnacceptedAnswers('matt-1', [{ questionId: 'q-1', response: 'Late draft' }], 'MOCK_TIME_UP')).toBe(true);
+    const evidence = await offline.readUnacceptedAnswers('matt-1');
+    expect(evidence).toMatchObject({
+      attemptId: 'matt-1',
+      reason: 'MOCK_TIME_UP',
+      answers: [{ questionId: 'q-1', response: 'Late draft' }],
+    });
+
+    (globalThis.localStorage as Storage).setItem('examui.queue.matt-1', '{"dirty":["q-1"]}');
+    (globalThis.localStorage as Storage).setItem('examui.essay.matt-1.q-1', 'Draft essay');
+    await offline.clearAttemptCache('matt-1');
+    expect((globalThis.localStorage as Storage).getItem('examui.queue.matt-1')).toBeNull();
+    expect((globalThis.localStorage as Storage).getItem('examui.essay.matt-1.q-1')).toBeNull();
+  });
 });
