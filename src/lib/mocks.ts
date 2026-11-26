@@ -720,25 +720,33 @@ export async function startMockExam(
   return parseOrThrow("POST /mock/exams/:id/start", MockStartResultSchema, normalized);
 }
 
-export function saveMockAnswer(
+export async function saveMockAnswer(
   attemptId: string,
   questionId: string,
   response: string,
 ): Promise<{ saved: boolean }> {
-  return post<{ saved: boolean }>(
+  const receipt = await post<true | { saved: boolean }>(
     `/mock/attempts/${encodeURIComponent(attemptId)}/answer`,
     { questionId, response },
   );
+  if (receipt !== true && receipt?.saved !== true) {
+    throw { code: 'SCHEMA_MISMATCH', message: 'The server did not confirm every answer was saved. Please retry.', status: 502 };
+  }
+  return { saved: true };
 }
 
-export function bulkMockAnswers(
+export async function bulkMockAnswers(
   attemptId: string,
   answers: Array<{ questionId: string; response: string }>,
 ): Promise<{ saved: number }> {
-  return post<{ saved: number }>(
+  const receipt = await post<{ saved: number }>(
     `/mock/attempts/${encodeURIComponent(attemptId)}/answers`,
     { answers },
   );
+  if (receipt?.saved !== answers.length) {
+    throw { code: 'SCHEMA_MISMATCH', message: 'The server did not confirm every answer was saved. Please retry.', status: 502 };
+  }
+  return receipt;
 }
 
 /** Section-only submit: pass e.g. ["listening"] to grade just that section. */

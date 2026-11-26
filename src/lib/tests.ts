@@ -117,15 +117,19 @@ export function startTest(testId: string): Promise<StartResult> {
   return post<StartResult>(`/tests/${encodeURIComponent(testId)}/start`, {});
 }
 
-export function saveAnswer(
+export async function saveAnswer(
   attemptId: string,
   questionId: string,
   answer: string,
 ): Promise<{ saved: boolean }> {
-  return post<{ saved: boolean }>(
+  const receipt = await post<{ saved: boolean }>(
     `/tests/attempts/${encodeURIComponent(attemptId)}/answer`,
     { questionId, answer },
   );
+  if (receipt?.saved !== true) {
+    throw { code: 'SCHEMA_MISMATCH', message: 'The server did not confirm every answer was saved. Please retry.', status: 502 };
+  }
+  return receipt;
 }
 
 export async function submitAttempt(attemptId: string): Promise<{

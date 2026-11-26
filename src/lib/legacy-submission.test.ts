@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { get, post } from './api';
-import { submitAttempt } from './tests';
+import { saveAnswer, submitAttempt } from './tests';
 import { MockSubmitResultSchema } from './schemas';
 vi.mock('./api', () => ({ get: vi.fn(), post: vi.fn() }));
 beforeEach(() => vi.resetAllMocks());
@@ -22,4 +22,13 @@ it('does not turn a failed result lookup into a successful submission', async ()
 });
 it('does not interpret in_progress as a successful mock submission', () => {
   expect(MockSubmitResultSchema.safeParse({ status: 'in_progress', rawScores: {}, sectionBands: null, overallBand: null, cefrLevel: null }).success).toBe(false);
+});
+
+it.each([null, false, {}, { saved: false }, { saved: 1 }])('rejects an unconfirmed legacy answer: %j', async receipt => {
+  vi.mocked(post).mockResolvedValueOnce(receipt);
+  await expect(saveAnswer('attempt', 'question', 'draft')).rejects.toMatchObject({ code: 'SCHEMA_MISMATCH' });
+});
+it('accepts an explicit legacy answer acknowledgement', async () => {
+  vi.mocked(post).mockResolvedValueOnce({ saved: true });
+  await expect(saveAnswer('attempt', 'question', 'draft')).resolves.toEqual({ saved: true });
 });

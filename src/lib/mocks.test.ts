@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { get, post } from "./api";
 import {
+  bulkMockAnswers,
+  saveMockAnswer,
   listMockExams,
   MOCK_SECTION_MINUTES,
   singleSectionOf,
@@ -176,5 +178,25 @@ describe("listMockExams schema resilience & raw fallback", () => {
     expect(list).toHaveLength(1);
     expect(list[0].id).toBe("exam-raw-fallback");
     expect(list[0].profile).toBe("practice");
+  });
+});
+
+describe('answer acknowledgements', () => {
+  it.each([true, { saved: true }])('accepts a compatible single-answer receipt: %j', async receipt => {
+    vi.mocked(post).mockResolvedValueOnce(receipt);
+    await expect(saveMockAnswer('a', 'q', 'draft')).resolves.toEqual({ saved: true });
+  });
+  it.each([null, false, {}, { saved: false }, { saved: 1 }])('rejects an unconfirmed single answer: %j', async receipt => {
+    vi.mocked(post).mockResolvedValueOnce(receipt);
+    await expect(saveMockAnswer('a', 'q', 'draft')).rejects.toMatchObject({ code: 'SCHEMA_MISMATCH' });
+  });
+  const answers = [{ questionId: 'q1', response: 'one' }, { questionId: 'q2', response: 'two' }];
+  it.each([null, {}, { saved: 0 }, { saved: 1 }, { saved: 3 }, { saved: '2' }])('rejects an incomplete or invalid batch receipt: %j', async receipt => {
+    vi.mocked(post).mockResolvedValueOnce(receipt);
+    await expect(bulkMockAnswers('a', answers)).rejects.toMatchObject({ code: 'SCHEMA_MISMATCH' });
+  });
+  it('accepts a full batch acknowledgement', async () => {
+    vi.mocked(post).mockResolvedValueOnce({ saved: 2 });
+    await expect(bulkMockAnswers('a', answers)).resolves.toEqual({ saved: 2 });
   });
 });
