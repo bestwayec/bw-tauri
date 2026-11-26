@@ -51,6 +51,24 @@
       "icons/icon.ico"
     ],
     "category": "Education",
+    "publisher": "Bestway Education Center",
+    "copyright": "Copyright © 2026 Bestway Education Center",
+    "shortDescription": "Bestway Examination Desktop & Mobile Application",
+    "windows": {
+      "allowDowngrades": false,
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["English"],
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "startMenuFolder": "Bestway App"
+      }
+    },
     "android": {
       "minSdkVersion": 24
     },

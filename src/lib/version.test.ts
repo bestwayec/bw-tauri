@@ -71,12 +71,24 @@ describe("installerUrlFor", () => {
 });
 
 describe("compareVersions", () => {
-  it("orders numeric dot-separated versions", () => {
+  it("orders numeric dot-separated versions and semver prereleases", () => {
     expect(compareVersions("0.5.6", "0.5.6")).toBe(0);
     expect(compareVersions("0.5.6", "0.5.7")).toBe(-1);
     expect(compareVersions("0.5.7", "0.5.6")).toBe(1);
     expect(compareVersions("0.10.0", "0.9.9")).toBe(1);
     expect(compareVersions("1.0", "1.0.0")).toBe(0);
+    expect(compareVersions("1.0.12", "2.0.0-rc.1")).toBe(-1);
+    expect(compareVersions("2.0.0-rc.1", "2.0.0-rc.2")).toBe(-1);
+    expect(compareVersions("2.0.0-rc.2", "2.0.0")).toBe(-1);
+    expect(compareVersions("2.0.0", "2.0.0-rc.2")).toBe(1);
+  });
+});
+
+describe("shouldNotifyUpdate semver prerelease", () => {
+  it("supports prerelease channels without rejecting valid semver tags", () => {
+    expect(shouldNotifyUpdate("1.0.12", "2.0.0-rc.1")).toBe(true);
+    expect(shouldNotifyUpdate("2.0.0-rc.1", "2.0.0")).toBe(true);
+    expect(shouldNotifyUpdate("2.0.0", "2.0.0-rc.1")).toBe(false);
   });
 });
 

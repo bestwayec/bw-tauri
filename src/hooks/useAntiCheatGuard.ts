@@ -345,19 +345,24 @@ export function useAntiCheatGuard(options: UseAntiCheatGuardOptions = {}): UseAn
     };
 
     // 4. Focus Loss / Window Blur & Visibility Change
+    let blurConfirmTimer: ReturnType<typeof setTimeout> | null = null;
     const onBlur = () => {
-      triggerViolation("WINDOW_BLUR");
+      if (blurConfirmTimer) clearTimeout(blurConfirmTimer);
+      blurConfirmTimer = setTimeout(() => {
+        blurConfirmTimer = null;
+        if (typeof document === "undefined" || !document.hasFocus?.()) {
+          triggerViolation("WINDOW_BLUR");
+        }
+      }, 180);
     };
 
     const onVisibilityChange = () => {
       if (typeof document !== "undefined" && document.hidden) {
+        if (blurConfirmTimer) {
+          clearTimeout(blurConfirmTimer);
+          blurConfirmTimer = null;
+        }
         triggerViolation("TAB_SWITCH_HIDDEN");
-      }
-    };
-
-    const onMouseLeave = (e: MouseEvent) => {
-      if (!e.relatedTarget && e.clientY <= 0) {
-        triggerViolation("MOUSE_LEAVE_WINDOW");
       }
     };
 
@@ -371,10 +376,10 @@ export function useAntiCheatGuard(options: UseAntiCheatGuardOptions = {}): UseAn
     window.addEventListener("blur", onBlur);
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", onVisibilityChange);
-      document.documentElement?.addEventListener("mouseleave", onMouseLeave);
     }
 
     return () => {
+      if (blurConfirmTimer) clearTimeout(blurConfirmTimer);
       window.removeEventListener("contextmenu", onContextMenu, { capture: true });
       window.removeEventListener("copy", onClipboard, { capture: true });
       window.removeEventListener("cut", onClipboard, { capture: true });
@@ -385,7 +390,6 @@ export function useAntiCheatGuard(options: UseAntiCheatGuardOptions = {}): UseAn
       window.removeEventListener("blur", onBlur);
       if (typeof document !== "undefined") {
         document.removeEventListener("visibilitychange", onVisibilityChange);
-        document.documentElement?.removeEventListener("mouseleave", onMouseLeave);
       }
     };
   }, [enabled, isTerminated, triggerViolation]);

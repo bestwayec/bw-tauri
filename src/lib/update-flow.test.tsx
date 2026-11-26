@@ -93,4 +93,21 @@ describe("UpdateNotifier language", () => {
     expect(html).toContain("Bestway Exam 1.0.10 is ready");
     expect(html).toContain("Download &amp; update");
   });
+
+  it("defers install and hides action when deferInstall or app-level exam lock is active", async () => {
+    localStorage.setItem("bestway.language", "en");
+    const { setUpdateInstallBlocked, isUpdateInstallBlocked } = await import("./version");
+    const htmlDeferred = renderToStaticMarkup(
+      <UpdateNotifier update={update} onClose={() => {}} deferInstall />,
+    );
+    expect(htmlDeferred).toContain("An exam is in progress");
+    expect(htmlDeferred).not.toContain("Download &amp; update");
+
+    setUpdateInstallBlocked(true);
+    expect(isUpdateInstallBlocked()).toBe(true);
+    const htmlLocked = renderToStaticMarkup(<UpdateNotifier update={update} onClose={() => {}} />);
+    expect(htmlLocked).toContain("An exam is in progress");
+    expect(htmlLocked).not.toContain("Download &amp; update");
+    setUpdateInstallBlocked(false);
+  });
 });

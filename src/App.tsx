@@ -403,7 +403,29 @@ export default function App() {
   }, [isPrivilegedRole]);
 
   const handleLogout = async () => {
-    if (!confirm("Log out of Bestway Exam on this device? Downloaded vocabulary and unsynced flashcard changes will be removed.")) return;
+    let hasUnsyncedExam = false;
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (k.startsWith("examui.queue.") || k.startsWith("examui.unaccepted."))) {
+          const val = localStorage.getItem(k);
+          if (val && val !== "[]" && val !== "{}") {
+            hasUnsyncedExam = true;
+            break;
+          }
+        }
+      }
+      if (!hasUnsyncedExam) {
+        const { hasAnyPendingRecordings } = await import("./lib/durable-recordings");
+        hasUnsyncedExam = await hasAnyPendingRecordings();
+      }
+    } catch {
+      /* ignore probe errors */
+    }
+    const msg = hasUnsyncedExam
+      ? "WARNING: You have unsynchronized exam answers or recordings saved offline on this device. They will remain scoped to your account for recovery when you sign back in, while downloaded vocabulary will be cleared. Log out now?"
+      : "Log out of Bestway Exam on this device? Downloaded vocabulary and unsynced flashcard changes will be removed.";
+    if (!confirm(msg)) return;
     const accountId = student?.id;
     await logout().catch(() => undefined);
     if (accountId) {
@@ -432,6 +454,15 @@ export default function App() {
     activeRoute === "mockSections" ||
     activeRoute === "mockRunner" ||
     activeRoute === "locked";
+  useEffect(() => {
+    let mounted = true;
+    void import("./lib/version").then(({ setUpdateInstallBlocked }) => {
+      if (mounted) setUpdateInstallBlocked(examActive);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [examActive]);
   const showChrome = student !== null && !examActive;
   const resultMax = activeStart
     ? activeStart.questions.reduce((s, q) => s + (q.maxScore ?? 0), 0)

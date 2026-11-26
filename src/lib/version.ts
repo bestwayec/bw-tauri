@@ -62,16 +62,58 @@ export async function getCurrentVersion(): Promise<string> {
   return APP_VERSION;
 }
 
-/** Numeric dot-separated compare: -1 when a<b, 0 when equal, 1 when a>b. */
+const SEMVER_RE = /^(\d+(?:\.\d+)*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
+
+let activeExamUpdateLock = false;
+
+/** Set app-level update install lock while an examination or recovery is active. */
+export function setUpdateInstallBlocked(blocked: boolean): void {
+  activeExamUpdateLock = blocked;
+}
+
+/** True whenever installing/relaunching an update must be deferred. */
+export function isUpdateInstallBlocked(): boolean {
+  return activeExamUpdateLock;
+}
+
+/** Semver-aware compare (handles prereleases like 2.0.0-rc.1 < 2.0.0): -1 when a<b, 0 equal, 1 when a>b. */
 export function compareVersions(a: string, b: string): number {
-  const pa = a.split(".").map((x) => parseInt(x, 10));
-  const pb = b.split(".").map((x) => parseInt(x, 10));
-  const n = Math.max(pa.length, pb.length);
+  const ma = a.trim().match(SEMVER_RE);
+  const mb = b.trim().match(SEMVER_RE);
+  const coreA = (ma?.[1] ?? a).split(".").map((x) => parseInt(x, 10));
+  const coreB = (mb?.[1] ?? b).split(".").map((x) => parseInt(x, 10));
+  const n = Math.max(coreA.length, coreB.length);
   for (let i = 0; i < n; i++) {
-    const x = Number.isFinite(pa[i]) ? (pa[i] as number) : 0;
-    const y = Number.isFinite(pb[i]) ? (pb[i] as number) : 0;
+    const x = Number.isFinite(coreA[i]) ? (coreA[i] as number) : 0;
+    const y = Number.isFinite(coreB[i]) ? (coreB[i] as number) : 0;
     if (x < y) return -1;
     if (x > y) return 1;
+  }
+  const preA = ma?.[2];
+  const preB = mb?.[2];
+  if (!preA && !preB) return 0;
+  if (!preA) return 1;
+  if (!preB) return -1;
+  const partsA = preA.split(".");
+  const partsB = preB.split(".");
+  const m = Math.max(partsA.length, partsB.length);
+  for (let i = 0; i < m; i++) {
+    const sa = partsA[i];
+    const sb = partsB[i];
+    if (sa === undefined) return -1;
+    if (sb === undefined) return 1;
+    const na = /^\d+$/.test(sa) ? parseInt(sa, 10) : null;
+    const nb = /^\d+$/.test(sb) ? parseInt(sb, 10) : null;
+    if (na !== null && nb !== null) {
+      if (na < nb) return -1;
+      if (na > nb) return 1;
+    } else if (na !== null) {
+      return -1;
+    } else if (nb !== null) {
+      return 1;
+    } else if (sa !== sb) {
+      return sa < sb ? -1 : 1;
+    }
   }
   return 0;
 }
@@ -84,8 +126,7 @@ export function shouldNotifyUpdate(current: string, latest: string): boolean {
   const next = typeof latest === "string" ? latest.trim() : "";
   const now = typeof current === "string" ? current.trim() : "";
   if (!next || !now) return false;
-  // A version that parses to all-zero parts (e.g. "latest", "") is malformed.
-  if (!/^\d+(\.\d+)*$/.test(next) || !/^\d+(\.\d+)*$/.test(now)) return false;
+  if (!SEMVER_RE.test(next) || !SEMVER_RE.test(now)) return false;
   return compareVersions(now, next) < 0;
 }
 

@@ -1,4 +1,4 @@
-import { isAllowedClientRole } from "@/lib/auth";
+import { isAllowedClientRole, normalizeRole } from "@/lib/auth";
 import { useEffect, useRef, useState } from "react";
 import { API_BASE_URL, clearSession, get, isApiMisconfigured, login, normalizePhone, setSession, type MeResponse } from "@/lib/api";
 import {
@@ -63,13 +63,13 @@ export default function Login({ onLogin }: Props) {
         // Authorization header, never the URL query string.
         const meRes = await get<MeResponse>("/auth/me", undefined, { token: p.token });
         const user = meRes?.user;
-        const role = String(user?.role ?? "");
-        const ALLOWED_ROLES = ["student", "teacher", "instructor", "admin", "super_admin"];
-        if (!ALLOWED_ROLES.includes(role)) {
-          setError(`Access denied: unauthorized role (${role || "none"}).`);
+        const rawRole = String(user?.role ?? "");
+        if (!isAllowedClientRole(rawRole)) {
+          setError(`Access denied: unauthorized role (${rawRole || "none"}).`);
           setBusy("idle");
           return;
         }
+        const role = normalizeRole(rawRole);
         if (!user?.id) {
           setError("Sign-in failed. Please try again.");
           setBusy("idle");

@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { openInBrowser } from "@/lib/oauth";
-import { dismissVersion, probeDownloadUrl, takeSignedUpdate, type UpdateInfo } from "@/lib/version";
+import {
+  dismissVersion,
+  isUpdateInstallBlocked,
+  probeDownloadUrl,
+  takeSignedUpdate,
+  type UpdateInfo,
+} from "@/lib/version";
 import { isSafeHttpUrl } from "@/lib/secure-storage";
 import { getAppLanguage, onUiPrefsChange, type AppLanguage } from "@/lib/ui-prefs";
 
@@ -102,7 +108,7 @@ export default function UpdateNotifier({ update, onClose, deferInstall }: Props)
   };
 
   const handleAction = async () => {
-    if (busy) return;
+    if (busy || deferInstall || isUpdateInstallBlocked()) return;
     setError(null);
     setProgress(null);
     if (signed) {
@@ -123,6 +129,11 @@ export default function UpdateNotifier({ update, onClose, deferInstall }: Props)
             setProgress(100);
           }
         });
+        if (deferInstall || isUpdateInstallBlocked()) {
+          // Do not relaunch if an exam started while the download was in flight.
+          setStatus("idle");
+          return;
+        }
         setStatus("installing");
         const proc = await import("@tauri-apps/plugin-process");
         await proc.relaunch();
@@ -235,7 +246,7 @@ export default function UpdateNotifier({ update, onClose, deferInstall }: Props)
               </div>
             </div>
 
-            {deferInstall ? (
+            {deferInstall || isUpdateInstallBlocked() ? (
               <p className="w-full text-xs leading-snug text-white/50">
                 {t.deferred}
               </p>

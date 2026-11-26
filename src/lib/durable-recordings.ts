@@ -111,6 +111,20 @@ export async function hasPendingRecordings(attempt: string): Promise<boolean> {
 }
 
 /**
+ * Best-effort check for ANY pending (unreleased) speaking recording across all attempts.
+ * Never throws; returns false when IndexedDB is unavailable in the test/browser environment.
+ */
+export async function hasAnyPendingRecordings(): Promise<boolean> {
+  if (retained.size > 0 || memoryOnlyKeys.size > 0) return true;
+  try {
+    const keys = await operation('readonly', (store) => store.getAllKeys());
+    return keys.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Returns true IF AND ONLY IF the take has been successfully confirmed in IndexedDB.
  * Memory-only takes return false.
  */

@@ -329,8 +329,15 @@ export function useLockdown(options: UseLockdownOptions): UseLockdownResult {
         if (lockOrientation) tryLockOrientation(lockOrientation);
       }
     };
+    let blurConfirmTimer: number | null = null;
     const onBlur = (e: Event) => {
-      reportBlurDeduped(e);
+      if (blurConfirmTimer !== null) window.clearTimeout(blurConfirmTimer);
+      blurConfirmTimer = window.setTimeout(() => {
+        blurConfirmTimer = null;
+        if (typeof document === "undefined" || !document.hasFocus?.()) {
+          reportBlurDeduped(e);
+        }
+      }, 150);
     };
 
     document.addEventListener("contextmenu", onContextMenu);
@@ -396,6 +403,7 @@ export function useLockdown(options: UseLockdownOptions): UseLockdownResult {
 
     return () => {
       disposed = true;
+      if (blurConfirmTimer !== null) window.clearTimeout(blurConfirmTimer);
       if (monitorTimer !== null) window.clearInterval(monitorTimer);
       unlistenTauriFocus?.();
       document.removeEventListener("contextmenu", onContextMenu);

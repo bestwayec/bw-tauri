@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { API_BASE_URL } from "@/lib/api";
-import { audioCaptureFailure, audioCaptureSupported, openMicrophone } from "@/lib/audio-capture";
+import { audioCaptureFailure, audioCaptureSupported, openMicrophone, supportedAudioCodecs } from "@/lib/audio-capture";
+import { hasAnyPendingRecordings } from "@/lib/durable-recordings";
+import { useSessionStore } from "@/lib/session-store";
 import { getVolume, setVolume } from "@/lib/volume";
 import { APP_VERSION } from "@/lib/version";
 
@@ -11,7 +13,83 @@ interface Props {
   requireCamera?: boolean;
 }
 
-type CheckStatus = "pending" | "checking" | "pass" | "warn" | "fail";
+export type CheckStatus = "pending" | "checking" | "pass" | "warn" | "fail";
+
+export function readinessBadge(status: CheckStatus): string {
+  switch (status) {
+    case "pass":
+      return "PASS";
+    case "warn":
+      return "WARNING";
+    case "fail":
+      return "FAIL";
+    default:
+      return "UNVERIFIED";
+  }
+}
+
+export function countQueuedExamCaches(): number {
+  if (typeof localStorage === "undefined") return 0;
+  let count = 0;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith("examui.queue.") || k.startsWith("examui.unaccepted."))) {
+        const raw = localStorage.getItem(k);
+        if (raw && raw !== "[]" && raw !== "{}") count += 1;
+      }
+    }
+  } catch {
+    return 0;
+  }
+  return count;
+}
+
+export function buildRedactedDiagnosticReport(input: {
+  networkStatus: CheckStatus;
+  latencyMs: number | null;
+  audioHeard: boolean;
+  micStatus: CheckStatus;
+  cameraStatus: CheckStatus;
+  storageStatus: CheckStatus;
+  storageRwOk: boolean | null;
+  storageAvailableMb: number | null;
+  viewport: { width: number; height: number; dpr: number };
+  queuedExamCount: number;
+  pendingRecordings: boolean | null;
+  sessionAuthenticated: boolean;
+  role: string | null;
+  codecs: string[];
+}): string {
+  return JSON.stringify(
+    {
+      appVersion: APP_VERSION,
+      runtime: typeof window !== "undefined" && "__TAURI_INTERNALS__" in window ? "Tauri v2" : "Web",
+      generatedAt: new Date().toISOString(),
+      apiOrigin: API_BASE_URL.replace(/\/v1$/, ""),
+      sessionAuthenticated: input.sessionAuthenticated,
+      role: input.role,
+      checks: {
+        network: { status: readinessBadge(input.networkStatus), latencyMs: input.latencyMs },
+        audioOutput: { status: input.audioHeard ? "PASS" : "UNVERIFIED", codecs: input.codecs },
+        microphone: { status: readinessBadge(input.micStatus) },
+        camera: { status: readinessBadge(input.cameraStatus) },
+        storage: {
+          status: readinessBadge(input.storageStatus),
+          readWriteOk: input.storageRwOk,
+          availableMb: input.storageAvailableMb,
+        },
+        display: input.viewport,
+      },
+      recovery: {
+        queuedExamCaches: input.queuedExamCount,
+        pendingAudioRecordings: input.pendingRecordings,
+      },
+    },
+    null,
+    2,
+  );
+}
 
 export default function DeviceReadinessModal({
   open,
@@ -39,9 +117,21 @@ export default function DeviceReadinessModal({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraActive, setCameraActive] = useState(false);
 
-  // 5. Storage
+  // 5. Storage & Integrity
   const [storageStatus, setStorageStatus] = useState<CheckStatus>("pending");
   const [storageAvailableMb, setStorageAvailableMb] = useState<number | null>(null);
+  const [storageRwOk, setStorageRwOk] = useState<boolean | null>(null);
+
+  // 6. Session, Pending Recovery & Display
+  const profile = useSessionStore((s) => s.profile);
+  const [pendingRecordings, setPendingRecordings] = useState<boolean | null>(null);
+  const [queuedExamCount, setQueuedExamCount] = useState(0);
+  const [reportStatus, setReportStatus] = useState<string | null>(null);
+  const viewport =
+    typeof window !== "undefined"
+      ? { width: window.innerWidth, height: window.innerHeight, dpr: window.devicePixelRatio || 1 }
+      : { width: 1280, height: 800, dpr: 1 };
+  const codecs = supportedAudioCodecs();
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
@@ -74,6 +164,10 @@ export default function DeviceReadinessModal({
     // Auto-run non-intrusive checks on mount
     void checkNetwork();
     void checkStorage();
+    setQueuedExamCount(countQueuedExamCaches());
+    void hasAnyPendingRecordings()
+      .then((pending) => setPendingRecordings(pending))
+      .catch(() => setPendingRecordings(null));
 
     return () => {
       cleanupStreams();
@@ -217,9 +311,24 @@ export default function DeviceReadinessModal({
     }
   }
 
-  // 5. Storage Check
+  // 5. Storage & R/W Integrity Check
   async function checkStorage() {
     setStorageStatus("checking");
+    let rwOk = false;
+    try {
+      const probeKey = "__bestway_readiness_probe__";
+      localStorage.setItem(probeKey, "1");
+      rwOk = localStorage.getItem(probeKey) === "1";
+      localStorage.removeItem(probeKey);
+    } catch {
+      rwOk = false;
+    }
+    setStorageRwOk(rwOk);
+    if (!rwOk) {
+      setStorageStatus("fail");
+      return;
+    }
+
     try {
       if (navigator.storage && typeof navigator.storage.estimate === "function") {
         const estimate = await navigator.storage.estimate();
@@ -228,18 +337,56 @@ export default function DeviceReadinessModal({
         setStorageAvailableMb(availableMb);
         setStorageStatus(availableMb > 50 ? "pass" : "warn");
       } else {
-        setStorageAvailableMb(500); // Standard web storage quota fallback
+        setStorageAvailableMb(null);
         setStorageStatus("pass");
       }
     } catch {
-      setStorageStatus("pass");
+      setStorageStatus("warn");
+    }
+  }
+
+  async function handleExportReport() {
+    const report = buildRedactedDiagnosticReport({
+      networkStatus,
+      latencyMs,
+      audioHeard,
+      micStatus,
+      cameraStatus,
+      storageStatus,
+      storageRwOk,
+      storageAvailableMb,
+      viewport,
+      queuedExamCount,
+      pendingRecordings,
+      sessionAuthenticated: Boolean(profile),
+      role: profile?.role ?? null,
+      codecs,
+    });
+    try {
+      const blob = new Blob([report], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `bestway-readiness-${APP_VERSION}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setReportStatus("Hisobot yuklandi");
+    } catch {
+      try {
+        await navigator.clipboard?.writeText(report);
+        setReportStatus("Nusxalandi");
+      } catch {
+        setReportStatus("Hisobotni saqlashda xatolik");
+      }
     }
   }
 
   if (!open) return null;
 
+  const viewportWarn = viewport.width < 1024 || viewport.height < 680;
   const isAllReady =
     networkStatus !== "fail" &&
+    storageStatus !== "fail" &&
     audioHeard &&
     micStatus === "pass" &&
     (!requireCamera || cameraStatus === "pass");
@@ -441,10 +588,37 @@ export default function DeviceReadinessModal({
             )}
           </div>
 
-          {/* 5. Storage & Version Info */}
-          <div className="rounded-xl border border-white/5 bg-[#111827] p-3 flex items-center justify-between text-xs text-slate-400 font-mono">
-            <span>💾 Disk Quota: ~{storageAvailableMb ?? 500} MB ({storageStatus === "pass" ? "OK" : "Low"})</span>
-            <span>App: v{APP_VERSION} (Tauri v2)</span>
+          {/* 5. Storage, Display, Recovery & Version Info */}
+          <div className="rounded-xl border border-white/5 bg-[#111827] p-3.5 space-y-2 text-xs text-slate-300 font-mono">
+            <div className="flex items-center justify-between gap-2">
+              <span>
+                💾 Storage R/W: {readinessBadge(storageStatus)}
+                {storageAvailableMb != null ? ` (~${storageAvailableMb} MB)` : ""}
+              </span>
+              <span>App: v{APP_VERSION} (Tauri v2)</span>
+            </div>
+            <div className="flex items-center justify-between gap-2 text-[11px] text-slate-400">
+              <span>
+                🖥️ Ekran: {viewport.width}×{viewport.height} ({Math.round(viewport.dpr * 100)}%)
+                {viewportWarn ? " — WARNING (<1024×680)" : " — PASS"}
+              </span>
+              <span>
+                🔄 Recovery: {queuedExamCount} queue /{" "}
+                {pendingRecordings == null ? "UNVERIFIED" : pendingRecordings ? "Pending audio" : "Clean"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/5">
+              <span className="text-[11px] text-slate-400">
+                🔐 Session: {profile ? `Authenticated (${profile.role})` : "Not signed in"}
+              </span>
+              <button
+                type="button"
+                onClick={() => void handleExportReport()}
+                className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-1 text-[11px] font-sans font-semibold text-emerald-300 hover:bg-white/10"
+              >
+                {reportStatus ?? "Diagnostika hisobotini yuklash"}
+              </button>
+            </div>
           </div>
         </div>
 
