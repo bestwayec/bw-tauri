@@ -15,7 +15,6 @@ export interface UseAntiCheatGuardOptions {
   /** Remaining test duration in seconds. */
   timeRemaining?: number;
   /** Maximum strikes before disqualification. Defaults to 3. */
-  maxStrikes?: number;
   /** Callback fired when a cheat anomaly / strike occurs. */
   onViolation?: (strikesCount: number, reason: string) => void;
   /** Callback fired when test is terminated due to 3 strikes or proctor action. */
@@ -157,7 +156,6 @@ export function useAntiCheatGuard(options: UseAntiCheatGuardOptions = {}): UseAn
     currentQuestion = 1,
     currentSection = "reading",
     timeRemaining,
-    maxStrikes = 3,
     onViolation,
     onTerminated,
     heartbeatIntervalMs = 6000,
@@ -257,14 +255,8 @@ export function useAntiCheatGuard(options: UseAntiCheatGuardOptions = {}): UseAn
       onViolation?.(newStrikes, reason);
       void sendTelemetry(newStrikes, false);
 
-      if (newStrikes >= maxStrikes) {
-        setIsTerminated(true);
-        isTerminatedRef.current = true;
-        void unlockKiosk();
-        onTerminated?.("auto_submit_due_to_violation");
-      }
     },
-    [enabled, maxStrikes, onViolation, onTerminated, sendTelemetry, unlockKiosk]
+    [enabled, onViolation, sendTelemetry]
   );
 
   // Dismiss warning and return to exam

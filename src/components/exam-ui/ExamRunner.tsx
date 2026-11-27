@@ -201,7 +201,7 @@ export default function ExamRunner(p: ExamRunnerProps) {
     onEvent: p.onSecurityEvent,
   });
 
-  // Forward-ref for automatic submission on 3 strikes or proctor termination
+  // Forward-ref for submission when a proctor ends the attempt.
   const doSubmitRef = useRef<(auto: boolean) => Promise<void>>(() => Promise.resolve());
 
   const activeRoomPin =
@@ -220,7 +220,6 @@ export default function ExamRunner(p: ExamRunnerProps) {
     currentQuestion: 1,
     currentSection: p.skill,
     timeRemaining: undefined,
-    maxStrikes: 3,
     onViolation: (_strikes, _reason) => {
       p.onCheat?.("window:blur");
       void logLockdownEvent(p.attemptId, "window:blur", undefined, cheatScope).catch(() => undefined);
@@ -992,7 +991,6 @@ export default function ExamRunner(p: ExamRunnerProps) {
       <AntiCheatWarningModal
         isOpen={antiCheat.isWarningOpen}
         strikesCount={antiCheat.strikesCount}
-        maxStrikes={3}
         countdown={antiCheat.countdown}
         isTerminated={antiCheat.isTerminated}
         onDismiss={antiCheat.dismissWarning}

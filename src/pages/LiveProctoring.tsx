@@ -480,20 +480,23 @@ export default function LiveProctoring() {
 
   async function handleDisqualifyProctorStudent(student: ProctorStudent) {
     if (!requireRoom()) return;
-    if (confirm(`Haqiqatan ham ${student.name} ni qoidabuzarlik uchun chetlatmoqchimisiz? (Diskvalifikatsiya)`)) {
-      try {
-        await post(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/action`, {
-          action: "disqualify_student",
-          student_id: student.id,
-        });
-        setStudents((prev) =>
-          prev.map((s) => (s.id === student.id ? { ...s, status: "critical" } : s))
-        );
-        triggerToast(`${student.name} imtihondan chetlatildi (3/3 Strikes).`);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        triggerToast(`Xatolik: Chetlatish amalga oshmadi (${msg})`);
-      }
+    const reason = prompt(`${student.name} uchun kuzatuvni ko‘rib chiqdingizmi? Qaror sababini yozing.`)?.trim();
+    if (!reason) return;
+    if (reason.length > 500) {
+      triggerToast("Sabab 500 belgidan oshmasligi kerak.");
+      return;
+    }
+    try {
+      await post(`/v1/live-room/${encodeURIComponent(liveRoom.pin)}/action`, {
+        action: "disqualify_student",
+        student_id: student.id,
+        reason,
+      });
+      setStudents((prev) => prev.map((s) => (s.id === student.id ? { ...s, status: "critical" } : s)));
+      triggerToast(`${student.name} uchun imtihon ishtiroki yakunlandi.`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      triggerToast(`Xatolik: Chetlatish amalga oshmadi (${msg})`);
     }
   }
 

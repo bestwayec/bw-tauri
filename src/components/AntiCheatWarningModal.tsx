@@ -2,7 +2,6 @@
 export interface AntiCheatWarningModalProps {
   isOpen: boolean;
   strikesCount: number;
-  maxStrikes?: number;
   countdown: number;
   isTerminated?: boolean;
   onDismiss: () => void;
@@ -11,7 +10,6 @@ export interface AntiCheatWarningModalProps {
 export default function AntiCheatWarningModal({
   isOpen,
   strikesCount,
-  maxStrikes = 3,
   countdown,
   isTerminated = false,
   onDismiss,
@@ -19,7 +17,7 @@ export default function AntiCheatWarningModal({
   if (!isOpen && !isTerminated) return null;
 
   const isCritical = strikesCount >= 2;
-  const isFinal = strikesCount >= maxStrikes || isTerminated;
+  const isFinal = isTerminated;
 
   return (
     <div
@@ -60,28 +58,28 @@ export default function AntiCheatWarningModal({
         <h3 id="anti-cheat-title" className="text-2xl font-bold tracking-tight text-white mb-2">
           {isFinal
             ? "Imtihon Majburiy To'xtatildi (Disqualified)"
-            : "Diqqat! Imtihon Maydonidan Chiqish Taqiqlanadi"}
+            : "Imtihon oynasidan chiqish qayd etildi"}
         </h3>
 
         {/* Description */}
         <p className="text-sm text-gray-300 leading-relaxed mb-6">
           {isFinal
-            ? "Qoidabuzarliklar soni 3 taga yetgani yoki nazoratchi buyrug'i sababli imtihon bekor qilindi. Barcha yozuvlar va hodisalar proktor jurnaliga muhrlandi."
-            : "Imtihon paytida oynani kichraytirish, boshqa ilovalarga o'tish yoki klaviatura xavfsizlik qoidalarini buzish qat'iyan man etiladi."}
+            ? "Nazoratchi imtihon ishtirokingizni yakunladi. Tafsilotlar uchun nazoratchiga murojaat qiling."
+            : "Iltimos, imtihon oynasiga qayting. Nazoratchi qaydni ko‘rib chiqishi mumkin."}
         </p>
 
         {/* Strikes Indicator Bar */}
         <div className="mb-6 rounded-2xl bg-[#111827] border border-gray-800 p-4">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs uppercase tracking-wider font-semibold text-gray-400">
-              Qoidabuzarliklar holati (Strikes)
+              Qayd etilgan hodisalar
             </span>
             <span
               className={`text-sm font-bold ${
                 isFinal ? "text-red-400" : isCritical ? "text-amber-400" : "text-yellow-400"
               }`}
             >
-              {Math.min(strikesCount, maxStrikes)} / {maxStrikes}
+              {strikesCount}
             </span>
           </div>
 
@@ -105,11 +103,6 @@ export default function AntiCheatWarningModal({
             })}
           </div>
 
-          {!isFinal && (
-            <p className="mt-3 text-xs text-amber-300/90 text-left">
-              ⚠️ 3-marta qoidabuzarlikda imtihon avtomatik tarzda majburiy yakunlanadi!
-            </p>
-          )}
         </div>
 
         {/* Action Button & Countdown */}
